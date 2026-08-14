@@ -275,3 +275,110 @@ def test_deterministic_refutation_basis_local_broadcast_sink() -> None:
     # 无 receiver 信息时不产生（旧候选兼容）
     candidate["sinks"] = [{"kind": "implicit_broadcast"}]
     assert "local_broadcast_intra_process" not in deterministic_refutation_basis(candidate)
+
+
+def _flow_candidate(chain_id: str, *, sink_line: int = 219, gap_line: int = 100,
+                    trace_size: int = 1) -> dict:
+    """构造两条语义等价、仅表层细节不同的数据流候选。"""
+
+    return {
+        "rule_id": "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+        "rule_version": "2.0.0",
+        "evidence_level": "L2",
+        "component": "activity",
+        "component_name": "com.example.MainActivity",
+        "entry_points": ["MainActivity#onCreate"],
+        "entry_method_id": "com/example/MainActivity.java#MainActivity.onCreate:10",
+        "authorization_status": "unprotected",
+        "authorization_operation": "component_entry",
+        "guard_status": "absent",
+        "dataflow_status": "not_proven",
+        "flow_kind": "control_to_sink",
+        "path_model": "linear_ir_v2",
+        "operation_taxonomy": "persistent_state_write",
+        "deterministic_chain_verified": False,
+        "chain_id": chain_id,
+        "sources": [{
+            "path": "com/example/MainActivity.java", "line": 12,
+            "kind": "intent_extra", "ordinal": 3, "text": "getIntent().getStringExtra(...)",
+        }],
+        "sinks": [{
+            "path": "com/example/PreferenceUtil.java", "line": sink_line,
+            "kind": "persistent_state_write", "taxonomy": "persistent_state_write",
+            "method_id": "com/example/PreferenceUtil.java#PreferenceUtil.removePref:210",
+            "ordinal": 4, "resolve_status": "pending", "text": "editorEdit.apply(...)",
+        }],
+        "propagation_paths": [{
+            "method_id": "com/example/MainActivity.java#MainActivity.onCreate:10",
+            "line": 12 + trace_size, "ordinal": trace_size, "text": f"call#{trace_size}",
+        }],
+        "blocking_gaps": [{
+            "code": "LINEAR_IR_PATH_SENSITIVITY_LIMITATION", "critical": True,
+            "line": gap_line, "method": f"m{gap_line}",
+        }],
+        "guard_coverage": {"status": "absent", "checked_line": gap_line},
+        # 组件级 trace：同组件所有链共享下发，随链路数量波动
+        "method_summaries": {"total": trace_size, "methods": [f"m{i}" for i in range(trace_size)]},
+        "reaching_definitions": [{"slot": f"s{i}"} for i in range(trace_size)],
+        "locations": [],
+    }
+
+
+def test_identity_merges_semantically_identical_chains() -> None:
+    """P0-3：语义相同的链必须合并——chain_id 与行号级噪声不得制造伪差异。"""
+
+    from app.analysis.candidate_funnel import build_candidate_identity
+
+    # 两条候选：入口/source/sink/taxonomy 全同，仅 chain_id、gap 行号、trace 规模不同
+    first = _flow_candidate("dfc_aaaa", gap_line=100, trace_size=1)
+    second = _flow_candidate("dfc_bbbb", gap_line=205, trace_size=7)
+
+    assert build_candidate_identity(first) == build_candidate_identity(second), (
+        "chain_id / gap 行号 / 组件级 trace 规模属于表层差异，"
+        "不得阻止语义相同的链合并（否则精确去重 0 生效，重复链耗尽 AI 预算）"
+    )
+
+
+def test_identity_still_separates_different_sinks_and_gap_semantics() -> None:
+    """P0-3 安全边界：真实语义差异必须继续区分，不得过度合并。"""
+
+    from app.analysis.candidate_funnel import build_candidate_identity
+
+    base = _flow_candidate("dfc_aaaa")
+
+    other_sink = _flow_candidate("dfc_aaaa", sink_line=221)
+    assert build_candidate_identity(base).chain_key != build_candidate_identity(other_sink).chain_key, \
+        "不同 sink 行是不同的漏洞终点，必须分组"
+
+    other_gap = copy.deepcopy(base)
+    other_gap["blocking_gaps"] = [{"code": "DATAFLOW_NOT_PROVEN", "critical": True}]
+    assert (
+        build_candidate_identity(base).deterministic_fact_hash
+        != build_candidate_identity(other_gap).deterministic_fact_hash
+    ), "gap code 不同代表判定依据不同，必须分组"
+
+    other_guard = copy.deepcopy(base)
+    other_guard["guard_coverage"] = {"status": "present_effective"}
+    assert (
+        build_candidate_identity(base).deterministic_fact_hash
+        != build_candidate_identity(other_guard).deterministic_fact_hash
+    ), "guard status 不同直接影响裁决，必须分组"
+
+    other_component = _flow_candidate("dfc_aaaa")
+    other_component["component_name"] = "com.example.OtherActivity"
+    assert build_candidate_identity(base).scope_key != build_candidate_identity(other_component).scope_key, \
+        "不同组件是不同的攻击面，必须分组"
+
+
+def test_identity_preserves_propagation_order_without_method_id() -> None:
+    """路径节点缺少 method_id 时仍须保序，不能被投影成同一个 None。"""
+
+    from app.analysis.candidate_funnel import build_candidate_identity
+
+    base = _flow_candidate("dfc_aaaa")
+    base["propagation_paths"] = [{"ordinal": 1}, {"ordinal": 2}]
+    reversed_path = copy.deepcopy(base)
+    reversed_path["propagation_paths"].reverse()
+
+    assert build_candidate_identity(base).chain_key != build_candidate_identity(reversed_path).chain_key, \
+        "调用顺序是链语义的一部分，无标识节点必须回退到节点内容而非丢弃"

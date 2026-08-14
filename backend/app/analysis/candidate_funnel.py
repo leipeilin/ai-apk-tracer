@@ -350,6 +350,20 @@ _PIPELINE_IDENTITY_EXCLUDED_FIELDS = {
     "scope_key", "chain_key", "deterministic_fact_hash",
     "chain_id", "entry_method_id", "path_model", "flow_kind",
 }
+# 组件级数据流 trace：由 detector 的 common_metadata 统一下发给同组件的每条链
+# （rules/shared/detector.py `common_metadata`），随链路数量波动且非判定依据。
+# 参与身份哈希只会制造伪差异，使语义相同的链无法合并。
+_PIPELINE_IDENTITY_TRACE_FIELDS = {
+    "method_summaries",
+    "reaching_definitions",
+    "validation_transitions",
+    "slot_overwrites",
+    "router_validation_bypass",
+    "summary_fixpoint",
+    "fragment_reflection",
+    "started_service_state_machine",
+    "receiver_binding",
+}
 _PIPELINE_AI_RESULT_FIELDS = {
     "analysis_status", "ai_analysis", "ai_analysis_trace",
     "ai_guard_assessment", "ai_preflight", "ai_status_reason",
@@ -522,6 +536,13 @@ def build_candidate_identity(candidate: Mapping[str, Any]) -> CandidateIdentity:
     ``scope_key`` binds the exposed entry and authorization region, ``chain_key`` preserves ordered
     source/path/sink semantics, and ``deterministic_fact_hash`` covers remaining rule facts after
     excluding runtime/AI fields. Equality of only one or two keys is never sufficient.
+
+    P0-3（2026-08-15）：三键此前恒等于"逐候选唯一"，精确去重 0 生效——`chain_key` 内嵌
+    `chain_id`（`dfc_` + entry/source/sink/path 哈希）且携带完整 `propagation_paths`（含行号、
+    调用文本、ordinal），`deterministic_fact_hash` 携带 gap/guard 的行号级明细。语义完全相同
+    的链（同入口、同 source、同 sink、同调用序列）因此永远无法合并。修复思路是**只做语义投影，
+    不放宽判定要素**：链身份改用有序 `method_id` 序列，gap/guard 只取 code/critical/status，
+    组件级 trace 字段（随链路波动、非判定依据）不参与身份。
     """
 
     scope = {
@@ -535,19 +556,23 @@ def build_candidate_identity(candidate: Mapping[str, Any]) -> CandidateIdentity:
         "path_regions": _pipeline_path_regions(candidate.get("authorization_matrix") or []),
     }
     chain = {
-        "chain_id": candidate.get("chain_id"),
+        # chain_id 逐候选唯一（dataflow.py:259 对 entry/source/sink/path 取哈希），保留在候选体内
+        # 供追溯，但不参与身份——否则任何两条链都不可能同组。
         "entry_method_id": candidate.get("entry_method_id"),
         "path_model": candidate.get("path_model"),
         "flow_kind": candidate.get("flow_kind"),
-        "sources": candidate.get("sources") or [],
-        "sinks": candidate.get("sinks") or [],
+        "sources": _pipeline_endpoint_projection(candidate.get("sources") or []),
+        "sinks": _pipeline_endpoint_projection(candidate.get("sinks") or []),
         "taxonomy": _pipeline_taxonomy(candidate),
-        "propagation_paths": candidate.get("propagation_paths") or [],
+        # 有序方法序列保留"经过哪些方法、顺序如何"的语义，剔除行号/调用文本/ordinal 等
+        # 同一语义链在不同候选间必然波动的表层差异。
+        "propagation_path_shape": _pipeline_path_shape(candidate.get("propagation_paths") or []),
     }
     facts = {
-        key: value
+        _pipeline_fact_key(key): _pipeline_fact_projection(key, value)
         for key, value in candidate.items()
         if key not in _PIPELINE_IDENTITY_EXCLUDED_FIELDS
+        and key not in _PIPELINE_IDENTITY_TRACE_FIELDS
         and key not in {"sources", "sinks", "propagation_paths"}
         and not key.startswith("ai_")
     }
@@ -561,6 +586,69 @@ def build_candidate_identity(candidate: Mapping[str, Any]) -> CandidateIdentity:
         chain_key=_pipeline_hash(_pipeline_canonical_semantic_sets(chain)),
         deterministic_fact_hash=_pipeline_hash(_pipeline_canonical_semantic_sets(facts)),
     )
+
+
+def _pipeline_endpoint_projection(endpoints: Sequence[Any]) -> list[Any]:
+    """Project source/sink endpoints down to their semantic identity.
+
+    保留 path+line（这是"哪个 sink"的本体，不能丢）与 taxonomy/kind，剔除 ordinal、
+    resolve_status、调用文本等同一 sink 在不同链路中会波动的字段。
+    """
+
+    projected: list[Any] = []
+    for endpoint in endpoints:
+        if not isinstance(endpoint, Mapping):
+            projected.append(endpoint)
+            continue
+        projected.append({
+            "path": endpoint.get("path"),
+            "line": endpoint.get("line"),
+            "method_id": endpoint.get("method_id"),
+            "taxonomy": endpoint.get("taxonomy") or endpoint.get("operation_taxonomy"),
+            "kind": endpoint.get("kind"),
+        })
+    return projected
+
+
+def _pipeline_path_shape(paths: Sequence[Any]) -> list[Any]:
+    """Ordered method sequence of a propagation path (call shape without表层细节).
+
+    顺序敏感：列表不参与 set-like 归并，因此调换顺序会产生不同的 chain_key。
+    节点缺少 method_id/path 时回退到节点自身的规范化内容——否则多个无标识节点会被
+    投影成同一个 None，顺序差异随之消失（实测基线 run 1660 个节点中有 4 个属此情形）。
+    """
+
+    shape: list[Any] = []
+    for node in paths:
+        if not isinstance(node, Mapping):
+            shape.append(node)
+            continue
+        identity = node.get("method_id") or node.get("path")
+        shape.append(identity if identity else _pipeline_canonical_semantic_sets(dict(node)))
+    return shape
+
+
+def _pipeline_fact_key(key: str) -> str:
+    return "blocking_gap_codes" if key == "blocking_gaps" else key
+
+
+def _pipeline_fact_projection(key: str, value: Any) -> Any:
+    """Reduce rule facts to判定语义, dropping line-level noise.
+
+    gap/coverage 只取 code + critical，guard 只取 status——判定依据是"有没有这类 gap /
+    guard 是否有效"，而不是"gap 落在第几行"。
+    """
+
+    if key in {"blocking_gaps", "coverage_gaps"} and isinstance(value, (list, tuple)):
+        codes = {
+            (str(item.get("code")), bool(item.get("critical")))
+            for item in value
+            if isinstance(item, Mapping)
+        }
+        return [{"code": code, "critical": critical} for code, critical in sorted(codes)]
+    if key in {"guard_coverage", "guard_summary"} and isinstance(value, Mapping):
+        return {"status": value.get("status")}
+    return value
 
 
 def representative_identity(candidate: Mapping[str, Any]) -> dict[str, str]:
