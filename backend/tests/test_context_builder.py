@@ -793,3 +793,65 @@ def test_finding_slice_sink_order_insensitive() -> None:
         {"path": "b.java", "line": 2, "kind": "y"}, {"path": "a.java", "line": 1, "kind": "x"},
     ]}}
     assert finding_slice_sink_mismatch(finding, context_slice) == []
+
+
+def test_slice_carries_deterministic_facts_to_ai(tmp_path: Path) -> None:
+    """P1-4：规则已算出的确定性事实必须随切片下发。
+
+    基线 run 实测切片只下发 sources/sinks/blocking_gaps 等，缺 flow_kind、dataflow_status、
+    deterministic_chain_verified——AI 因而无从区分"值流已证明到 Sink 参数"与"仅控制流共现"，
+    只能复述规则断言（unresolved 135/136 = 99.3%）。
+    """
+
+    builder = ContextBuilder(build_index(tmp_path))
+    payload = candidate()
+    payload.update({
+        "flow_kind": "control_to_sink",
+        "dataflow_status": "not_proven",
+        "deterministic_chain_verified": False,
+        "operation_taxonomy": "persistent_state_write",
+        "impact_status": "potential",
+        "guard_status": "absent",
+        "authorization_status": "unprotected",
+        "blocking_gaps": [
+            {"code": "LINEAR_IR_PATH_SENSITIVITY_LIMITATION", "critical": True},
+            {"code": "SOME_NON_CRITICAL", "critical": False},
+        ],
+        "sinks": [{
+            "path": "com/example/ExportedActivity.java", "line": 12,
+            "effect_verified": True, "resolve_status": "resolved",
+            "receiver_type": "android.content.SharedPreferences.Editor",
+        }],
+    })
+    document = builder.build_initial(payload)
+    summary = document["candidate"]
+
+    for field in (
+        "flow_kind", "dataflow_status", "deterministic_chain_verified",
+        "operation_taxonomy", "impact_status",
+    ):
+        assert field in summary, f"{field} 未随切片下发，AI 只能从代码窗口猜测"
+
+    facts = summary["deterministic_facts"]
+    assert facts["value_flow_reaches_sink_argument"] is False, (
+        "control_to_sink 表示无 untrusted 值到达 Sink 实参，必须显式告知 AI"
+    )
+    assert facts["deterministic_chain_verified"] is False
+    assert facts["guard_status"] == "absent"
+    assert facts["critical_gap_codes"] == ["LINEAR_IR_PATH_SENSITIVITY_LIMITATION"], (
+        "只摊平 critical gap，非 critical 不进该字段"
+    )
+    assert facts["sink_effect_verified"][0]["effect_verified"] is True
+    assert facts["sink_effect_verified"][0]["resolve_status"] == "resolved"
+
+
+def test_deterministic_facts_flag_proven_value_flow(tmp_path: Path) -> None:
+    """source_to_sink 才代表值流真正到达 Sink 实参。"""
+
+    builder = ContextBuilder(build_index(tmp_path))
+    payload = candidate()
+    payload.update({"flow_kind": "source_to_sink", "deterministic_chain_verified": True})
+    facts = builder.build_initial(payload)["candidate"]["deterministic_facts"]
+
+    assert facts["value_flow_reaches_sink_argument"] is True
+    assert facts["deterministic_chain_verified"] is True

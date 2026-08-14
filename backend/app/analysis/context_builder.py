@@ -869,8 +869,52 @@ def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         "authorization_status", "authorization_matrix", "authorization_operation", "scope_key", "chain_key",
         "locations", "entry_points", "sources", "sinks", "propagation_paths", "blocking_gaps", "coverage_gaps",
         "limitations", "platform_assumptions",
+        # P1-4（2026-08-15）：规则层已算出但此前未下发的确定性事实。
+        # 缺少这些字段时 AI 只能看到"候选断言 + 代码窗口"，无从区分"值流已证明到 sink 参数"
+        # 与"仅控制流共现"——这是它几乎从不输出 refutes_candidate 的直接原因
+        # （基线 run unresolved 135/136 = 99.3%）。
+        "flow_kind", "dataflow_status", "deterministic_chain_verified",
+        "operation_taxonomy", "impact_status", "final_reaching_state", "input_control",
     }
-    return {key: deepcopy(value) for key, value in candidate.items() if key in allowed}
+    summary = {key: deepcopy(value) for key, value in candidate.items() if key in allowed}
+    summary["deterministic_facts"] = _deterministic_facts(candidate)
+    return summary
+
+
+def _deterministic_facts(candidate: dict[str, Any]) -> dict[str, Any]:
+    """把规则层的确定性结论显式摊平给 AI，避免它从代码窗口重新猜测。
+
+    只搬运规则已经算出的事实，不做任何新推断——这里多写一个字段，AI 就少猜一次。
+    """
+
+    sinks = [sink for sink in candidate.get("sinks") or [] if isinstance(sink, dict)]
+    flow_kind = candidate.get("flow_kind")
+    return {
+        # 值流是否真正到达 sink 参数。control_to_sink 表示"仅分支条件受控"，
+        # taint 引擎已确定无 untrusted 值到达 sink 实参。
+        "value_flow_reaches_sink_argument": flow_kind == "source_to_sink",
+        "flow_kind": flow_kind,
+        "dataflow_status": candidate.get("dataflow_status"),
+        "deterministic_chain_verified": candidate.get("deterministic_chain_verified") is True,
+        "guard_status": candidate.get("guard_status"),
+        "authorization_status": candidate.get("authorization_status"),
+        "operation_taxonomy": candidate.get("operation_taxonomy"),
+        "sink_effect_verified": [
+            {
+                "path": sink.get("path"),
+                "line": sink.get("line"),
+                "effect_verified": sink.get("effect_verified"),
+                "resolve_status": sink.get("resolve_status"),
+                "receiver_type": sink.get("receiver_type"),
+            }
+            for sink in sinks
+        ],
+        "critical_gap_codes": sorted({
+            str(gap.get("code"))
+            for gap in candidate.get("blocking_gaps") or []
+            if isinstance(gap, dict) and gap.get("critical") is True
+        }),
+    }
 
 
 def _numbered(content: str, start_line: int) -> str:

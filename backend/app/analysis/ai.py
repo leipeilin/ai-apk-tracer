@@ -44,7 +44,9 @@ _DEFAULT_RETRY_JITTER_SECONDS = 0.05
 _PROMPT_VERSIONS = {
     "preflight": "1.0.1",
     "l1-triage": "2.0.4",
-    "l2-review": "3.0.4",
+    # 3.0.6：新增 candidate.deterministic_facts 使用规则（P1-4，2026-08-15）。
+    # 基于生效版本 3.0.4 派生——3.0.5 已入库但从未被 _PROMPT_VERSIONS 引用。
+    "l2-review": "3.0.6",
     "repair": "1.0.1",
     "finalization": "1.0.3",
 }

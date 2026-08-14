@@ -211,6 +211,22 @@ prompts:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
     output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
 - id: l2-review
+  version: 3.0.6
+  system_file: l2-review/3.0.6/system.md
+  user_file: l2-review/3.0.6/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: 5661be49c216166292d3642dc3ce17c5d928ced1d7f44fb914d9aab225ff964d
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
   version: 3.0.3
   system_file: l2-review/3.0.3/system.md
   user_file: l2-review/3.0.3/user.md
