@@ -349,6 +349,9 @@ _PIPELINE_IDENTITY_EXCLUDED_FIELDS = {
     "evidence_variants", "is_ai_representative", "funnel_disposition",
     "scope_key", "chain_key", "deterministic_fact_hash",
     "chain_id", "entry_method_id", "path_model", "flow_kind",
+    # funnel 自身写回的分级结果：由候选事实推导而来，不得反过来参与身份计算，
+    # 否则同一候选在开关开/关两种配置下会得到不同 candidate_id。
+    "demotion_reason", "flow_evidence_tier",
 }
 # 组件级数据流 trace：由 detector 的 common_metadata 统一下发给同组件的每条链
 # （rules/shared/detector.py `common_metadata`），随链路数量波动且非判定依据。
@@ -410,6 +413,9 @@ class CandidateFunnel:
         self.min_l1_risk_score = int(
             _pipeline_setting(settings, "min_l1_risk_score", 80)
         )
+        self.demote_unproven_flow = bool(
+            _pipeline_setting(settings, "demote_unproven_flow", False)
+        )
 
     def process(self, candidates: list[dict[str, Any]]) -> FunnelResult:
         """原地标注候选、按三重身份分组，并只为代表项分配 AI 路由。
@@ -432,7 +438,16 @@ class CandidateFunnel:
                 candidate, self.min_l1_risk_score
             )
             candidate["risk_score"] = candidate_risk_score(candidate)
-            candidate["ai_required"] = _pipeline_requires_ai(candidate)
+            demotion_reason = unproven_flow_demotion_reason(candidate)
+            candidate["demotion_reason"] = demotion_reason
+            if demotion_reason and self.demote_unproven_flow:
+                # 降级为 signal：不占 AI 预算、不进人工队列，但候选仍完整写入产物，
+                # 前端可列示、回归可审计——是降级而非丢弃。
+                candidate["flow_evidence_tier"] = "signal"
+                candidate["ai_required"] = False
+            else:
+                candidate["flow_evidence_tier"] = "candidate"
+                candidate["ai_required"] = _pipeline_requires_ai(candidate)
             candidate["ai_eligible"] = False
             candidate["ai_budget_deferred"] = False
             groups.setdefault(
@@ -509,6 +524,13 @@ class CandidateFunnel:
         representative_indexes.extend(selected_l1)
         representative_indexes.sort()
 
+        # P0-2 可观测：降级行为必须可审计、可回溯（按 reason 分组计数）。
+        # demote_unproven_flow 关闭时仍统计"若开启会降级多少"，供灰度评估。
+        demotion_counts: dict[str, int] = {}
+        for item in candidates:
+            reason = item.get("demotion_reason")
+            if reason:
+                demotion_counts[str(reason)] = demotion_counts.get(str(reason), 0) + 1
         summary = {
             "candidate_count": len(candidates),
             "identity_group_count": len(groups),
@@ -516,6 +538,15 @@ class CandidateFunnel:
             "ai_representative_count": len(representative_indexes),
             "l1_ai_selected_count": len(selected_l1),
             "l1_ai_deferred_count": len(deferred_l1),
+            "unproven_flow_demotion_enabled": int(self.demote_unproven_flow),
+            "unproven_flow_matched_count": sum(demotion_counts.values()),
+            "demoted_candidates": (
+                sum(demotion_counts.values()) if self.demote_unproven_flow else 0
+            ),
+            **{
+                f"demotion_reason_{reason}": count
+                for reason, count in sorted(demotion_counts.items())
+            },
             **{
                 disposition: sum(
                     item.get("funnel_disposition") == disposition for item in candidates
@@ -763,6 +794,39 @@ def propagate_representative_analysis(candidates: list[dict[str, Any]]) -> None:
                 if field in representative:
                     member[field] = copy.deepcopy(representative[field])
             member["ai_result_source_candidate_id"] = representative["candidate_id"]
+
+
+def unproven_flow_demotion_reason(candidate: Mapping[str, Any]) -> str | None:
+    """判断候选是否属于"值流未证明"，返回结构化降级原因（不降级返回 None）。
+
+    P0-2（2026-08-15）判据说明：**不使用 sink 参数字面量性**。
+
+    `control_to_sink` 的定义（rules/shared/dataflow.py `_execute_call`）已确定"无任何
+    untrusted 值到达 sink 参数"——这是 taint 引擎给出的确定性事实。而"参数非常量"只说明
+    它是个变量，**不能证明它受攻击者控制**：基线 run 实测按字面量判据会把 57 条候选判为
+    "可能受控"送 AI，而 v04 真机验证这 57 条全部是误报。
+
+    因此降级判据交给 P0-1 的作用域分析：
+    - `CONTROL_SCOPE_UNRESOLVED`：分支作用域无法推断，control_to_sink 的支配关系存疑。
+      P0-1 生效后，作用域可解析的块外 sink 根本不会成链；能走到这里的只有边界未知的链。
+    - `LEGACY_FLOW_FALLBACK`：轻量正则回退匹配，语义链未闭合。
+
+    已被确定性验证的链（`deterministic_chain_verified`）永不降级。
+    """
+
+    if candidate.get("deterministic_chain_verified") is True:
+        return None
+    flow_kind = candidate.get("flow_kind")
+    gap_codes = {
+        str(gap.get("code"))
+        for gap in candidate.get("blocking_gaps") or []
+        if isinstance(gap, Mapping)
+    }
+    if flow_kind == "inferred_source_to_sink" or "LEGACY_FLOW_FALLBACK" in gap_codes:
+        return "legacy_fallback"
+    if flow_kind == "control_to_sink" and "CONTROL_SCOPE_UNRESOLVED" in gap_codes:
+        return "scope_unresolved"
+    return None
 
 
 def _pipeline_requires_ai(candidate: Mapping[str, Any]) -> bool:

@@ -364,3 +364,111 @@ def test_l1_ai_potential_chain_stays_proposal_without_formal_evidence() -> None:
     assert candidate["sinks"] == original_sinks
     assert "promotion_requested" not in candidate
     assert candidate["ai_promotion_proposal"]["candidate_verdict"] == "potential_chain"
+
+
+def _unproven_candidate(**overrides) -> dict:
+    """control_to_sink + 作用域未解析：P0-2 的降级目标。"""
+
+    candidate = {
+        "rule_id": "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+        "rule_version": "2.0.0",
+        "evidence_level": "L2",
+        "component": "activity",
+        "component_name": "com.example.MainActivity",
+        "entry_points": ["MainActivity#onCreate"],
+        "entry_method_id": "com/example/MainActivity.java#MainActivity.onCreate:10",
+        "authorization_status": "unprotected",
+        "guard_status": "absent",
+        "dataflow_status": "not_proven",
+        "flow_kind": "control_to_sink",
+        "operation_taxonomy": "persistent_state_write",
+        "deterministic_chain_verified": False,
+        "chain_id": "dfc_unproven",
+        "sources": [{"path": "a.java", "line": 1, "kind": "intent_extra"}],
+        "sinks": [{"path": "b.java", "line": 2, "kind": "persistent_state_write"}],
+        "propagation_paths": [],
+        "blocking_gaps": [{"code": "CONTROL_SCOPE_UNRESOLVED", "critical": True}],
+        "locations": [],
+    }
+    candidate.update(overrides)
+    return candidate
+
+
+def test_unproven_flow_demotion_reason_matches_scope_and_legacy_only() -> None:
+    """P0-2 判据：只认 P0-1 的作用域结论与 legacy 回退，不看 sink 参数字面量性。"""
+
+    from app.analysis.candidate_funnel import unproven_flow_demotion_reason
+
+    assert unproven_flow_demotion_reason(_unproven_candidate()) == "scope_unresolved"
+
+    legacy = _unproven_candidate(
+        flow_kind="inferred_source_to_sink",
+        blocking_gaps=[{"code": "LEGACY_FLOW_FALLBACK", "critical": True}],
+    )
+    assert unproven_flow_demotion_reason(legacy) == "legacy_fallback"
+
+    # 作用域已解析的 control_to_sink：P0-1 生效后块外 sink 根本不成链，
+    # 能留下来的说明 sink 受分支支配，属真实攻击面，不得降级。
+    scoped = _unproven_candidate(blocking_gaps=[
+        {"code": "LINEAR_IR_PATH_SENSITIVITY_LIMITATION", "critical": True}
+    ])
+    assert unproven_flow_demotion_reason(scoped) is None
+
+    # 值流已证明到 sink 参数：绝不降级
+    proven = _unproven_candidate(flow_kind="source_to_sink")
+    assert unproven_flow_demotion_reason(proven) is None
+
+    # 确定性验证过的链：绝不降级
+    verified = _unproven_candidate(deterministic_chain_verified=True)
+    assert unproven_flow_demotion_reason(verified) is None
+
+
+def test_demotion_disabled_by_default_and_gated_by_setting() -> None:
+    """默认关闭：判据照常计算并统计，但不改变 AI 准入——保证灰度可评估、行为不突变。"""
+
+    from app.analysis.candidate_funnel import CandidateFunnel
+
+    disabled = CandidateFunnel().process([_unproven_candidate()])
+    candidate = disabled.candidates[0]
+    assert candidate["demotion_reason"] == "scope_unresolved"
+    assert candidate["flow_evidence_tier"] == "candidate"
+    assert candidate["ai_required"] is True, "默认配置下不得改变既有 AI 准入行为"
+    assert disabled.summary["unproven_flow_matched_count"] == 1
+    assert disabled.summary["demoted_candidates"] == 0
+
+    enabled = CandidateFunnel({"demote_unproven_flow": True}).process([_unproven_candidate()])
+    demoted = enabled.candidates[0]
+    assert demoted["flow_evidence_tier"] == "signal"
+    assert demoted["ai_required"] is False, "开启后值流未证明的链不得占用 AI 预算"
+    assert enabled.summary["demoted_candidates"] == 1
+    assert enabled.summary["demotion_reason_scope_unresolved"] == 1
+
+
+def test_demotion_keeps_candidate_and_identity_stable() -> None:
+    """降级是"不送 AI"而非"丢弃"：候选仍在产物中，且 candidate_id 不随开关变化。"""
+
+    from app.analysis.candidate_funnel import CandidateFunnel
+
+    disabled = CandidateFunnel().process([_unproven_candidate()])
+    enabled = CandidateFunnel({"demote_unproven_flow": True}).process([_unproven_candidate()])
+
+    assert len(enabled.candidates) == len(disabled.candidates) == 1, "降级不得丢弃候选"
+    assert enabled.candidates[0]["candidate_id"] == disabled.candidates[0]["candidate_id"], (
+        "分级结果由候选事实推导而来，不得反过来参与身份计算，"
+        "否则同一候选在开关开/关下会得到不同 candidate_id"
+    )
+
+
+def test_demotion_does_not_touch_proven_chains() -> None:
+    """安全边界：值流已证明的链在开启后仍须送 AI。"""
+
+    from app.analysis.candidate_funnel import CandidateFunnel
+
+    proven = _unproven_candidate(
+        flow_kind="source_to_sink",
+        blocking_gaps=[{"code": "LINEAR_IR_PATH_SENSITIVITY_LIMITATION", "critical": True}],
+    )
+    result = CandidateFunnel({"demote_unproven_flow": True}).process([proven])
+    assert result.candidates[0]["flow_evidence_tier"] == "candidate"
+    assert result.candidates[0]["ai_required"] is True
+    assert result.summary["demoted_candidates"] == 0

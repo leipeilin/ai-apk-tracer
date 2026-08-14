@@ -65,6 +65,11 @@ funnel:
   max_l1_candidates_per_run: 20
   # L1 候选进入 AI 分诊的最低风险分。
   min_l1_risk_score: 80
+  # 值流未证明的链是否降级为 signal（不占 AI 预算、不进人工队列，仍写入产物可查）。
+  # 判据来自 P0-1 的作用域分析：control_to_sink 且作用域未解析、或 legacy 回退匹配。
+  # 默认 false——开启前须完成历史回归（被降级集合中真漏洞数 = 0）与至少 3 个不同编码风格
+  # APK 的复现验证，详见 docs/analysis/2026-08-15-precision-optimization-plan.md §5。
+  demote_unproven_flow: false
 
 # 上下文和请求预算。max_input_tokens 是确定性 UTF-8 近似值；max_output_tokens 会作为模型 API 的 max_tokens 发送。
 context_budget:

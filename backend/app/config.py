@@ -118,6 +118,14 @@ class FunnelSettings(BaseModel):
 
     max_l1_candidates_per_run: int = Field(default=20, ge=0, description="单次任务最多进入 AI 的 L1 代表候选数")
     min_l1_risk_score: int = Field(default=80, ge=0, le=100, description="L1 候选进入 AI 分诊的最低风险分")
+    demote_unproven_flow: bool = Field(
+        default=False,
+        description=(
+            "值流未证明的链（control_to_sink 作用域未解析、legacy 回退匹配）是否降级为 "
+            "signal 不占 AI 预算。默认关闭：需先完成历史回归（被降级集合中真漏洞数必须为 0）"
+            "与至少 3 个不同风格 APK 的复现验证，方可开启。"
+        ),
+    )
 
 
 class ContextBudgetSettings(BaseModel):
