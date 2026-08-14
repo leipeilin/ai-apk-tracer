@@ -683,3 +683,160 @@ def test_decision_whitelist_includes_input_protocol_uncontrolled() -> None:
     from app.findings.decision import _EVIDENCE_INSUFFICIENCY_GAPS
 
     assert "INPUT_PROTOCOL_UNCONTROLLED" in _EVIDENCE_INSUFFICIENCY_GAPS
+
+
+def test_control_fact_does_not_escape_branch_block(tmp_path: Path) -> None:
+    """P0-1：分支条件可控不得蔓延为"整段代码可控"。
+
+    基线 run 20260809T110600Z 中 98.6% 的候选（138/140）源于 control_fact 置位后永不重置：
+    入口方法里任意一个"攻击者可控 if"之后，整个调用图内所有 effect 都被挂链——即便 sink
+    位于分支块之外、参数全是常量。此处 `web.loadUrl("https://fixed.example.com")` 在块外且
+    实参为字面量，改造前会产出 1 条 control_to_sink，改造后应为 0。
+    """
+
+    source = """package com.example;
+class RouterActivity {
+ WebView web;
+ void onCreate(Intent intent) {
+  String evil = intent.getStringExtra("evil");
+  if (evil != null) {
+   log(evil);
+  }
+  web.loadUrl("https://fixed.example.com");
+ }
+}
+"""
+    flow = _analyzer(
+        tmp_path, {"com/example/RouterActivity.java": source}, {"onCreate"}
+    ).analyze_entry({"onCreate"})
+
+    escaped = [
+        chain for chain in flow["chains"]
+        if chain.get("flow_kind") == "control_to_sink"
+    ]
+    assert not escaped, (
+        "块外的常量 sink 不得因块内条件可控而成链；"
+        f"实际逃逸 {len(escaped)} 条：{[c.get('sink', {}).get('text') for c in escaped]}"
+    )
+
+
+def test_control_fact_still_covers_sink_inside_branch_block(tmp_path: Path) -> None:
+    """P0-1 召回边界：块内 sink 必须继续成链——降级只针对块外，不得误伤真实攻击面。
+
+    与 test_control_fact_does_not_escape_branch_block 构成对照：同一段代码，
+    仅把 sink 从块外移入块内，结论必须相反。
+    """
+
+    source = """package com.example;
+class RouterActivity {
+ WebView web;
+ void onCreate(Intent intent) {
+  String evil = intent.getStringExtra("evil");
+  if (evil != null) {
+   web.loadUrl("https://fixed.example.com");
+  }
+ }
+}
+"""
+    flow = _analyzer(
+        tmp_path, {"com/example/RouterActivity.java": source}, {"onCreate"}
+    ).analyze_entry({"onCreate"})
+
+    covered = [
+        chain for chain in flow["chains"]
+        if chain.get("flow_kind") == "control_to_sink"
+    ]
+    assert covered, "分支块内的敏感操作仍受攻击者控制的条件支配，必须继续成链"
+
+
+def test_branch_block_end_line_covers_control_structures() -> None:
+    """P0-1 作用域边界推断：覆盖花括号块、单语句体、if-else 链、循环、switch、嵌套。
+
+    else / else if 与 if 共享同一支配条件（条件为假时执行），因此整条链合并为一个作用域，
+    避免 else 内的 sink 逃逸判定。
+    """
+
+    from app.analysis.indexer import _build_flow_ir, _method_texts
+
+    def branch_hints(snippet: str) -> list[dict]:
+        raw, masked = _method_texts(snippet)
+        return [
+            item for item in _build_flow_ir(raw, masked, 1, [])
+            if item["op"] == "branch_hint"
+        ]
+
+    # 花括号块：块末 = 第 4 行的 "}"，块外 b() 在第 5 行
+    hints = branch_hints("void f() {\n if (evil) {\n  a();\n }\n b();\n}")
+    assert [h["block_end_line"] for h in hints] == [4]
+
+    # 单语句体：以分号结尾
+    hints = branch_hints("void f() {\n if (evil) a();\n b();\n}")
+    assert [h["block_end_line"] for h in hints] == [2]
+
+    # if-else：作用域覆盖到 else 块末
+    hints = branch_hints("void f() {\n if (evil) {\n  a();\n } else {\n  c();\n }\n b();\n}")
+    assert [h["block_end_line"] for h in hints] == [6]
+
+    # else-if 链：两个 branch_hint 都延伸到链末
+    hints = branch_hints(
+        "void f() {\n if (evil) {\n  a();\n } else if (x) {\n  c();\n } else {\n  d();\n }\n b();\n}"
+    )
+    assert [h["block_end_line"] for h in hints] == [8, 8]
+
+    # 循环与 switch 同样是独立作用域
+    assert [h["block_end_line"] for h in
+            branch_hints("void f() {\n while (evil) {\n  a();\n }\n b();\n}")] == [4]
+    assert [h["block_end_line"] for h in
+            branch_hints("void f() {\n switch (evil) {\n  case 1: a(); break;\n }\n b();\n}")] == [4]
+
+    # 嵌套：内层块末早于外层
+    hints = branch_hints(
+        "void f() {\n if (evil) {\n  if (inner) {\n   a();\n  }\n  c();\n }\n b();\n}"
+    )
+    assert [h["block_end_line"] for h in hints] == [7, 5]
+
+
+def test_control_scope_unresolved_gap_when_block_end_unknown(tmp_path: Path) -> None:
+    """作用域无法推断时退回旧行为（持续到方法末尾），但必须显式标注 CONTROL_SCOPE_UNRESOLVED。
+
+    "未知"不得被当作"无限制"——缺失边界的链需带 critical gap，使其无法被判为高可信。
+    这里复用真实索引产物再抹掉 block_end_line，模拟旧索引 / 括号未闭合场景：
+    链应当仍然产出（保守），且必须携带该 gap。
+    """
+
+    source = """package com.example;
+class RouterActivity {
+ WebView web;
+ void onCreate(Intent intent) {
+  String evil = intent.getStringExtra("evil");
+  if (evil != null) {
+   log(evil);
+  }
+  web.loadUrl("https://fixed.example.com");
+ }
+}
+"""
+    analyzer = _analyzer(
+        tmp_path, {"com/example/RouterActivity.java": source}, {"onCreate"}
+    )
+    stripped = 0
+    for file in analyzer.files:
+        for method in file.get("methods", []):
+            for item in method.get("flow_ir", []):
+                if item.get("op") == "branch_hint" and "block_end_line" in item:
+                    del item["block_end_line"]
+                    stripped += 1
+    assert stripped, "测试前提：索引应已产出 block_end_line 供抹除"
+
+    flow = analyzer.analyze_entry({"onCreate"})
+
+    assert flow["chains"], "边界未知时应退回旧行为继续挂链（保守），而不是静默丢弃"
+    emitted = {
+        gap.get("code")
+        for chain in flow["chains"]
+        for gap in chain.get("blocking_gaps", [])
+    }
+    emitted |= {gap.get("code") for gap in flow.get("coverage_gaps", [])}
+    assert "CONTROL_SCOPE_UNRESOLVED" in emitted, (
+        f"block_end_line 缺失时必须产出 CONTROL_SCOPE_UNRESOLVED，实际 gap：{emitted}"
+    )

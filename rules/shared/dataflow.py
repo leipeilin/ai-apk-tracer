@@ -400,10 +400,17 @@ class DataFlowAnalyzer:
         chains: list[dict[str, Any]] = []
         returned: ValueFact | None = None
         control_fact = inherited_control
+        # P0-1：control_fact 的作用域栈。每项为 (block_end_line, previous_control_fact)；
+        # 执行越过 block_end_line 时弹栈还原，使"分支条件可控"不再蔓延到整个方法。
+        # inherited_control 不入栈——它由调用方的分支支配，在本方法内全程有效。
+        control_scopes: list[tuple[int, ValueFact | None]] = []
         current_gaps = list(path_gaps)
         for instruction in flow_ir:
             if self._enumeration_stopped:
                 break
+            instruction_line = _instruction_line(instruction, method)
+            while control_scopes and instruction_line > control_scopes[-1][0]:
+                _, control_fact = control_scopes.pop()
             if self._ir_steps >= self.max_ir_steps:
                 self._add_budget_gap(
                     "DATAFLOW_IR_STEP_BUDGET_EXCEEDED",
@@ -440,7 +447,21 @@ class DataFlowAnalyzer:
                     int(instruction.get("line", method.get("start_line", 1))),
                 )
                 if condition_fact and condition_fact.state in {"untrusted", "maybe_untrusted"}:
-                    control_fact = condition_fact
+                    block_end_line = instruction.get("block_end_line")
+                    if block_end_line is None:
+                        # 作用域无法可靠推断（括号未闭合/方法体被截断/旧索引无该字段）。
+                        # 退回旧行为（持续到方法末尾）但显式标注，避免"未知"被当作"无限制"。
+                        current_gaps = _unique_gaps([*current_gaps, {
+                            "code": "CONTROL_SCOPE_UNRESOLVED",
+                            "critical": True,
+                            "method": method["id"],
+                            "line": instruction_line,
+                            "construct": "branch",
+                        }])
+                        control_fact = condition_fact
+                    else:
+                        control_scopes.append((int(block_end_line), control_fact))
+                        control_fact = condition_fact
                 proven = self._branch_is_proven_fail_closed(state, instruction)
                 self._apply_branch_validation(method, state, instruction)
                 if not proven:
@@ -3308,3 +3329,15 @@ def _unique_gaps(gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
             seen.add(marker)
             result.append(gap)
     return result
+
+
+def _instruction_line(instruction: dict[str, Any], method: dict[str, Any]) -> int:
+    """IR 指令的源码行，缺失时回退到方法起始行（保守：不触发作用域弹栈）。"""
+
+    raw = instruction.get("line")
+    if raw is None:
+        return int(method.get("start_line", 1) or 1)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return int(method.get("start_line", 1) or 1)

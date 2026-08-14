@@ -687,6 +687,7 @@ def _build_flow_ir(
         if closing is None:
             continue
         following = masked_text[closing + 1:closing + 301]
+        block_end_line = _branch_block_end_line(masked_text, closing + 1, start_line)
         events.append((closing + 1, 0, {
             "op": "branch_hint",
             "condition": raw_text[opening + 1:closing].strip(),
@@ -696,6 +697,9 @@ def _build_flow_ir(
                 re.S,
             )),
             "line": start_line + masked_text.count("\n", 0, match.start()),
+            # P0-1：分支作用域末行。None 表示无法可靠推断（消费方须按"作用域未解析"
+            # 保守处理并产出 CONTROL_SCOPE_UNRESOLVED gap），不得当作"无作用域限制"。
+            "block_end_line": block_end_line,
         }))
     result = [event for _, _, event in sorted(events, key=lambda item: (item[0], item[1]))]
     for call in call_sites:
@@ -732,6 +736,75 @@ def _extract_smali_call_sites(method_id: str, snippet: str, start_line: int) -> 
             "expression_kind": "smali_invoke",
         })
     return calls
+
+
+def _branch_block_end_line(masked_text: str, body_start: int, start_line: int) -> int | None:
+    """推断分支体（含 else / else if 链）的末行，供数据流限定 control_fact 作用域。
+
+    P0-1（2026-08-15）：此前 IR 不携带块边界，`control_fact` 一旦置位便持续到方法结束，
+    导致"分支条件可控"被解释为"整段代码可控"——基线 run 中 98.6% 的候选由此产生。
+
+    覆盖两种块形态：
+    - 花括号块 `{ ... }`：括号配对定位末行；
+    - 单语句体 `if (c) doSomething();`：以首个 `;` 结尾。
+
+    `else` / `else if` 分支同样受同一条件支配（条件为假时执行），因此整条 if-else 链
+    合并为一个作用域，避免 else 内的 sink 逃逸判定。
+
+    返回 None 表示无法可靠推断（如括号未闭合、体被截断），调用方必须保守处理。
+    """
+
+    index = body_start
+    length = len(masked_text)
+    while index < length and masked_text[index] in " \t\r\n":
+        index += 1
+    if index >= length:
+        return None
+
+    if masked_text[index] == "{":
+        depth = 0
+        end_index = None
+        for cursor in range(index, length):
+            char = masked_text[cursor]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    end_index = cursor
+                    break
+        if end_index is None:
+            return None
+    else:
+        # 单语句体：到分号为止。遇到块结束符先于分号出现说明体被截断，判为不可推断。
+        end_index = None
+        for cursor in range(index, length):
+            char = masked_text[cursor]
+            if char == ";":
+                end_index = cursor
+                break
+            if char == "}":
+                return None
+        if end_index is None:
+            return None
+
+    # else / else if：与 if 共享同一支配条件，作用域延伸至整条链末尾。
+    tail = masked_text[end_index + 1:]
+    else_match = re.match(r"\s*else\b", tail)
+    if else_match:
+        else_body_start = end_index + 1 + else_match.end()
+        nested = re.match(r"\s*if\s*\(", masked_text[else_body_start:])
+        if nested:
+            opening = masked_text.find("(", else_body_start)
+            closing = _matching_paren(masked_text, opening) if opening >= 0 else None
+            if closing is None:
+                return None
+            chained = _branch_block_end_line(masked_text, closing + 1, start_line)
+            return chained
+        chained = _branch_block_end_line(masked_text, else_body_start, start_line)
+        return chained
+
+    return start_line + masked_text.count("\n", 0, end_index)
 
 
 def _matching_paren(text: str, opening: int) -> int | None:
