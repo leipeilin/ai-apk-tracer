@@ -1,0 +1,15 @@
+{
+  "id": "local-binder-not-remote",
+  "category": "binder",
+  "label": "negative",
+  "rule": "SERVICE_BINDER_CALLER_CHECK_MISSING",
+  "component": "service",
+  "entry": "onBind",
+  "operation": "local Binder return",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "unprotected", "guard": "unknown", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["local Binder as remote AIDL surface"],
+  "sources": [{"path": "synthetic/LocalService.java", "symbol": "onBind", "kind": "service_entry"}],
+  "sinks": [{"path": "synthetic/LocalService.java", "symbol": "LocalBinder", "kind": "local_binder"}],
+  "tags": ["false-positive", "binder", "local"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_p0_closure.py::test_binder_requires_remote_dispatch_and_maps_transaction"}]
+}

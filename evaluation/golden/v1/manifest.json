@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0",
+  "dataset_version": "v1",
+  "description": "阶段0离线静态分析最小黄金集；仅包含合成语义与测试引用，不包含APK代码。label=positive/negative分别表示已知候选/已知非候选，conditional/unknown不进入二元指标；must_not_report仅按完整字符串精确匹配；provenance只用于审计引用，不作为评分证据。",
+  "cases": [
+    {
+      "id": "import-is-not-source",
+      "file": "cases/import-is-not-source.json"
+    },
+    {
+      "id": "empty-provider-mutation",
+      "file": "cases/empty-provider-mutation.json"
+    },
+    {
+      "id": "executor-execute-not-network",
+      "file": "cases/executor-execute-not-network.json"
+    },
+    {
+      "id": "local-broadcast-not-external",
+      "file": "cases/local-broadcast-not-external.json"
+    },
+    {
+      "id": "local-binder-not-remote",
+      "file": "cases/local-binder-not-remote.json"
+    },
+    {
+      "id": "remote-aidl-unguarded",
+      "file": "cases/remote-aidl-unguarded.json"
+    },
+    {
+      "id": "strong-permission-protected",
+      "file": "cases/strong-permission-protected.json"
+    },
+    {
+      "id": "router-validation-overwritten",
+      "file": "cases/router-validation-overwritten.json"
+    },
+    {
+      "id": "fragment-external-class-name",
+      "file": "cases/fragment-external-class-name.json"
+    },
+    {
+      "id": "started-service-stopself-event",
+      "file": "cases/started-service-stopself-event.json"
+    },
+    {
+      "id": "dynamic-receiver-flag-2",
+      "file": "cases/dynamic-receiver-flag-2.json"
+    },
+    {
+      "id": "dynamic-receiver-flag-4",
+      "file": "cases/dynamic-receiver-flag-4.json"
+    },
+    {
+      "id": "file-provider-safe-prefix",
+      "file": "cases/file-provider-safe-prefix.json"
+    },
+    {
+      "id": "file-provider-unsafe-prefix",
+      "file": "cases/file-provider-unsafe-prefix.json"
+    },
+    {
+      "id": "map-put-not-persistent-write",
+      "file": "cases/map-put-not-persistent-write.json"
+    },
+    {
+      "id": "unregistered-activity",
+      "file": "cases/unregistered-activity.json"
+    },
+    {
+      "id": "debuggable-default-false",
+      "file": "cases/debuggable-default-false.json"
+    }
+  ],
+  "ai_responses": [
+    {
+      "id": "valid",
+      "file": "ai-responses/valid.json",
+      "expectation": "valid",
+      "target_model": "L2ReviewOutput",
+      "model_version": "1",
+      "schema_file": "ai_l2_review_output.schema.json",
+      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+    },
+    {
+      "id": "missing-analysis-complete",
+      "file": "ai-responses/missing-analysis-complete.json",
+      "expectation": "invalid",
+      "target_model": "L2ReviewOutput",
+      "model_version": "1",
+      "schema_file": "ai_l2_review_output.schema.json",
+      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+    },
+    {
+      "id": "extra-field",
+      "file": "ai-responses/extra-field.json",
+      "expectation": "invalid",
+      "target_model": "L2ReviewOutput",
+      "model_version": "1",
+      "schema_file": "ai_l2_review_output.schema.json",
+      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+    },
+    {
+      "id": "invalid-enum",
+      "file": "ai-responses/invalid-enum.json",
+      "expectation": "invalid",
+      "target_model": "L2ReviewOutput",
+      "model_version": "1",
+      "schema_file": "ai_l2_review_output.schema.json",
+      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+    },
+    {
+      "id": "repairable-json",
+      "file": "ai-responses/repairable-json.json",
+      "expectation": "repairable",
+      "target_model": "L2ReviewOutput",
+      "model_version": "1",
+      "schema_file": "ai_l2_review_output.schema.json",
+      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+    }
+  ]
+}

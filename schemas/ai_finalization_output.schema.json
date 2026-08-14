@@ -1,0 +1,232 @@
+{
+  "$defs": {
+    "BlockingGap": {
+      "additionalProperties": false,
+      "description": "阻止模型形成可靠结论的证据缺口。",
+      "properties": {
+        "code": {
+          "description": "可稳定聚合的证据缺口代码",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Code",
+          "type": "string"
+        },
+        "critical": {
+          "description": "该缺口是否足以阻止形成支持或反驳裁决",
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "evidence_refs": {
+          "description": "用于界定缺口的已知证据引用",
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          },
+          "maxItems": 32,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "message": {
+          "description": "缺少何种事实以及它如何阻止结论",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "critical"
+      ],
+      "title": "BlockingGap",
+      "type": "object"
+    },
+    "EvidenceReference": {
+      "additionalProperties": false,
+      "description": "引用输入切片中可回查的确定性证据。",
+      "properties": {
+        "claim": {
+          "description": "该引用直接支持的、可回查的具体主张",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "context_id": {
+          "description": "被引用输入上下文的稳定 ID",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据结束行；缺省时表示单行或整个上下文",
+          "title": "End Line"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据起始行；必须落在引用上下文范围内",
+          "title": "Line"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据所在的工作区相对路径；缺省时仅按 context_id 回查",
+          "title": "Path"
+        }
+      },
+      "required": [
+        "context_id",
+        "claim"
+      ],
+      "title": "EvidenceReference",
+      "type": "object"
+    },
+    "Uncertainty": {
+      "additionalProperties": false,
+      "description": "模型必须显式披露的不确定性。",
+      "properties": {
+        "impact": {
+          "description": "不确定性对裁决可靠性的影响等级",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Impact",
+          "type": "string"
+        },
+        "reason": {
+          "description": "无法由当前输入消除不确定性的原因",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "resolvable": {
+          "description": "追加受控上下文是否可能消除该不确定性",
+          "title": "Resolvable",
+          "type": "boolean"
+        },
+        "topic": {
+          "description": "不确定性所涉及的语义主题",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "reason",
+        "impact",
+        "resolvable"
+      ],
+      "title": "Uncertainty",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "供编排层消费但仍需策略校验的最终 AI 建议。",
+  "properties": {
+    "analysis_complete": {
+      "description": "finalization 是否完整结束；不得用来掩盖 unresolved 或缺口",
+      "title": "Analysis Complete",
+      "type": "boolean"
+    },
+    "blocking_gaps": {
+      "description": "最终建议仍需保留的阻断性缺口",
+      "items": {
+        "$ref": "#/$defs/BlockingGap"
+      },
+      "maxItems": 64,
+      "title": "Blocking Gaps",
+      "type": "array"
+    },
+    "evidence_refs": {
+      "description": "最终建议引用的输入证据；不得新增上游未提供的证据",
+      "items": {
+        "$ref": "#/$defs/EvidenceReference"
+      },
+      "maxItems": 128,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "review_recommendation": {
+      "description": "供编排层消费的复核建议，而非授权模型直接改变审核状态",
+      "enum": [
+        "pending_ai",
+        "pending_manual",
+        "ai_false_positive"
+      ],
+      "title": "Review Recommendation",
+      "type": "string"
+    },
+    "summary": {
+      "description": "合并确定性事实与最后一轮严格输出后的最终摘要",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "uncertainties": {
+      "description": "最终建议仍需保留的不确定性",
+      "items": {
+        "$ref": "#/$defs/Uncertainty"
+      },
+      "maxItems": 64,
+      "title": "Uncertainties",
+      "type": "array"
+    },
+    "verdict": {
+      "description": "沿用证据语义的最终建议裁决，不直接写入人工 review_status",
+      "enum": [
+        "supports_candidate",
+        "refutes_candidate",
+        "unresolved"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "required": [
+    "summary",
+    "verdict",
+    "review_recommendation",
+    "analysis_complete"
+  ],
+  "title": "FinalizationOutput",
+  "type": "object"
+}

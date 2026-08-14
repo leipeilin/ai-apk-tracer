@@ -1,0 +1,15 @@
+{
+  "id": "strong-permission-protected",
+  "category": "authorization",
+  "label": "negative",
+  "rule": "PROVIDER_EXPORTED_NO_PERMISSION",
+  "component": "provider",
+  "entry": "query",
+  "operation": "protected provider read",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "strongly_protected", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["signature-protected component as unprotected"],
+  "sources": [{"path": "synthetic/AndroidManifest.xml", "symbol": "signature permission", "kind": "manifest_permission"}],
+  "sinks": [{"path": "synthetic/ProtectedProvider.java", "symbol": "query", "kind": "provider_read"}],
+  "tags": ["false-positive", "permission", "signature"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_authorization_guard_matrix.py::test_provider_generic_permission_protects_read_and_write"}]
+}

@@ -1,0 +1,41 @@
+{
+  "additionalProperties": false,
+  "description": "AI 服务能力预检结果。",
+  "properties": {
+    "acknowledged_capabilities": {
+      "description": "服务明确确认的协议能力",
+      "items": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 16,
+      "title": "Acknowledged Capabilities",
+      "type": "array"
+    },
+    "analysis_complete": {
+      "description": "响应是否完整完成本阶段；false 不得视为已接受输出",
+      "title": "Analysis Complete",
+      "type": "boolean"
+    },
+    "message": {
+      "description": "对预检结果的简明说明",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "ok": {
+      "description": "服务是否确认能够遵守全部要求",
+      "title": "Ok",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "ok",
+    "message",
+    "analysis_complete"
+  ],
+  "title": "PreflightOutput",
+  "type": "object"
+}

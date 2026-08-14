@@ -1,0 +1,15 @@
+{
+  "id": "executor-execute-not-network",
+  "category": "sink_taxonomy",
+  "label": "negative",
+  "rule": "RECEIVER_INPUT_TO_SINK",
+  "component": "receiver",
+  "entry": "onReceive",
+  "operation": "Executor.execute",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "unprotected", "guard": "absent", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["Executor.execute as network sink"],
+  "sources": [{"path": "synthetic/DumpReceiver.java", "symbol": "Intent.getAction", "kind": "intent"}],
+  "sinks": [{"path": "synthetic/DumpReceiver.java", "symbol": "Executor.execute", "kind": "non_sink"}],
+  "tags": ["false-positive", "type-aware", "executor"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_manual_review_regressions.py::test_thread_pool_execute_is_not_network_sink"}]
+}

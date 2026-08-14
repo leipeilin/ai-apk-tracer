@@ -1,0 +1,15 @@
+{
+  "id": "remote-aidl-unguarded",
+  "category": "binder",
+  "label": "positive",
+  "rule": "SERVICE_BINDER_CALLER_CHECK_MISSING",
+  "component": "service",
+  "entry": "onBind|onTransact",
+  "operation": "AIDL transaction dispatch",
+  "expected": {"candidate": true, "dataflow": "interprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "location_sensor_collection", "verdict": "report"},
+  "must_not_report": ["unmapped transaction method", "local-only Binder finding"],
+  "sources": [{"path": "synthetic/RemoteService.java", "symbol": "onBind", "kind": "service_entry"}, {"path": "synthetic/SportApiStub.java", "symbol": "onTransact parcel input", "kind": "binder_transaction"}],
+  "sinks": [{"path": "synthetic/SportApiStub.java", "symbol": "startSport", "kind": "sensitive_effect"}],
+  "tags": ["true-positive", "binder", "aidl", "interprocedural"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_p0_closure.py::test_binder_requires_remote_dispatch_and_maps_transaction"}]
+}

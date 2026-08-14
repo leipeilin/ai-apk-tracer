@@ -1,0 +1,15 @@
+{
+  "id": "local-broadcast-not-external",
+  "category": "dynamic_receiver",
+  "label": "negative",
+  "rule": "DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION",
+  "component": "receiver",
+  "entry": "register",
+  "operation": "LocalBroadcastManager.registerReceiver",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["local broadcast receiver as externally reachable"],
+  "sources": [{"path": "synthetic/InternalEvents.java", "symbol": "LocalBroadcastManager", "kind": "local_channel"}],
+  "sinks": [],
+  "tags": ["false-positive", "local-broadcast", "reachability"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_dynamic_receiver_resolution.py::test_local_broadcast_is_decided_per_registration_call"}]
+}

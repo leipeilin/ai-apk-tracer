@@ -1,0 +1,140 @@
+# 应用基础信息。取值优先级为进程环境变量 > .env > 本 YAML > 代码默认值；嵌套项使用双下划线覆盖。
+app_name: AI-APK-Tracer
+app_version: 0.1.0
+
+# 本地单用户版本仅允许监听回环地址，避免无认证服务暴露到局域网。
+host: 127.0.0.1
+port: 8000
+# Python 标准日志等级，例如 DEBUG、INFO、WARNING、ERROR。
+log_level: INFO
+# 任务元数据 SQLite；相对路径以项目根目录为基准，绝对路径视为受信任运维配置而不会被工作区沙箱限制。
+database_path: .ai-apk-tracer/tracer.sqlite3
+# 静态分析组件导出、权限和动态 Receiver 语义时采用的 Android 平台 API，并不探测 APK 的实际运行设备。
+analysis_platform_api: 36
+
+# DEX 反编译伪源码分析。关闭后仅执行 Manifest/资源级规则，并降低覆盖范围。
+source_analysis:
+  enabled: true
+  # 反编译适配器标识；当前内置实现为 jadx。
+  decompiler: jadx
+  # JADX 可执行文件名或绝对路径，运行时通过非 Shell 参数数组启动。
+  jadx_path: jadx
+  # 声明是否允许在伪源码缺失时使用 Smali 能力；具体兜底覆盖以产物清单为准。
+  smali_fallback: true
+  # 普通源码文件进入结构索引的大小上限，单位 KiB；超限文件记录为覆盖缺口。
+  max_file_size_kb: 512
+  # Manifest 显式组件源码的特例上限；只放宽真实入口，不全局纳入大型生成代码。
+  component_max_file_size_kb: 2048
+  # 单次 JADX 墙钟超时，单位秒；超时会终止整个进程组。
+  decompile_timeout_seconds: 600
+
+# 单条内置规则的故障与资源隔离限制，不是分析完整性的业务预算。
+rule_runtime:
+  # 同时执行的规则子进程上限；结果仍按 rule_id 稳定汇总。
+  max_concurrency: 2
+  # 父进程强制执行的墙钟超时，单位秒。
+  wall_timeout_seconds: 120
+  # 子进程 CPU 时间限制，单位秒；macOS 下属于 best-effort。
+  cpu_timeout_seconds: 60
+  # 子进程地址空间上限，单位 MiB；普通子进程不等同于恶意规则强沙箱。
+  memory_mb: 1024
+  # 标准输出和标准错误的最大保留量，单位 MiB。
+  stdout_max_mb: 10
+  stderr_max_mb: 10
+  # 规则可写工作目录上限，单位 MiB；共享只读 analysis.sqlite3 不计入该目录。
+  workdir_max_mb: 256
+
+# 本地任务数据、上传和 APK ZIP 结构限制。
+storage:
+  # 每个 run 的 APK 副本、反编译产物、索引、切片、报告和日志根目录；绝对路径仅应来自受信任运维配置。
+  data_root: .ai-apk-tracer
+  # MVP 仅支持人工清理，避免复核完成前自动丢失证据。
+  retention: manual
+  # 启动时可清理的孤立临时目录年龄，单位小时。
+  stale_tmp_hours: 24
+  # 上传 APK 压缩包大小上限，单位 MiB。
+  max_apk_size_mb: 512
+  # APK ZIP 条目数上限，用于阻止异常目录规模消耗资源。
+  max_zip_entries: 100000
+  # APK 全部条目的声明解压总大小上限，单位 MiB；不使用单条目压缩比拦截。
+  max_uncompressed_mb: 2048
+
+# 候选漏斗仅将具高价值语义信号的高风险 L1 代表候选送入 AI。
+funnel:
+  # 单次任务最多进入 AI 分诊的 L1 代表候选数；超限候选标记 ai_budget_deferred。
+  max_l1_candidates_per_run: 20
+  # L1 候选进入 AI 分诊的最低风险分。
+  min_l1_risk_score: 80
+
+# 上下文和请求预算。max_input_tokens 是确定性 UTF-8 近似值；max_output_tokens 会作为模型 API 的 max_tokens 发送。
+context_budget:
+  max_input_tokens: 24000
+  max_output_tokens: 8000
+  # 请求数统计编排层逻辑调用；transport 内因失败而进行的 HTTP 重试不额外占用此计数。
+  max_requests_per_candidate: 4
+  max_expansions_per_candidate: 2
+  # 候选墙钟预算阻止发起后续逻辑调用，但不会主动取消已在途的 HTTP 请求。
+  max_candidate_wall_seconds: 300
+  # 同样统计单次扫描的逻辑调用数，而非底层 HTTP 发送次数。
+  max_requests_per_run: 500
+  max_contexts_per_slice: 24
+  max_additions_per_request: 8
+  max_context_bytes_per_slice: 96000
+  max_lines_per_context: 240
+  max_methods_per_class_request: 8
+
+# OpenAI-compatible 深度语义分析和代码外发默认均为 true，不要求逐任务 opt-in。
+# 请求会发送候选的确定性事实及预算内的方法级代码切片，不会发送完整代码索引。
+ai:
+  enabled: true
+  # 例如 http://127.0.0.1:11434/v1；使用外部地址前需确认代码处理边界。
+  base_url: https://api.deepseek.com
+  # 这里只填写保存密钥的环境变量名，禁止填写真实密钥、Token 或 Cookie。
+  # export AI_APK_TRACER_OPENAI_API_KEY="你的实际密钥"设置在环境变量中
+  api_key_env: AI_APK_TRACER_OPENAI_API_KEY
+  # OpenAI-compatible 服务端可识别的模型 ID；未配置时跳过 AI 阶段。
+  model: deepseek-v4-flash
+  # 全局代码外发开关，默认 true；设为 false 会跳过 AI，且不存在额外的逐任务授权步骤。
+  allow_external_code: true
+  # 旧 timeout_seconds 仅在未显式配置 read_timeout_seconds 时作为读取超时回退。
+  timeout_seconds: 120
+  connect_timeout_seconds: 10.0
+  read_timeout_seconds: 120.0
+  write_timeout_seconds: 30.0
+  pool_timeout_seconds: 10.0
+  # 单次 AI 请求 HTTP body 字节上限，超过则不发请求，当前候选标记失败但不熔断其他候选。
+  max_request_bytes: 524288
+  # 进程级、单次扫描及同 provider 的最大并发分别为 20/12/12。
+  # 三者需协同：candidate_concurrency 决定同时分析的候选数；provider_max_in_flight 是同
+  # base_url/model 的在途请求闸门（实际瓶颈）；max_concurrent 为进程级总闸门，须 >= 前两者。
+  # 若服务端频繁返回 429，应优先下调 provider_max_in_flight 而非 candidate_concurrency，
+  # 以保留候选级并行度；provider_max_cooldown_seconds 会在 429 时触发共享冷却。
+  max_concurrent: 20
+  candidate_concurrency: 12
+  # 同一 base_url/model/api_key_env 的进程级最大在途 HTTP 请求数。
+  provider_max_in_flight: 12
+  # 429 Retry-After 触发的共享服务冷却上限，单位秒。
+  provider_max_cooldown_seconds: 60.0
+  # 可恢复失败后的重试次数；retry_max_attempts 为 null 时总发送次数等于 retry_count+1。
+  retry_count: 1
+  retry_max_attempts: null
+  # 指数退避基础时长、单次等待上限和随机抖动上限，单位秒。
+  retry_base_seconds: 0.05
+  retry_max_seconds: 30.0
+  retry_jitter_seconds: 0.05
+  # run 内共享 ai-cache 的单条记录大小上限，单位字节；候选和恢复执行共享，但不会跨 run 共享。
+  cache_max_entry_bytes: 2097152
+  # preflight 协议严格度。默认 false：与普通分析同级，允许剥离 markdown 围栏/周边文本并在首次
+  # 校验失败后进入一次 repair；两者都失败才熔断。设为 true 时 preflight 只接受纯 JSON，一次不合格
+  # 立即熔断整个 run 的 AI 能力——仅在需要严格协议一致性验证时开启。
+  # 放宽只作用于"从噪音中提取 JSON"，不放宽字段校验：重复键检测与 additionalProperties=false 始终生效。
+  preflight_strict_protocol: false
+  # deepseek-v4-flash 思维模式默认开启：推理 token 会挤占 max_tokens，导致 content 为空或
+  # 被截断（实测 131/138 初始响应为空字符串，JSON 判定 100% 失败）。本项目所有 AI 输出都是
+  # 结构化 JSON 判定，无需思维过程，默认显式关闭。thinking_param 为请求参数名（deepseek
+  # 兼容层为 thinking，其他服务可用 reasoning_effort）。
+  disable_thinking: true
+  thinking_param: thinking
+  # 单次输出 token 上限；None 时沿用 context_budget.max_output_tokens（8000）。
+  # 仅在关闭思维链后仍需更大输出的场景覆盖。
+  max_output_tokens: null

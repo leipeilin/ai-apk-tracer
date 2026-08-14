@@ -1,0 +1,9 @@
+id: DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION
+version: 1.0.0
+protocol_version: 1.0.0
+component: receiver
+evidence_output: L1_L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "基于索引调用点保守解析 Context/ContextCompat overload、flags、权限与 action；动态表达式或未解析 Receiver 目标会保留 critical gap。"

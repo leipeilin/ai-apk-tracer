@@ -1,0 +1,121 @@
+{
+  "additionalProperties": false,
+  "description": "记录一次可复现 AI 调用所需的不可变摘要。",
+  "properties": {
+    "analysis_complete": {
+      "description": "被记录输出是否完整结束对应分析阶段",
+      "title": "Analysis Complete",
+      "type": "boolean"
+    },
+    "analysis_track": {
+      "description": "调用所属的分析阶段",
+      "enum": [
+        "preflight",
+        "l1_triage",
+        "l2_review",
+        "repair",
+        "finalization"
+      ],
+      "title": "Analysis Track",
+      "type": "string"
+    },
+    "input_schema_sha256": {
+      "description": "输入 Schema 原始字节的 SHA-256",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Schema Sha256",
+      "type": "string"
+    },
+    "model": {
+      "description": "模型服务端使用的模型 ID",
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "output_schema_sha256": {
+      "description": "输出 Schema 原始字节的 SHA-256",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Output Schema Sha256",
+      "type": "string"
+    },
+    "prompt_id": {
+      "description": "本次调用使用的 Prompt ID",
+      "enum": [
+        "preflight",
+        "l1-triage",
+        "l2-review",
+        "repair",
+        "finalization"
+      ],
+      "title": "Prompt Id",
+      "type": "string"
+    },
+    "prompt_version": {
+      "description": "精确加载且不允许回退的 Prompt 版本",
+      "maxLength": 160,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+      "title": "Prompt Version",
+      "type": "string"
+    },
+    "round": {
+      "description": "候选在该分析阶段中的轮次",
+      "maximum": 16,
+      "minimum": 0,
+      "title": "Round",
+      "type": "integer"
+    },
+    "status": {
+      "description": "本次逻辑调用的终态",
+      "enum": [
+        "completed",
+        "incomplete",
+        "failed",
+        "skipped"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "system_rendered_sha256": {
+      "description": "变量渲染后 system 文本 UTF-8 字节的 SHA-256",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "System Rendered Sha256",
+      "type": "string"
+    },
+    "system_template_sha256": {
+      "description": "system 模板原始字节的 SHA-256",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "System Template Sha256",
+      "type": "string"
+    },
+    "user_rendered_sha256": {
+      "description": "变量渲染后 user 文本 UTF-8 字节的 SHA-256",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "User Rendered Sha256",
+      "type": "string"
+    },
+    "user_template_sha256": {
+      "description": "user 模板原始字节的 SHA-256",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "User Template Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "prompt_id",
+    "prompt_version",
+    "analysis_track",
+    "round",
+    "model",
+    "status",
+    "system_template_sha256",
+    "user_template_sha256",
+    "system_rendered_sha256",
+    "user_rendered_sha256",
+    "input_schema_sha256",
+    "output_schema_sha256",
+    "analysis_complete"
+  ],
+  "title": "AITraceEntry",
+  "type": "object"
+}

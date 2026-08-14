@@ -1,0 +1,442 @@
+{
+  "$defs": {
+    "BlockingGap": {
+      "additionalProperties": false,
+      "description": "阻止模型形成可靠结论的证据缺口。",
+      "properties": {
+        "code": {
+          "description": "可稳定聚合的证据缺口代码",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Code",
+          "type": "string"
+        },
+        "critical": {
+          "description": "该缺口是否足以阻止形成支持或反驳裁决",
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "evidence_refs": {
+          "description": "用于界定缺口的已知证据引用",
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          },
+          "maxItems": 32,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "message": {
+          "description": "缺少何种事实以及它如何阻止结论",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "critical"
+      ],
+      "title": "BlockingGap",
+      "type": "object"
+    },
+    "ContextRequest": {
+      "additionalProperties": false,
+      "description": "请求补充一个有界且可解析的上下文目标。",
+      "properties": {
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "用于消歧目标的源码行号",
+          "title": "Line"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "用于消歧目标的工作区相对路径",
+          "title": "Path"
+        },
+        "reason": {
+          "description": "当前结论为何需要这份额外上下文",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "target": {
+          "description": "要补充的符号、组件或调用关系目标",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "type": {
+          "description": "编排器可解析的扩片目标类型",
+          "enum": [
+            "method",
+            "class",
+            "component",
+            "callers",
+            "callees",
+            "file_symbols"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "target",
+        "reason"
+      ],
+      "title": "ContextRequest",
+      "type": "object"
+    },
+    "EvidenceReference": {
+      "additionalProperties": false,
+      "description": "引用输入切片中可回查的确定性证据。",
+      "properties": {
+        "claim": {
+          "description": "该引用直接支持的、可回查的具体主张",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "context_id": {
+          "description": "被引用输入上下文的稳定 ID",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据结束行；缺省时表示单行或整个上下文",
+          "title": "End Line"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据起始行；必须落在引用上下文范围内",
+          "title": "Line"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据所在的工作区相对路径；缺省时仅按 context_id 回查",
+          "title": "Path"
+        }
+      },
+      "required": [
+        "context_id",
+        "claim"
+      ],
+      "title": "EvidenceReference",
+      "type": "object"
+    },
+    "ProposedEvidence": {
+      "additionalProperties": false,
+      "description": "L1 提议的 Source、Sink 或 Guard 位置，后续必须确定性回查。",
+      "properties": {
+        "context_id": {
+          "description": "提议位置所属输入上下文的稳定 ID",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "kind": {
+          "description": "提议证据的 Source、Sink、Guard 等语义类别",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Kind",
+          "type": "string"
+        },
+        "line": {
+          "description": "待确定性回查的源码行号",
+          "maximum": 10000000,
+          "minimum": 1,
+          "title": "Line",
+          "type": "integer"
+        },
+        "path": {
+          "description": "提议位置的工作区相对路径",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "为何该位置可能参与候选链路",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "symbol": {
+          "description": "提议位置对应的方法或字段符号",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Symbol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "context_id",
+        "path",
+        "line",
+        "kind",
+        "symbol",
+        "reason"
+      ],
+      "title": "ProposedEvidence",
+      "type": "object"
+    },
+    "ProposedPath": {
+      "additionalProperties": false,
+      "description": "L1 提议的 Source 到 Sink 路径索引。",
+      "properties": {
+        "method_ids": {
+          "description": "按调用顺序排列的候选方法链",
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Method Ids",
+          "type": "array"
+        },
+        "reason": {
+          "description": "该 Source 到 Sink 路径为何值得确定性闭链",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "sink_ref": {
+          "description": "suggested_sinks 中提议 Sink 的零基索引",
+          "maximum": 255,
+          "minimum": 0,
+          "title": "Sink Ref",
+          "type": "integer"
+        },
+        "source_ref": {
+          "description": "suggested_sources 中提议 Source 的零基索引",
+          "maximum": 255,
+          "minimum": 0,
+          "title": "Source Ref",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source_ref",
+        "sink_ref",
+        "reason"
+      ],
+      "title": "ProposedPath",
+      "type": "object"
+    },
+    "Uncertainty": {
+      "additionalProperties": false,
+      "description": "模型必须显式披露的不确定性。",
+      "properties": {
+        "impact": {
+          "description": "不确定性对裁决可靠性的影响等级",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Impact",
+          "type": "string"
+        },
+        "reason": {
+          "description": "无法由当前输入消除不确定性的原因",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "resolvable": {
+          "description": "追加受控上下文是否可能消除该不确定性",
+          "title": "Resolvable",
+          "type": "boolean"
+        },
+        "topic": {
+          "description": "不确定性所涉及的语义主题",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "reason",
+        "impact",
+        "resolvable"
+      ],
+      "title": "Uncertainty",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "L1 分诊提议；不得直接成为正式漏洞证据。",
+  "properties": {
+    "analysis_complete": {
+      "description": "当前 L1 阶段是否无需额外上下文即可结束；不代表漏洞成立",
+      "title": "Analysis Complete",
+      "type": "boolean"
+    },
+    "blocking_gaps": {
+      "description": "阻止本轮形成更强分诊结果的证据缺口",
+      "items": {
+        "$ref": "#/$defs/BlockingGap"
+      },
+      "maxItems": 64,
+      "title": "Blocking Gaps",
+      "type": "array"
+    },
+    "context_requests": {
+      "description": "仅当 analysis_complete=false 时请求的有界补充上下文",
+      "items": {
+        "$ref": "#/$defs/ContextRequest"
+      },
+      "maxItems": 32,
+      "title": "Context Requests",
+      "type": "array"
+    },
+    "evidence_refs": {
+      "description": "支撑摘要和分诊结果且可回查到输入上下文的引用",
+      "items": {
+        "$ref": "#/$defs/EvidenceReference"
+      },
+      "maxItems": 128,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "guard_observations": {
+      "description": "输入切片中观察到的潜在 Guard 位置",
+      "items": {
+        "$ref": "#/$defs/ProposedEvidence"
+      },
+      "maxItems": 64,
+      "title": "Guard Observations",
+      "type": "array"
+    },
+    "suggested_paths": {
+      "description": "连接已提议 Source 与 Sink 的候选路径",
+      "items": {
+        "$ref": "#/$defs/ProposedPath"
+      },
+      "maxItems": 64,
+      "title": "Suggested Paths",
+      "type": "array"
+    },
+    "suggested_sinks": {
+      "description": "待后续确定性回查的 Sink 提议",
+      "items": {
+        "$ref": "#/$defs/ProposedEvidence"
+      },
+      "maxItems": 64,
+      "title": "Suggested Sinks",
+      "type": "array"
+    },
+    "suggested_sources": {
+      "description": "待后续确定性回查的 Source 提议",
+      "items": {
+        "$ref": "#/$defs/ProposedEvidence"
+      },
+      "maxItems": 64,
+      "title": "Suggested Sources",
+      "type": "array"
+    },
+    "summary": {
+      "description": "基于当前确定性输入的 L1 分诊摘要",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "triage_disposition": {
+      "description": "潜在链路、仅暴露或证据不足的分诊结果；不是最终漏洞裁决",
+      "enum": [
+        "potential_chain",
+        "exposure_only",
+        "insufficient"
+      ],
+      "title": "Triage Disposition",
+      "type": "string"
+    },
+    "uncertainties": {
+      "description": "即使结束本轮仍需披露的不确定性",
+      "items": {
+        "$ref": "#/$defs/Uncertainty"
+      },
+      "maxItems": 64,
+      "title": "Uncertainties",
+      "type": "array"
+    }
+  },
+  "required": [
+    "summary",
+    "triage_disposition",
+    "analysis_complete"
+  ],
+  "title": "L1TriageOutput",
+  "type": "object"
+}

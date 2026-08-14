@@ -1,0 +1,48 @@
+{
+  "additionalProperties": false,
+  "description": "验证服务是否能遵守严格 JSON 输出协议的最小输入。",
+  "properties": {
+    "model": {
+      "description": "服务端模型 ID",
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "provider_kind": {
+      "const": "openai-compatible",
+      "description": "待预检的模型服务协议类型",
+      "title": "Provider Kind",
+      "type": "string"
+    },
+    "required_capabilities": {
+      "description": "服务必须逐项确认的严格协议能力",
+      "items": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 16,
+      "minItems": 1,
+      "title": "Required Capabilities",
+      "type": "array"
+    },
+    "response_format": {
+      "description": "本次预检要求服务遵守的结构化输出模式",
+      "enum": [
+        "json_object",
+        "json_schema"
+      ],
+      "title": "Response Format",
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider_kind",
+    "model",
+    "response_format",
+    "required_capabilities"
+  ],
+  "title": "PreflightInput",
+  "type": "object"
+}

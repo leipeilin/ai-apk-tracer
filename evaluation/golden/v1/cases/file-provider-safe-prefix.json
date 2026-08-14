@@ -1,0 +1,15 @@
+{
+  "id": "file-provider-safe-prefix",
+  "category": "file_provider",
+  "label": "negative",
+  "rule": "PROVIDER_URI_TO_FILE",
+  "component": "provider",
+  "entry": "openFile",
+  "operation": "canonical boundary with separator",
+  "expected": {"candidate": false, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "present_effective", "taxonomy": "file_read", "verdict": "suppress"},
+  "must_not_report": ["separator-aware canonical boundary as path traversal"],
+  "sources": [{"path": "synthetic/SafeProvider.java", "symbol": "Uri path", "kind": "provider_uri"}],
+  "sinks": [{"path": "synthetic/SafeProvider.java", "symbol": "ParcelFileDescriptor.open", "kind": "file_open"}],
+  "tags": ["false-positive", "file-provider", "safe-boundary"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_p0_closure.py::test_safe_file_boundary_is_not_verified_path_traversal_and_authority_tokens_conflict"}]
+}

@@ -1,0 +1,50 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "additionalProperties": false,
+  "description": "只携带无效输出与校验错误的格式修复输入。",
+  "properties": {
+    "invalid_output": {
+      "$ref": "#/$defs/JsonValue",
+      "description": "待做格式修复的原始解析结果；不得据此重新分析事实"
+    },
+    "output_schema_sha256": {
+      "description": "目标输出 Schema 原始字节的 SHA-256",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Output Schema Sha256",
+      "type": "string"
+    },
+    "target_output_model": {
+      "description": "必须恢复到的严格输出模型名称",
+      "enum": [
+        "PreflightOutput",
+        "L1TriageOutput",
+        "L2ReviewOutput",
+        "FinalizationOutput"
+      ],
+      "title": "Target Output Model",
+      "type": "string"
+    },
+    "validation_errors": {
+      "description": "目标模型校验失败的精简错误列表",
+      "items": {
+        "maxLength": 10000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Validation Errors",
+      "type": "array"
+    }
+  },
+  "required": [
+    "target_output_model",
+    "invalid_output",
+    "validation_errors",
+    "output_schema_sha256"
+  ],
+  "title": "RepairInput",
+  "type": "object"
+}

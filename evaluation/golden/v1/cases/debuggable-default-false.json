@@ -1,0 +1,15 @@
+{
+  "id": "debuggable-default-false",
+  "category": "manifest_defaults",
+  "label": "negative",
+  "rule": "APPLICATION_DEBUGGABLE",
+  "component": "application",
+  "entry": "manifest",
+  "operation": "debuggable omitted",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["omitted android:debuggable as true"],
+  "sources": [{"path": "synthetic/AndroidManifest.xml", "symbol": "application without debuggable", "kind": "manifest_default"}],
+  "sinks": [],
+  "tags": ["false-positive", "manifest", "default-value", "debuggable"],
+  "provenance": [{"kind": "design", "reference": "Android manifest debuggable default false regression"}]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "dynamic-receiver-flag-2",
+  "category": "dynamic_receiver",
+  "label": "positive",
+  "rule": "DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION",
+  "component": "receiver",
+  "entry": "register|onReceive",
+  "operation": "registerReceiver flag 2",
+  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "location_sensor_collection", "verdict": "report"},
+  "must_not_report": ["flag 2 as not exported"],
+  "sources": [{"path": "synthetic/DemoReceiver.java", "symbol": "registerReceiver(..., 2)", "kind": "external_registration"}],
+  "sinks": [{"path": "synthetic/DemoReceiver.java", "symbol": "onReceive effect", "kind": "sensitive_effect"}],
+  "tags": ["true-positive", "dynamic-receiver", "numeric-flag", "exported"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_dynamic_receiver_resolution.py::test_numeric_hex_bitwise_and_same_file_flag_constants"}]
+}

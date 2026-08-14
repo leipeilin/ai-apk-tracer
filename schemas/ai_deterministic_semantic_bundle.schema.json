@@ -1,0 +1,265 @@
+{
+  "$defs": {
+    "BlockingGap": {
+      "additionalProperties": false,
+      "description": "阻止模型形成可靠结论的证据缺口。",
+      "properties": {
+        "code": {
+          "description": "可稳定聚合的证据缺口代码",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Code",
+          "type": "string"
+        },
+        "critical": {
+          "description": "该缺口是否足以阻止形成支持或反驳裁决",
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "evidence_refs": {
+          "description": "用于界定缺口的已知证据引用",
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          },
+          "maxItems": 32,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "message": {
+          "description": "缺少何种事实以及它如何阻止结论",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "critical"
+      ],
+      "title": "BlockingGap",
+      "type": "object"
+    },
+    "DeterministicFact": {
+      "additionalProperties": false,
+      "description": "由确定性分析产生、允许模型引用但不得改写的事实。",
+      "properties": {
+        "evidence_refs": {
+          "description": "生成该事实时已回查的证据引用",
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "fact_type": {
+          "description": "确定性分析事实的稳定类别",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Fact Type",
+          "type": "string"
+        },
+        "statement": {
+          "description": "模型只可引用、不得改写的事实陈述",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fact_type",
+        "statement",
+        "evidence_refs"
+      ],
+      "title": "DeterministicFact",
+      "type": "object"
+    },
+    "EvidenceReference": {
+      "additionalProperties": false,
+      "description": "引用输入切片中可回查的确定性证据。",
+      "properties": {
+        "claim": {
+          "description": "该引用直接支持的、可回查的具体主张",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "context_id": {
+          "description": "被引用输入上下文的稳定 ID",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据结束行；缺省时表示单行或整个上下文",
+          "title": "End Line"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据起始行；必须落在引用上下文范围内",
+          "title": "Line"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据所在的工作区相对路径；缺省时仅按 context_id 回查",
+          "title": "Path"
+        }
+      },
+      "required": [
+        "context_id",
+        "claim"
+      ],
+      "title": "EvidenceReference",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "Uncertainty": {
+      "additionalProperties": false,
+      "description": "模型必须显式披露的不确定性。",
+      "properties": {
+        "impact": {
+          "description": "不确定性对裁决可靠性的影响等级",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Impact",
+          "type": "string"
+        },
+        "reason": {
+          "description": "无法由当前输入消除不确定性的原因",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "resolvable": {
+          "description": "追加受控上下文是否可能消除该不确定性",
+          "title": "Resolvable",
+          "type": "boolean"
+        },
+        "topic": {
+          "description": "不确定性所涉及的语义主题",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "reason",
+        "impact",
+        "resolvable"
+      ],
+      "title": "Uncertainty",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "传给模型的规范化确定性语义包。",
+  "properties": {
+    "blocking_gaps": {
+      "description": "进入本轮分析前已知的阻断性覆盖缺口",
+      "items": {
+        "$ref": "#/$defs/BlockingGap"
+      },
+      "maxItems": 64,
+      "title": "Blocking Gaps",
+      "type": "array"
+    },
+    "candidate": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "description": "待分析候选的规范化确定性字段",
+      "title": "Candidate",
+      "type": "object"
+    },
+    "contexts": {
+      "description": "预算内、带稳定 context_id 的方法或文件上下文切片",
+      "items": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "type": "object"
+      },
+      "maxItems": 256,
+      "title": "Contexts",
+      "type": "array"
+    },
+    "manifest_facts": {
+      "description": "由 Manifest 解析器确认的不可改写事实",
+      "items": {
+        "$ref": "#/$defs/DeterministicFact"
+      },
+      "maxItems": 128,
+      "title": "Manifest Facts",
+      "type": "array"
+    },
+    "semantic_facts": {
+      "description": "由规则和索引确认的不可改写语义事实",
+      "items": {
+        "$ref": "#/$defs/DeterministicFact"
+      },
+      "maxItems": 256,
+      "title": "Semantic Facts",
+      "type": "array"
+    },
+    "uncertainties": {
+      "description": "确定性阶段已识别但尚未消除的不确定性",
+      "items": {
+        "$ref": "#/$defs/Uncertainty"
+      },
+      "maxItems": 64,
+      "title": "Uncertainties",
+      "type": "array"
+    }
+  },
+  "required": [
+    "candidate"
+  ],
+  "title": "DeterministicSemanticBundle",
+  "type": "object"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "fragment-external-class-name",
+  "category": "fragment_reflection",
+  "label": "positive",
+  "rule": "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+  "component": "activity",
+  "entry": "onCreate",
+  "operation": "Fragment.instantiate",
+  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "ui_navigation", "verdict": "report"},
+  "must_not_report": ["fixed fragment class as external input"],
+  "sources": [{"path": "synthetic/RouterActivity.java", "symbol": "external className extra", "kind": "intent"}],
+  "sinks": [{"path": "synthetic/RouterActivity.java", "symbol": "Fragment.instantiate", "kind": "fragment_reflection"}],
+  "tags": ["true-positive", "fragment", "reflection", "class-name"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_component_specialized_analysis.py::test_detector_fragment_external_class_positive_fixed_class_negative"}]
+}

@@ -1,0 +1,9 @@
+id: CLEARTEXT_TRAFFIC_ALLOWED
+version: 1.0.0
+protocol_version: 1.0.0
+component: manifest
+evidence_output: L1
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "usesCleartextTraffic=true + targetSdk>=28（明文流量放开）"

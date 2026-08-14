@@ -1,0 +1,15 @@
+{
+  "id": "started-service-stopself-event",
+  "category": "started_service",
+  "label": "positive",
+  "rule": "SERVICE_START_COMMAND_TO_SENSITIVE_SINK",
+  "component": "service",
+  "entry": "onStartCommand",
+  "operation": "event branch to stopSelf",
+  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "connection_session_control", "verdict": "report"},
+  "must_not_report": ["reachable stopSelf without event binding as closed chain"],
+  "sources": [{"path": "synthetic/CommandService.java", "symbol": "Intent action event", "kind": "service_event"}],
+  "sinks": [{"path": "synthetic/CommandService.java", "symbol": "stopSelf", "kind": "service_lifecycle"}],
+  "tags": ["true-positive", "service", "event-binding", "stopSelf"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_component_specialized_analysis.py::test_started_service_action_controls_effect_branch"}, {"kind": "test", "reference": "backend/tests/test_p0_closure.py::test_fqcn_resolution_keeps_same_named_services_separate"}]
+}

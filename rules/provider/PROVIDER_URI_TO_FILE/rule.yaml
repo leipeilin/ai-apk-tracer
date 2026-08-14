@@ -1,0 +1,9 @@
+id: PROVIDER_URI_TO_FILE
+version: 1.0.0
+protocol_version: 1.0.0
+component: provider
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "路径规范化与固定映射需人工复核。"

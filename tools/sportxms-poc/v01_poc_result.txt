@@ -1,0 +1,43 @@
+--------- beginning of main
+07-31 23:37:09.078 25114 25114 D SportXmsPOC: ===== 测试应用身份 =====
+07-31 23:37:09.078 25114 25114 D SportXmsPOC: 包名: com.example.sportxms.poc
+07-31 23:37:09.078 25114 25114 D SportXmsPOC: UID: 10312
+07-31 23:37:09.078 25114 25114 D SportXmsPOC: 是否系统应用: false
+07-31 23:37:09.079 25114 25114 D SportXmsPOC: 签名: SHA-256: 请用 keytool -printcert -jarfile 核实
+07-31 23:37:09.079 25114 25114 D SportXmsPOC: 
+07-31 23:37:09.079 25114 25114 D SportXmsPOC: ===== 目标应用身份 =====
+07-31 23:37:09.079 25114 25114 D SportXmsPOC: 包名: com.mi.health
+07-31 23:37:09.079 25114 25114 D SportXmsPOC: UID: 10279
+07-31 23:37:09.079 25114 25114 D SportXmsPOC: 
+07-31 23:37:09.079 25114 25114 D SportXmsPOC: ========== 开始验证 ==========
+07-31 23:37:09.080 25114 25114 D SportXmsPOC: 正在绑定 com.mi.health/com.xiaomi.fitness.sport_xms.SportXmsService
+07-31 23:37:09.081 25114 25114 D SportXmsPOC: bindService 返回: true
+07-31 23:37:09.119 25114 25114 D SportXmsPOC: ---------- 绑定成功 ----------
+07-31 23:37:09.121 25114 25114 D SportXmsPOC: onServiceConnected 收到 Binder: android.os.BinderProxy@9a6fbf6
+07-31 23:37:09.124 25114 25114 D SportXmsPOC: 目标组件: ComponentInfo{com.mi.health/com.xiaomi.fitness.sport_xms.SportXmsService}
+07-31 23:37:09.126 25114 25114 D SportXmsPOC: Binder descriptor: com.xiaomi.fitness.sport_xms.launch.ISportXmsApi
+07-31 23:37:09.127 25114 25114 D SportXmsPOC: 描述符匹配: ISportXmsApi 确认
+07-31 23:37:09.131 25114 25114 D SportXmsPOC: 
+07-31 23:37:09.132 25114 25114 D SportXmsPOC: ===== transaction 11: isDeviceConnected() =====
+07-31 23:37:09.135 25114 25114 D SportXmsPOC: transact(11) 返回: true
+07-31 23:37:09.135 25114 25114 D SportXmsPOC: 结果: isDeviceConnected = true
+07-31 23:37:09.136 25114 25114 D SportXmsPOC: 
+07-31 23:37:09.136 25114 25114 D SportXmsPOC: ===== transaction 14: getDeviceBattery() =====
+07-31 23:37:09.137 25114 25114 D SportXmsPOC: transact(14) 返回: true
+07-31 23:37:09.137 25114 25114 D SportXmsPOC: 结果: getDeviceBattery = "76"
+07-31 23:37:09.137 25114 25114 D SportXmsPOC: 
+07-31 23:37:09.138 25114 25114 D SportXmsPOC: ===== transaction 16: hasOngoingSport() =====
+07-31 23:37:09.139 25114 25114 D SportXmsPOC: transact(16) 返回: true
+07-31 23:37:09.139 25114 25114 D SportXmsPOC: 结果: hasOngoingSport = false
+07-31 23:37:09.140 25114 25114 D SportXmsPOC: 
+07-31 23:37:09.140 25114 25114 D SportXmsPOC: ===== transaction 23: getDeviceInfo() =====
+07-31 23:37:09.142 25114 25114 D SportXmsPOC: transact(23) 返回: true
+07-31 23:37:09.142 25114 25114 D SportXmsPOC: 结果: DeviceInfo
+07-31 23:37:09.143 25114 25114 D SportXmsPOC:   name  = 小米手环10 NFC版   
+07-31 23:37:09.145 25114 25114 D SportXmsPOC:   model = miwear.watch.o66nfc
+07-31 23:37:09.145 25114 25114 D SportXmsPOC:   did   = 983635152
+07-31 23:37:09.146 25114 25114 D SportXmsPOC:   >>> 设备唯一标识(DID)已泄露
+07-31 23:37:09.148 25114 25114 D SportXmsPOC: 
+07-31 23:37:09.148 25114 25114 D SportXmsPOC: ========== 验证完成 ==========
+07-31 23:37:09.149 25114 25114 D SportXmsPOC: 如果以上 transaction 均无 SecurityException，
+07-31 23:37:09.151 25114 25114 D SportXmsPOC: 则证明 SportXmsService 的 AIDL 接口缺少调用者鉴权。

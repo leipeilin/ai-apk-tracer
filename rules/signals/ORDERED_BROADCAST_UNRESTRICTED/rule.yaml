@@ -1,0 +1,10 @@
+id: ORDERED_BROADCAST_UNRESTRICTED
+version: 1.0.0
+protocol_version: 1.0.0
+component: receiver
+evidence_output: L1_auxiliary
+builtin: true
+auxiliary: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "未限制有序广播必须关联敏感数据或安全结果才能升级。"

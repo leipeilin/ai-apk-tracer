@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-apk-tracer.local/schemas/config.schema.json",
+  "title": "AI-APK-Tracer config",
+  "type": "object",
+  "required": ["analysis_platform_api", "source_analysis", "rule_runtime", "storage", "ai", "funnel", "context_budget"],
+  "properties": {
+    "app_name": {"type": "string", "description": "应用显示名称。"},
+    "app_version": {"type": "string", "description": "扫描引擎语义版本。"},
+    "host": {"const": "127.0.0.1", "description": "本地服务固定回环监听地址。"},
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "本地 HTTP 服务端口。"},
+    "log_level": {"type": "string", "description": "Python 日志等级。"},
+    "database_path": {"type": "string", "minLength": 1, "description": "任务元数据 SQLite 路径；相对路径以工作区为基准。"},
+    "analysis_platform_api": {"type": "integer", "minimum": 1, "default": 36, "description": "静态分析 Android 导出、权限及动态 Receiver 语义时采用的平台 API。"},
+    "source_analysis": {
+      "type": "object",
+      "required": ["enabled", "decompiler"],
+      "properties": {
+        "enabled": {"type": "boolean", "description": "是否执行 DEX 反编译伪源码分析。"},
+        "decompiler": {"type": "string", "minLength": 1, "default": "jadx", "description": "反编译适配器标识。"},
+        "jadx_path": {"type": "string", "minLength": 1, "default": "jadx", "description": "JADX 可执行文件名或绝对路径。"},
+        "smali_fallback": {"type": "boolean", "default": true, "description": "伪源码不可用时是否允许 Smali 兜底能力。"},
+        "max_file_size_kb": {"type": "integer", "default": 512, "description": "普通源码文件进入结构索引的大小上限，单位 KiB。"},
+        "component_max_file_size_kb": {"type": "integer", "default": 2048, "description": "Manifest 显式组件源码进入结构索引的大小上限，单位 KiB。"},
+        "decompile_timeout_seconds": {"type": "integer", "minimum": 1, "default": 600, "description": "JADX 单次执行墙钟超时，单位秒。"}
+      },
+      "additionalProperties": true
+    },
+    "rule_runtime": {
+      "type": "object",
+      "required": ["wall_timeout_seconds", "stdout_max_mb", "stderr_max_mb"],
+      "properties": {
+        "max_concurrency": {"type": "integer", "minimum": 1, "default": 2, "description": "规则子进程最大并发数。"},
+        "wall_timeout_seconds": {"type": "integer", "default": 120, "description": "父进程强制执行的单规则墙钟超时，单位秒。"},
+        "cpu_timeout_seconds": {"type": "integer", "default": 60, "description": "单规则 CPU 时间限制，单位秒。"},
+        "memory_mb": {"type": "integer", "default": 1024, "description": "单规则地址空间上限，单位 MiB。"},
+        "stdout_max_mb": {"type": "integer", "default": 10, "description": "单规则标准输出上限，单位 MiB。"},
+        "stderr_max_mb": {"type": "integer", "default": 10, "description": "单规则标准错误上限，单位 MiB。"},
+        "workdir_max_mb": {"type": "integer", "default": 256, "description": "单规则可写工作目录上限，单位 MiB。"}
+      },
+      "additionalProperties": true
+    },
+    "storage": {
+      "type": "object",
+      "required": ["data_root"],
+      "properties": {
+        "data_root": {"type": "string", "minLength": 1, "description": "本地扫描任务及敏感产物根目录。"},
+        "retention": {"const": "manual", "description": "任务保留策略；MVP 仅支持人工清理。"},
+        "stale_tmp_hours": {"type": "integer", "default": 24, "description": "孤立临时目录可清理年龄，单位小时。"},
+        "max_apk_size_mb": {"type": "integer", "default": 512, "description": "上传 APK 压缩包大小上限，单位 MiB。"},
+        "max_zip_entries": {"type": "integer", "default": 100000, "description": "APK ZIP 条目数上限。"},
+        "max_uncompressed_mb": {"type": "integer", "default": 2048, "description": "APK 声明解压总大小上限，单位 MiB。"}
+      },
+      "additionalProperties": true
+    },
+    "ai": {
+      "type": "object",
+      "required": ["enabled", "allow_external_code"],
+      "properties": {
+        "enabled": {"type": "boolean", "description": "是否启用 OpenAI-compatible 深度分析。"},
+        "base_url": {"type": ["string", "null"], "description": "OpenAI-compatible API 基础地址。"},
+        "api_key_env": {"type": "string", "minLength": 1, "default": "AI_APK_TRACER_OPENAI_API_KEY", "description": "保存模型密钥的环境变量名，不是密钥本身。"},
+        "model": {"type": ["string", "null"], "description": "模型服务端可识别的模型 ID。"},
+        "allow_external_code": {"type": "boolean", "description": "是否允许向模型服务发送候选事实和方法级代码切片。"},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "default": 120, "description": "兼容字段；仅在未显式配置 read_timeout_seconds 时作为读取超时回退。"},
+        "connect_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 600, "default": 10.0, "description": "建立模型连接的超时，单位秒。"},
+        "read_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600, "default": 120.0, "description": "读取模型响应的显式超时，单位秒；优先于 timeout_seconds。"},
+        "write_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 600, "default": 30.0, "description": "写入模型请求的超时，单位秒。"},
+        "pool_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 600, "default": 10.0, "description": "等待 HTTP 连接池的超时，单位秒。"},
+        "max_request_bytes": {"type": "integer", "minimum": 1, "default": 524288, "description": "单次 AI 请求 HTTP body 字节上限。"},
+        "max_concurrent": {"type": "integer", "minimum": 1, "maximum": 64, "default": 6, "description": "进程级 AI HTTP 最大并发数。"},
+        "candidate_concurrency": {"type": "integer", "minimum": 1, "maximum": 32, "default": 4, "description": "单次扫描并发分析候选数上限。"},
+        "provider_max_in_flight": {"type": "integer", "minimum": 1, "maximum": 64, "default": 4, "description": "同一模型服务进程级最大在途请求数。"},
+        "provider_max_cooldown_seconds": {"type": "number", "minimum": 0, "maximum": 3600, "default": 60.0, "description": "模型服务共享限流冷却上限，单位秒。"},
+        "retry_count": {"type": "integer", "minimum": 0, "maximum": 10, "default": 1, "description": "可恢复失败后的兼容重试次数。"},
+        "retry_max_attempts": {"type": ["integer", "null"], "minimum": 1, "maximum": 11, "default": null, "description": "最大总 HTTP 发送次数；null 时等于 retry_count + 1。"},
+        "retry_base_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 0.05, "description": "指数退避基础时长，单位秒。"},
+        "retry_max_seconds": {"type": "number", "minimum": 0, "maximum": 600, "default": 30.0, "description": "单次重试等待上限，单位秒。"},
+        "retry_jitter_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 0.05, "description": "单次重试随机抖动上限，单位秒。"},
+        "cache_max_entry_bytes": {"type": "integer", "minimum": 1024, "maximum": 16777216, "default": 2097152, "description": "run 内共享 AI 缓存的单条记录大小上限。"}
+      },
+      "additionalProperties": true
+    },
+    "funnel": {
+      "type": "object",
+      "required": ["max_l1_candidates_per_run", "min_l1_risk_score"],
+      "properties": {
+        "max_l1_candidates_per_run": {"type": "integer", "minimum": 0, "default": 20, "description": "单次任务最多进入 AI 的 L1 代表候选数。"},
+        "min_l1_risk_score": {"type": "integer", "minimum": 0, "maximum": 100, "default": 80, "description": "L1 候选进入 AI 分诊的最低风险分。"}
+      },
+      "additionalProperties": false
+    },
+    "context_budget": {
+      "type": "object",
+      "required": [
+        "max_input_tokens", "max_output_tokens", "max_requests_per_candidate",
+        "max_expansions_per_candidate", "max_candidate_wall_seconds", "max_requests_per_run",
+        "max_contexts_per_slice", "max_additions_per_request", "max_context_bytes_per_slice",
+        "max_lines_per_context", "max_methods_per_class_request"
+      ],
+      "properties": {
+        "max_input_tokens": {"type": "integer", "minimum": 256, "default": 24000, "description": "单次 AI 输入的确定性近似 token 上限。"},
+        "max_output_tokens": {"type": "integer", "minimum": 1, "default": 3000, "description": "作为模型 API max_tokens 发送的单次输出预算。"},
+        "max_requests_per_candidate": {"type": "integer", "minimum": 1, "default": 4, "description": "单候选逻辑 AI 调用上限，不按 transport HTTP 重试计数。"},
+        "max_expansions_per_candidate": {"type": "integer", "minimum": 0, "default": 2, "description": "单候选上下文扩片次数上限。"},
+        "max_candidate_wall_seconds": {"type": "integer", "minimum": 1, "default": 300, "description": "单候选阶段墙钟预算；到期后不发起后续调用，但不取消在途请求。"},
+        "max_requests_per_run": {"type": "integer", "minimum": 1, "default": 140, "description": "单次扫描逻辑 AI 调用上限，不按 transport HTTP 重试计数。"},
+        "max_contexts_per_slice": {"type": "integer", "minimum": 1, "default": 24, "description": "送入单次 AI 请求的上下文数量上限。"},
+        "max_additions_per_request": {"type": "integer", "minimum": 1, "default": 8, "description": "单轮上下文扩片最多新增的上下文数量。"},
+        "max_context_bytes_per_slice": {"type": "integer", "minimum": 1, "default": 96000, "description": "单个切片中 contexts 的确定性 UTF-8 JSON 字节上限。"},
+        "max_lines_per_context": {"type": "integer", "minimum": 8, "default": 240, "description": "单个代码上下文保留的最大行数。"},
+        "max_methods_per_class_request": {"type": "integer", "minimum": 1, "default": 8, "description": "单次 class 或 component 扩片最多加入的方法数。"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

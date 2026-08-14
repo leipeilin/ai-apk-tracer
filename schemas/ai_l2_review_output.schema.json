@@ -1,0 +1,538 @@
+{
+  "$defs": {
+    "BlockingGap": {
+      "additionalProperties": false,
+      "description": "阻止模型形成可靠结论的证据缺口。",
+      "properties": {
+        "code": {
+          "description": "可稳定聚合的证据缺口代码",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Code",
+          "type": "string"
+        },
+        "critical": {
+          "description": "该缺口是否足以阻止形成支持或反驳裁决",
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "evidence_refs": {
+          "description": "用于界定缺口的已知证据引用",
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          },
+          "maxItems": 32,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "message": {
+          "description": "缺少何种事实以及它如何阻止结论",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "critical"
+      ],
+      "title": "BlockingGap",
+      "type": "object"
+    },
+    "ContextRequest": {
+      "additionalProperties": false,
+      "description": "请求补充一个有界且可解析的上下文目标。",
+      "properties": {
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "用于消歧目标的源码行号",
+          "title": "Line"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "用于消歧目标的工作区相对路径",
+          "title": "Path"
+        },
+        "reason": {
+          "description": "当前结论为何需要这份额外上下文",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "target": {
+          "description": "要补充的符号、组件或调用关系目标",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "type": {
+          "description": "编排器可解析的扩片目标类型",
+          "enum": [
+            "method",
+            "class",
+            "component",
+            "callers",
+            "callees",
+            "file_symbols"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "target",
+        "reason"
+      ],
+      "title": "ContextRequest",
+      "type": "object"
+    },
+    "EvidenceReference": {
+      "additionalProperties": false,
+      "description": "引用输入切片中可回查的确定性证据。",
+      "properties": {
+        "claim": {
+          "description": "该引用直接支持的、可回查的具体主张",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Claim",
+          "type": "string"
+        },
+        "context_id": {
+          "description": "被引用输入上下文的稳定 ID",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Context Id",
+          "type": "string"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据结束行；缺省时表示单行或整个上下文",
+          "title": "End Line"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据起始行；必须落在引用上下文范围内",
+          "title": "Line"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据所在的工作区相对路径；缺省时仅按 context_id 回查",
+          "title": "Path"
+        }
+      },
+      "required": [
+        "context_id",
+        "claim"
+      ],
+      "title": "EvidenceReference",
+      "type": "object"
+    },
+    "ExploitabilityAssessment": {
+      "additionalProperties": false,
+      "description": "vuln-judgment-prompt §3：可利用性逐项评估。",
+      "properties": {
+        "authorization_absent": {
+          "description": "是否存在权限/签名级授权保护；无保护时为 True",
+          "title": "Authorization Absent",
+          "type": "boolean"
+        },
+        "entry_reachable": {
+          "description": "攻击者入口是否可达（组件 exported/隐式 intent 可触发）",
+          "title": "Entry Reachable",
+          "type": "boolean"
+        },
+        "exfiltration_channel": {
+          "description": "执行结果回到攻击者的跨进程通道状态；静态无法证明时用 unverified",
+          "enum": [
+            "confirmed",
+            "unverified",
+            "absent"
+          ],
+          "title": "Exfiltration Channel",
+          "type": "string"
+        },
+        "guard_bypassed": {
+          "description": "是否存在且被绕过的 Guard；无 Guard 时为 False",
+          "title": "Guard Bypassed",
+          "type": "boolean"
+        },
+        "propagation_proven": {
+          "description": "攻击者输入是否沿同值/同对象/key-slot 传播到 Sink",
+          "title": "Propagation Proven",
+          "type": "boolean"
+        },
+        "sink_effective": {
+          "description": "Sink 是否真实执行了敏感操作而非空操作",
+          "title": "Sink Effective",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "entry_reachable",
+        "propagation_proven",
+        "sink_effective",
+        "guard_bypassed",
+        "authorization_absent",
+        "exfiltration_channel"
+      ],
+      "title": "ExploitabilityAssessment",
+      "type": "object"
+    },
+    "HarmAssessment": {
+      "additionalProperties": false,
+      "description": "vuln-judgment-prompt §3：危害影响评估。",
+      "properties": {
+        "impact_target": {
+          "description": "受影响的资产/数据/能力范围描述",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Impact Target",
+          "type": "string"
+        },
+        "impact_type": {
+          "description": "危害类型；无法具体描述时用 other 并说明",
+          "enum": [
+            "data_disclosure",
+            "data_tamper",
+            "dos",
+            "privilege_escalation",
+            "device_control",
+            "financial",
+            "other"
+          ],
+          "title": "Impact Type",
+          "type": "string"
+        },
+        "server_confirmation_required": {
+          "default": false,
+          "description": "影响是否依赖服务端/硬件/动态确认，静态阶段无法定论",
+          "title": "Server Confirmation Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "impact_type",
+        "impact_target"
+      ],
+      "title": "HarmAssessment",
+      "type": "object"
+    },
+    "ImpactVector": {
+      "additionalProperties": false,
+      "description": "vuln-judgment-prompt §3：CVSS 因子级描述（AI 不输出分数，分数由确定性映射器计算）。",
+      "properties": {
+        "attack_complexity": {
+          "description": "利用复杂度",
+          "enum": [
+            "low",
+            "high"
+          ],
+          "title": "Attack Complexity",
+          "type": "string"
+        },
+        "availability": {
+          "description": "可用性影响",
+          "enum": [
+            "none",
+            "partial",
+            "total"
+          ],
+          "title": "Availability",
+          "type": "string"
+        },
+        "confidentiality": {
+          "description": "机密性影响",
+          "enum": [
+            "none",
+            "partial",
+            "total"
+          ],
+          "title": "Confidentiality",
+          "type": "string"
+        },
+        "integrity": {
+          "description": "完整性影响",
+          "enum": [
+            "none",
+            "partial",
+            "total"
+          ],
+          "title": "Integrity",
+          "type": "string"
+        },
+        "privileges_required": {
+          "description": "利用所需前置权限",
+          "enum": [
+            "none",
+            "low",
+            "high"
+          ],
+          "title": "Privileges Required",
+          "type": "string"
+        },
+        "user_interaction": {
+          "description": "是否需要用户交互",
+          "enum": [
+            "none",
+            "required"
+          ],
+          "title": "User Interaction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "confidentiality",
+        "integrity",
+        "availability",
+        "privileges_required",
+        "attack_complexity",
+        "user_interaction"
+      ],
+      "title": "ImpactVector",
+      "type": "object"
+    },
+    "Uncertainty": {
+      "additionalProperties": false,
+      "description": "模型必须显式披露的不确定性。",
+      "properties": {
+        "impact": {
+          "description": "不确定性对裁决可靠性的影响等级",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Impact",
+          "type": "string"
+        },
+        "reason": {
+          "description": "无法由当前输入消除不确定性的原因",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "resolvable": {
+          "description": "追加受控上下文是否可能消除该不确定性",
+          "title": "Resolvable",
+          "type": "boolean"
+        },
+        "topic": {
+          "description": "不确定性所涉及的语义主题",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "reason",
+        "impact",
+        "resolvable"
+      ],
+      "title": "Uncertainty",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "L2 对候选的严格证据裁决。",
+  "properties": {
+    "analysis_complete": {
+      "description": "当前 L2 阶段是否无需额外上下文即可结束；与 verdict 值相互独立",
+      "title": "Analysis Complete",
+      "type": "boolean"
+    },
+    "blocking_gaps": {
+      "description": "阻止形成确定裁决的证据缺口",
+      "items": {
+        "$ref": "#/$defs/BlockingGap"
+      },
+      "maxItems": 64,
+      "title": "Blocking Gaps",
+      "type": "array"
+    },
+    "confidence_rationale": {
+      "default": "",
+      "description": "为既有 confidence_tier 补充的一句理由；不改动 confidence_tier 本身",
+      "maxLength": 2000,
+      "minLength": 0,
+      "title": "Confidence Rationale",
+      "type": "string"
+    },
+    "confidence_tier": {
+      "description": "裁决受当前证据支撑的置信等级",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence Tier",
+      "type": "string"
+    },
+    "context_requests": {
+      "description": "仅在尚未结束复核时请求的有界补充上下文",
+      "items": {
+        "$ref": "#/$defs/ContextRequest"
+      },
+      "maxItems": 32,
+      "title": "Context Requests",
+      "type": "array"
+    },
+    "evidence_refs": {
+      "description": "直接支撑 verdict 与 guard_status 的输入证据引用",
+      "items": {
+        "$ref": "#/$defs/EvidenceReference"
+      },
+      "maxItems": 128,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "exploitability": {
+      "$ref": "#/$defs/ExploitabilityAssessment",
+      "description": "可利用性逐项评估（§3）"
+    },
+    "flaw_holds": {
+      "description": "缺陷是否成立：存在真实调用点的缺陷，非 import/注释/声明/共现",
+      "title": "Flaw Holds",
+      "type": "boolean"
+    },
+    "guard_status": {
+      "description": "已观察 Guard 对候选链路的实际约束状态",
+      "enum": [
+        "absent",
+        "present_effective",
+        "present_bypassable",
+        "present_partial",
+        "unknown"
+      ],
+      "title": "Guard Status",
+      "type": "string"
+    },
+    "harm": {
+      "$ref": "#/$defs/HarmAssessment",
+      "description": "危害影响评估（§3）"
+    },
+    "impact_vector": {
+      "$ref": "#/$defs/ImpactVector",
+      "description": "CVSS 因子级描述；不得输出数值分数"
+    },
+    "reachability_class": {
+      "description": "可达性分级（§5）",
+      "enum": [
+        "remote",
+        "local",
+        "supply_chain",
+        "device"
+      ],
+      "title": "Reachability Class",
+      "type": "string"
+    },
+    "reverse_exclusion": {
+      "description": "逐项对照反向排除红线清单（§4），说明为何不算漏洞或为何排除；supports_candidate 时须给出",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 32,
+      "title": "Reverse Exclusion",
+      "type": "array"
+    },
+    "summary": {
+      "description": "对确定性闭链候选的证据复核摘要",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "uncertainties": {
+      "description": "裁决必须同时披露的剩余不确定性",
+      "items": {
+        "$ref": "#/$defs/Uncertainty"
+      },
+      "maxItems": 64,
+      "title": "Uncertainties",
+      "type": "array"
+    },
+    "verdict": {
+      "description": "当前证据支持、反驳或不足以解决候选的裁决；不得输出其他枚举",
+      "enum": [
+        "supports_candidate",
+        "refutes_candidate",
+        "unresolved"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "required": [
+    "summary",
+    "verdict",
+    "confidence_tier",
+    "guard_status",
+    "flaw_holds",
+    "exploitability",
+    "harm",
+    "reachability_class",
+    "impact_vector",
+    "analysis_complete"
+  ],
+  "title": "L2ReviewOutput",
+  "type": "object"
+}

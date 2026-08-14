@@ -1,0 +1,10 @@
+id: PROVIDER_LOOSE_URI_MATCH
+version: 1.0.0
+protocol_version: 1.0.0
+component: provider
+evidence_output: L1_auxiliary
+builtin: true
+auxiliary: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "宽松 URI 匹配仅作加权辅助信号。"

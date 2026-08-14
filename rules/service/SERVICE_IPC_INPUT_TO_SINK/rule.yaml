@@ -1,0 +1,9 @@
+id: SERVICE_IPC_INPUT_TO_SINK
+version: 1.0.0
+protocol_version: 1.0.0
+component: service
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "跨进程数据流和共享 Guard 需深度复核。"

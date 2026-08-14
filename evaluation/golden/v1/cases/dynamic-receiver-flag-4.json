@@ -1,0 +1,15 @@
+{
+  "id": "dynamic-receiver-flag-4",
+  "category": "dynamic_receiver",
+  "label": "negative",
+  "rule": "DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION",
+  "component": "receiver",
+  "entry": "register|onReceive",
+  "operation": "registerReceiver flag 4",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["flag 4 receiver as externally reachable"],
+  "sources": [{"path": "synthetic/DemoReceiver.java", "symbol": "registerReceiver(..., 4)", "kind": "private_registration"}],
+  "sinks": [],
+  "tags": ["false-positive", "dynamic-receiver", "numeric-flag", "not-exported"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_dynamic_receiver_resolution.py::test_numeric_hex_bitwise_and_same_file_flag_constants"}]
+}

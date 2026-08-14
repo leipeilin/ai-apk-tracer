@@ -1,0 +1,28 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "additionalProperties": false,
+  "description": "格式修复阶段返回的单个候选 JSON 对象。",
+  "properties": {
+    "analysis_complete": {
+      "description": "格式修复是否已完整结束；不表示重新完成语义分析",
+      "title": "Analysis Complete",
+      "type": "boolean"
+    },
+    "repaired_output": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "description": "仅修正结构和类型后的目标输出对象",
+      "title": "Repaired Output",
+      "type": "object"
+    }
+  },
+  "required": [
+    "repaired_output",
+    "analysis_complete"
+  ],
+  "title": "RepairOutput",
+  "type": "object"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "empty-provider-mutation",
+  "category": "provider_mutation",
+  "label": "negative",
+  "rule": "PROVIDER_UNAUTHORIZED_MUTATION",
+  "component": "provider",
+  "entry": "delete|insert|update",
+  "operation": "constant-return-or-unsupported",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "unprotected", "guard": "absent", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["constant return as mutation", "UnsupportedOperationException as mutation"],
+  "sources": [{"path": "synthetic/EmptyProvider.java", "symbol": "provider entry", "kind": "component_entry"}],
+  "sinks": [],
+  "tags": ["false-positive", "provider", "no-effect"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_manual_review_regressions.py::test_provider_constant_and_unsupported_mutations_are_not_effects"}]
+}

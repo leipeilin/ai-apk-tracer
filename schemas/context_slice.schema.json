@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-apk-tracer.local/schemas/context_slice.schema.json",
+  "title": "Evidence-linked code context slice",
+  "type": "object",
+  "required": ["schema_version", "builder_version", "slice_id", "candidate", "contexts", "edges", "guards", "request_history", "unresolved", "limitations"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "builder_version": {"type": "string"},
+    "slice_id": {"type": "string", "pattern": "^slice_[0-9a-f]{20}$"},
+    "candidate": {"type": "object"},
+    "contexts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["context_id", "kind", "path", "start_line", "end_line", "reason", "content_sha256", "content"],
+        "properties": {
+          "context_id": {"type": "string"},
+          "kind": {"enum": ["method", "code_window", "class_summary", "file_symbols", "manifest_component"]},
+          "path": {"type": "string"},
+          "start_line": {"type": "integer", "minimum": 0},
+          "end_line": {"type": "integer", "minimum": 0},
+          "reason": {"type": "string"},
+          "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "content": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "edges": {"type": "array", "items": {"type": "object"}},
+    "guards": {"type": "array", "items": {"type": "object"}},
+    "request_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "target", "symbol_key", "path", "line", "relation", "reason_code", "reason"],
+        "properties": {
+          "type": {"type": "string"},
+          "target": {"type": "string"},
+          "index_method_id": {"type": ["string", "null"]},
+          "canonical_method_target": {"type": ["string", "null"]},
+          "symbol_key": {"type": ["string", "null"]},
+          "descriptor": {"type": ["string", "null"]},
+          "path": {"type": ["string", "null"]},
+          "line": {"type": ["integer", "null"], "minimum": 1},
+          "relation": {"type": ["string", "null"]},
+          "reason_code": {"type": "string"},
+          "reason": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "unresolved": {"type": "array", "items": {"type": "object"}},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "omitted_contexts": {"type": "array", "items": {"type": "object"}},
+    "context_budget": {
+      "type": "object",
+      "required": ["status", "limits", "usage", "omitted_context_count"],
+      "properties": {
+        "status": {"enum": ["within_budget", "limited"]},
+        "limits": {
+          "type": "object",
+          "required": ["max_contexts", "max_additions", "max_bytes"],
+          "properties": {
+            "max_contexts": {"type": "integer", "minimum": 1},
+            "max_additions": {"type": "integer", "minimum": 1},
+            "max_bytes": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "usage": {
+          "type": "object",
+          "required": ["contexts", "additions", "bytes"],
+          "properties": {
+            "contexts": {"type": "integer", "minimum": 0},
+            "additions": {"type": "integer", "minimum": 0},
+            "bytes": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "omitted_context_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "policy_version": {"type": "string"},
+    "budget": {
+      "type": "object",
+      "required": ["status", "policy_version", "estimated_input_tokens", "original_context_count", "retained_context_count", "omitted_context_count"],
+      "properties": {
+        "status": {"enum": ["within_budget", "trimmed", "cannot_trim_safely"]},
+        "policy_version": {"type": "string"},
+        "estimated_input_tokens": {"type": "integer", "minimum": 0},
+        "original_context_count": {"type": "integer", "minimum": 0},
+        "retained_context_count": {"type": "integer", "minimum": 0},
+        "omitted_context_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,33 @@
+{
+  "summary": "响应仅遗漏完成状态。",
+  "verdict": "unresolved",
+  "confidence_tier": "low",
+  "guard_status": "unknown",
+  "evidence_refs": [],
+  "blocking_gaps": [],
+  "uncertainties": [],
+  "context_requests": [],
+  "flaw_holds": true,
+  "exploitability": {
+    "entry_reachable": true,
+    "propagation_proven": true,
+    "sink_effective": true,
+    "guard_bypassed": false,
+    "authorization_absent": true,
+    "exfiltration_channel": "confirmed"
+  },
+  "harm": {
+    "impact_type": "data_disclosure",
+    "impact_target": "本地敏感数据",
+    "server_confirmation_required": false
+  },
+  "reachability_class": "remote",
+  "impact_vector": {
+    "confidentiality": "partial",
+    "integrity": "none",
+    "availability": "none",
+    "privileges_required": "none",
+    "attack_complexity": "low",
+    "user_interaction": "none"
+  }
+}

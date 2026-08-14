@@ -1,0 +1,15 @@
+{
+  "id": "unregistered-activity",
+  "category": "manifest_reachability",
+  "label": "negative",
+  "rule": "ACTIVITY_EXPORTED_NO_PERMISSION",
+  "component": "activity",
+  "entry": "onCreate",
+  "operation": "class absent from manifest",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["unregistered Activity class as exported component"],
+  "sources": [{"path": "synthetic/UnusedActivity.java", "symbol": "Activity subclass", "kind": "unregistered_class"}],
+  "sinks": [],
+  "tags": ["false-positive", "manifest", "reachability", "unregistered"],
+  "provenance": [{"kind": "design", "reference": "阶段0 manifest 注册边界回归项"}]
+}

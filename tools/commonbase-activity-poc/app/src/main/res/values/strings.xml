@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CommonBasePOC</string>
+    <string name="accessibility_description">读取屏幕文本用于漏洞验证</string>
+</resources>

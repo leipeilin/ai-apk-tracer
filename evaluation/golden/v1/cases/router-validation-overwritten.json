@@ -1,0 +1,15 @@
+{
+  "id": "router-validation-overwritten",
+  "category": "dataflow",
+  "label": "positive",
+  "rule": "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+  "component": "activity",
+  "entry": "onCreate",
+  "operation": "putExtras overwrite then loadUrl",
+  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "data_disclosure", "verdict": "report"},
+  "must_not_report": ["validation remains effective after same-slot overwrite"],
+  "sources": [{"path": "synthetic/RouterActivity.java", "symbol": "Intent extras override", "kind": "intent"}],
+  "sinks": [{"path": "synthetic/RouterActivity.java", "symbol": "WebView.loadUrl", "kind": "webview"}],
+  "tags": ["true-positive", "validation", "slot-overwrite", "router"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_component_specialized_analysis.py::test_router_put_extras_overwrite_is_the_only_validation_bypass"}]
+}

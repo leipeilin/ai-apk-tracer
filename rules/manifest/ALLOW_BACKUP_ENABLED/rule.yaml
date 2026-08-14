@@ -1,0 +1,9 @@
+id: ALLOW_BACKUP_ENABLED
+version: 1.0.0
+protocol_version: 1.0.0
+component: manifest
+evidence_output: L1
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "allowBackup=true + targetSdk>=23（数据可提取）"

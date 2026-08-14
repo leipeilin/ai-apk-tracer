@@ -1,0 +1,324 @@
+# Prompt 只按精确 id/version 解析，不存在隐式版本 fallback。
+# template_sha256 与 schema_sha256 均计算对应文件提交后原始 bytes 的 SHA-256。
+registry_version: '1'
+prompts:
+- id: preflight
+  version: 1.0.0
+  system_file: preflight/1.0.0/system.md
+  user_file: preflight/1.0.0/user.md
+  allowed_placeholders:
+  - preflight_input_json
+  input_model: PreflightInput
+  output_model: PreflightOutput
+  input_schema_file: ai_preflight_input.schema.json
+  output_schema_file: ai_preflight_output.schema.json
+  template_sha256:
+    system: 6402dfc182506a6514a3d697e479a6195e27539c34d49adef950e7eff176cda5
+    user: 4b60a4eadf7a2c0773270a9ebe838414122880930aada3ae7e3ca20db530b315
+  schema_sha256:
+    input: 20e6b01f782673ebe9a4d24852e43a8c3cd24f6eb023f6901d3855a3e76ff772
+    output: 81cd1bb3f62fe25f0483d408b82183f93297ba3632d207d55889471c1b38d998
+- id: preflight
+  version: 1.0.1
+  system_file: preflight/1.0.1/system.md
+  user_file: preflight/1.0.1/user.md
+  allowed_placeholders:
+  - preflight_input_json
+  input_model: PreflightInput
+  output_model: PreflightOutput
+  input_schema_file: ai_preflight_input.schema.json
+  output_schema_file: ai_preflight_output.schema.json
+  template_sha256:
+    system: 4286e043ea4e2dfd93975990567a26330993f89d815b14340ac6613819a9d85b
+    user: 4b60a4eadf7a2c0773270a9ebe838414122880930aada3ae7e3ca20db530b315
+  schema_sha256:
+    input: 20e6b01f782673ebe9a4d24852e43a8c3cd24f6eb023f6901d3855a3e76ff772
+    output: 81cd1bb3f62fe25f0483d408b82183f93297ba3632d207d55889471c1b38d998
+- id: l1-triage
+  version: 2.0.4
+  system_file: l1-triage/2.0.4/system.md
+  user_file: l1-triage/2.0.4/user.md
+  allowed_placeholders:
+  - l1_triage_input_json
+  input_model: L1TriageInput
+  output_model: L1TriageOutput
+  input_schema_file: ai_l1_triage_input.schema.json
+  output_schema_file: ai_l1_triage_output.schema.json
+  template_sha256:
+    system: 9a10b44d3318715adb894b0dcef8d8d129158a93c1380363895b07f3326fe8f0
+    user: 5c259ae9fa690f3487108f606e026e0e0887e780e35c5dde6181e097f2bd6980
+  schema_sha256:
+    input: 1cb468a38ba41066b3ceee6b2a598206290e09bb493c7b551f69f653532adea3
+    output: 8949c9a81d337ab6014abdd93e095cc3fdbc7edf9a2f2a51e873dbc8a33027c7
+- id: l1-triage
+  version: 2.0.3
+  system_file: l1-triage/2.0.3/system.md
+  user_file: l1-triage/2.0.3/user.md
+  allowed_placeholders:
+  - l1_triage_input_json
+  input_model: L1TriageInput
+  output_model: L1TriageOutput
+  input_schema_file: ai_l1_triage_input.schema.json
+  output_schema_file: ai_l1_triage_output.schema.json
+  template_sha256:
+    system: 918fc7efe78addc3eef9423138cf53c1116cafaf79c40a965fcfd7c49eb63cce
+    user: 5c259ae9fa690f3487108f606e026e0e0887e780e35c5dde6181e097f2bd6980
+  schema_sha256:
+    input: 1cb468a38ba41066b3ceee6b2a598206290e09bb493c7b551f69f653532adea3
+    output: 8949c9a81d337ab6014abdd93e095cc3fdbc7edf9a2f2a51e873dbc8a33027c7
+- id: l1-triage
+  version: 2.0.2
+  system_file: l1-triage/2.0.2/system.md
+  user_file: l1-triage/2.0.2/user.md
+  allowed_placeholders:
+  - l1_triage_input_json
+  input_model: L1TriageInput
+  output_model: L1TriageOutput
+  input_schema_file: ai_l1_triage_input.schema.json
+  output_schema_file: ai_l1_triage_output.schema.json
+  template_sha256:
+    system: fe1f2af2336307bf3c58e01f139e49c78570e3843953613d98af0f861063607d
+    user: 5c259ae9fa690f3487108f606e026e0e0887e780e35c5dde6181e097f2bd6980
+  schema_sha256:
+    input: 1cb468a38ba41066b3ceee6b2a598206290e09bb493c7b551f69f653532adea3
+    output: 8949c9a81d337ab6014abdd93e095cc3fdbc7edf9a2f2a51e873dbc8a33027c7
+- id: l1-triage
+  version: 2.0.1
+  system_file: l1-triage/2.0.1/system.md
+  user_file: l1-triage/2.0.1/user.md
+  allowed_placeholders:
+  - l1_triage_input_json
+  input_model: L1TriageInput
+  output_model: L1TriageOutput
+  input_schema_file: ai_l1_triage_input.schema.json
+  output_schema_file: ai_l1_triage_output.schema.json
+  template_sha256:
+    system: 81d3a1b8bcb8a7e96aef34dfafc61e975b1d085649f18c0748e053e0404352b3
+    user: 5c259ae9fa690f3487108f606e026e0e0887e780e35c5dde6181e097f2bd6980
+  schema_sha256:
+    input: 1cb468a38ba41066b3ceee6b2a598206290e09bb493c7b551f69f653532adea3
+    output: 8949c9a81d337ab6014abdd93e095cc3fdbc7edf9a2f2a51e873dbc8a33027c7
+- id: l2-review
+  version: 2.0.1
+  system_file: l2-review/2.0.1/system.md
+  user_file: l2-review/2.0.1/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: ffca07d1048e00ec2336a46207c79c6a1f9b67389a5c34664ce2b5d347550b13
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
+  version: 2.0.3
+  system_file: l2-review/2.0.3/system.md
+  user_file: l2-review/2.0.3/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: 2ca36c07814fb920d722d2c57ff5d2ef8894768ed3bb553d0c27cb2da986cd06
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
+  version: 2.0.4
+  system_file: l2-review/2.0.4/system.md
+  user_file: l2-review/2.0.4/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: 162dedb9408401c66ff408392f4f0c37b1cdde347dc22abd33392d51020ee5f1
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
+  version: 3.0.0
+  system_file: l2-review/3.0.0/system.md
+  user_file: l2-review/3.0.0/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: 5a3834cca2c2cd5f4e02c40cbb26bf644b769cb4c07b3eb737e09f3b7d631e3c
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
+  version: 3.0.1
+  system_file: l2-review/3.0.1/system.md
+  user_file: l2-review/3.0.1/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: e3026753b257c2ee5251a501fe3c8375f64a967a0e0eb5f238be97f56a9b8b04
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
+  version: 3.0.4
+  system_file: l2-review/3.0.4/system.md
+  user_file: l2-review/3.0.4/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: 2b0eb89726d9e56e85a7493ee2d88007bce8467e4fb4acc3cbea40e3b342e0b2
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
+  version: 3.0.5
+  system_file: l2-review/3.0.5/system.md
+  user_file: l2-review/3.0.5/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: 71d18235bdb2c359e42a477ee1fbc0689457ce32d467fc01bdd405c581973c06
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
+  version: 3.0.3
+  system_file: l2-review/3.0.3/system.md
+  user_file: l2-review/3.0.3/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: b747fdcddeb00a4e024ad534a08dc585fa38b7c87feb1703c2e855abca60d044
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
+  version: 3.0.2
+  system_file: l2-review/3.0.2/system.md
+  user_file: l2-review/3.0.2/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: e61eb31156ec0b4817c5fb83e5b48f1aaa7c86560d69a4cdc8f254a1e2c57b6c
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: l2-review
+  version: 2.0.2
+  system_file: l2-review/2.0.2/system.md
+  user_file: l2-review/2.0.2/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: ea7ebe420d96dc4463797d5587d3c057caeef7f2ea6a9287febe9ac8871f344f
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+- id: finalization
+  version: 1.0.3
+  system_file: finalization/1.0.3/system.md
+  user_file: finalization/1.0.3/user.md
+  allowed_placeholders:
+  - finalization_input_json
+  input_model: FinalizationInput
+  output_model: FinalizationOutput
+  input_schema_file: ai_finalization_input.schema.json
+  output_schema_file: ai_finalization_output.schema.json
+  template_sha256:
+    system: f8ed1050668dcb89b4f3acb3b71d738e58af9b6534c12fdc5a301567fcabd4c2
+    user: 8c8726df05dab208859d117efe83b070f08c62546373b16ace43935af2b41e52
+  schema_sha256:
+    input: adf90e596fadf6de73407362a884798bd20e53a761602889454e0df2a1020895
+    output: 5f5e15e3037583022bd478ccc4f3bf9db6d5aacc4e67445d0e7b42cab5afc4ba
+- id: finalization
+  version: 1.0.2
+  system_file: finalization/1.0.2/system.md
+  user_file: finalization/1.0.2/user.md
+  allowed_placeholders:
+  - finalization_input_json
+  input_model: FinalizationInput
+  output_model: FinalizationOutput
+  input_schema_file: ai_finalization_input.schema.json
+  output_schema_file: ai_finalization_output.schema.json
+  template_sha256:
+    system: c887e8ee77acfa1ec7ea221d5892fd385046d61dff82e18acd34faae7f72dee0
+    user: 8c8726df05dab208859d117efe83b070f08c62546373b16ace43935af2b41e52
+  schema_sha256:
+    input: adf90e596fadf6de73407362a884798bd20e53a761602889454e0df2a1020895
+    output: 5f5e15e3037583022bd478ccc4f3bf9db6d5aacc4e67445d0e7b42cab5afc4ba
+- id: repair
+  version: 1.0.1
+  system_file: repair/1.0.1/system.md
+  user_file: repair/1.0.1/user.md
+  allowed_placeholders:
+  - repair_input_json
+  input_model: RepairInput
+  output_model: RepairOutput
+  input_schema_file: ai_repair_input.schema.json
+  output_schema_file: ai_repair_output.schema.json
+  template_sha256:
+    system: ac507a90ac24d85267f2141746c8d58015dbf9ce33a4b238e3cf6820ea47c146
+    user: e65a65f0531ba0a0ca92e2048b8c09a05935a5b70edf0651a588b01cd6ac5dea
+  schema_sha256:
+    input: 60cce3f0e6ab6c48ea8a37898d7b18396866d5d99925252098e95858ac3f589d
+    output: 0e580ab0af82a278757f6d7c8c70591d4d3e7b86ded85666d0701665cb2b6772
+- id: finalization
+  version: 1.0.1
+  system_file: finalization/1.0.1/system.md
+  user_file: finalization/1.0.1/user.md
+  allowed_placeholders:
+  - finalization_input_json
+  input_model: FinalizationInput
+  output_model: FinalizationOutput
+  input_schema_file: ai_finalization_input.schema.json
+  output_schema_file: ai_finalization_output.schema.json
+  template_sha256:
+    system: bf9cd9d54d43c284b5d2d1d7934c985c49b132acc8be86778c610ff9e120aad5
+    user: 8c8726df05dab208859d117efe83b070f08c62546373b16ace43935af2b41e52
+  schema_sha256:
+    input: adf90e596fadf6de73407362a884798bd20e53a761602889454e0df2a1020895
+    output: 5f5e15e3037583022bd478ccc4f3bf9db6d5aacc4e67445d0e7b42cab5afc4ba

@@ -1,0 +1,9 @@
+id: PROVIDER_UNAUTHORIZED_QUERY
+version: 1.0.0
+protocol_version: 1.0.0
+component: provider
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "数据敏感度、行列白名单和归属校验需人工复核。"

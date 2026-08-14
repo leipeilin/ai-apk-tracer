@@ -1,0 +1,15 @@
+{
+  "id": "file-provider-unsafe-prefix",
+  "category": "file_provider",
+  "label": "positive",
+  "rule": "PROVIDER_URI_TO_FILE",
+  "component": "provider",
+  "entry": "openFile|delete",
+  "operation": "canonical startsWith root without separator",
+  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "present_bypassable", "taxonomy": "file_mutation", "verdict": "report"},
+  "must_not_report": ["unsafe prefix check as safe boundary"],
+  "sources": [{"path": "synthetic/UnsafeFileProvider.java", "symbol": "Uri path", "kind": "provider_uri"}],
+  "sinks": [{"path": "synthetic/UnsafeFileProvider.java", "symbol": "file open or delete", "kind": "file_mutation"}],
+  "tags": ["true-positive", "file-provider", "unsafe-prefix"],
+  "provenance": [{"kind": "test", "reference": "backend/tests/test_manual_review_regressions.py::test_remote_binder_and_unsafe_file_provider_specialists"}]
+}

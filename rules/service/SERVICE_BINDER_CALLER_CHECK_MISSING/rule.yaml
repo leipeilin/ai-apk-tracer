@@ -1,0 +1,9 @@
+id: SERVICE_BINDER_CALLER_CHECK_MISSING
+version: 1.0.0
+protocol_version: 1.0.0
+component: service
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "负向 Guard 搜索不能单独晋级 L3。"

@@ -1,0 +1,9 @@
+id: WEBVIEW_JS_BRIDGE_EXPOSED
+version: 1.0.0
+protocol_version: 1.0.0
+component: webview
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "addJavascriptInterface 注入 JS 桥，攻击者可通过 WebView 内 JS 调用任意导出方法"

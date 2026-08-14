@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CommonBaseActivity Fragment 注入 POC"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="正在加载目标 APK..."
+            android:textSize="12sp"
+            android:paddingBottom="8dp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#CCCCCC"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="— 目标 Activity —"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <Button
+            android:id="@+id/btnBaseUI"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="baseui.common.CommonBaseActivity"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnDeviceSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="devicesettings.base.CommonBaseActivity"
+            android:textSize="11sp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#CCCCCC"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="— 测试 Fragment —"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <Button
+            android:id="@+id/btnWearGuide"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="GuideWearInstructionFragment (无副作用)" />
+
+        <Button
+            android:id="@+id/btnWebView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="GuideWebViewFragment (URL校验)" />
+
+        <Button
+            android:id="@+id/btnDebug"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="DeviceInstallAPPDebugFragment (调试页)" />
+
+        <Button
+            android:id="@+id/btnEmergency"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="EmergencyContactListFragment (联系人)" />
+
+        <Button
+            android:id="@+id/btnStepData"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="StepFragment (步数健康数据)" />
+
+        <Button
+            android:id="@+id/btnSleepData"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="SleepFragment (睡眠健康数据)" />
+
+        <Button
+            android:id="@+id/btnHeartRateData"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="HrmFragment (心率健康数据)" />
+
+        <Button
+            android:id="@+id/btnWeightData"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="WeightFragment (体重健康数据)" />
+
+        <Button
+            android:id="@+id/btnCustom"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="自定义 Fragment 类名" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#CCCCCC"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="— 组合攻击：AccessibilityService 读取屏幕 —"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <Button
+            android:id="@+id/btnOpenAccessibility"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1. 开启无障碍服务（跳转设置）" />
+
+        <Button
+            android:id="@+id/btnReadScreen"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2. 打开联系人页面并读取屏幕数据" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#CCCCCC"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btnNullParam"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="发送空 fragment_param (验证可达性)" />
+
+        <Button
+            android:id="@+id/btnInvalidClass"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="发送无效类名 (com.fake.NotExist)" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#CCCCCC"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="— 日志 —"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <Button
+            android:id="@+id/btnClear"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="清除日志" />
+
+        <TextView
+            android:id="@+id/logView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:background="#F5F5F5"
+            android:padding="8dp"
+            android:textIsSelectable="true"
+            android:scrollbars="vertical"
+            android:minHeight="200dp" />
+
+    </LinearLayout>
+</ScrollView>

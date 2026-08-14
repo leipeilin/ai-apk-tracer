@@ -1,0 +1,10 @@
+fastapi==0.115.12
+uvicorn==0.34.2
+pydantic-settings==2.9.1
+python-multipart==0.0.20
+PyYAML==6.0.2
+httpx==0.28.1
+pytest==8.3.5
+
+# External CLI requirement (not installable by pip): Android SDK Platform-Tools >=35.0.2
+# Installed under .venv/android-sdk/platform-tools and linked into .venv/bin.

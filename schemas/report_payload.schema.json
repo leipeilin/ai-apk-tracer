@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-apk-tracer.local/schemas/report_payload.schema.json",
+  "title": "Report payload",
+  "type": "object",
+  "required": [
+    "title",
+    "app_version",
+    "finding_status",
+    "analysis_status",
+    "analysis_summary",
+    "coverage_gaps",
+    "blocking_gaps",
+    "dynamic_validation_status",
+    "environment",
+    "description",
+    "evidence_refs",
+    "chain_steps",
+    "trust_boundary",
+    "impact",
+    "poc",
+    "poc_guide",
+    "poc_result",
+    "remediation"
+  ],
+  "properties": {
+    "pipeline_version": {"type": "string"},
+    "schema_versions": {"type": "object"},
+    "prompt_version": {"type": ["string", "null"]},
+    "status_layers": {"type": "object"},
+    "deterministic_facts": {"type": "object"},
+    "ai_observation": {
+      "type": "object",
+      "properties": {
+        "analysis_track": {"type": ["string", "null"]},
+        "triage_disposition": {"type": ["string", "null"]},
+        "summary": {"type": ["string", "null"]},
+        "stop_reason": {"type": ["string", "null"]},
+        "cache_hit": {"type": ["boolean", "null"]}
+      }
+    },
+    "external_status": {"type": "string"},
+    "title": {"type": "string", "minLength": 1},
+    "app_version": {
+      "type": "object",
+      "required": ["version_code", "version_name", "compile_sdk_version", "compile_sdk_codename", "package"]
+    },
+    "finding_status": {"enum": ["自动候选（旧状态）", "待AI复核", "待人工复核", "AI确认误报", "人工确认误报", "已确认"]},
+    "analysis_status": {
+      "enum": ["rule_only", "ai_skipped", "ai_failed", "ai_incomplete", "ai_partial", "ai_completed", "human_confirmed"]
+    },
+    "analysis_summary": {
+      "type": "object",
+      "required": [
+        "analysis_incomplete",
+        "jadx_status",
+        "jadx_error_count",
+        "skipped_file_count",
+        "rule_failure_count",
+        "rule_total_count",
+        "rule_component_gap_count",
+        "ai_status",
+        "ai_success_count",
+        "ai_failure_count",
+        "ai_skip_reason",
+        "candidates_checked",
+        "deterministic_chains_closed",
+        "gradeable_findings"
+      ]
+    },
+    "coverage_gaps": {"type": "array"},
+    "blocking_gaps": {"type": "array"},
+    "dynamic_validation_status": {"enum": ["未执行", "成功", "失败", "结果不确定"]},
+    "environment": {"type": "string"},
+    "description": {"type": "string"},
+    "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "chain_steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type", "text", "evidence_id", "status"],
+        "properties": {"status": {"enum": ["fact", "candidate", "inference", "missing"]}}
+      }
+    },
+    "trust_boundary": {
+      "type": "object",
+      "required": ["original_boundary", "proxy_component", "attacker_permission", "bypass_reason"]
+    },
+    "impact": {
+      "type": "object",
+      "required": ["severity", "confirmed", "capabilities", "consequences", "sink_evidence", "prerequisites", "scope", "limitations"],
+      "properties": {
+        "capabilities": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "consequences": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "sink_evidence": {"type": "array", "items": {"type": "string"}},
+        "prerequisites": {"type": "array", "items": {"type": "string"}},
+        "scope": {"type": "array", "items": {"type": "string"}},
+        "limitations": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "poc": {"type": "string"},
+    "poc_guide": {
+      "type": "object",
+      "required": ["commands", "notes", "expected"],
+      "properties": {
+        "commands": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "notes": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "expected": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    },
+    "poc_result": {"type": "string"},
+    "remediation": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

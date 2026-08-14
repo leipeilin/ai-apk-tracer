@@ -1,0 +1,354 @@
+{
+  "$defs": {
+    "AICacheDescriptor": {
+      "additionalProperties": false,
+      "description": "只含不可逆摘要和版本元数据的 AI 缓存身份描述。",
+      "properties": {
+        "analysis_track": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "缓存输出所属分析阶段",
+          "title": "Analysis Track"
+        },
+        "analyzer_version": {
+          "description": "分析器实现版本",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Analyzer Version",
+          "type": "string"
+        },
+        "base_url_hash": {
+          "description": "规范化模型端点的不可逆摘要",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Base Url Hash",
+          "type": "string"
+        },
+        "budget_policy_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "影响请求与缓存复用的预算策略摘要",
+          "title": "Budget Policy Hash"
+        },
+        "context_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "参与分析的上下文摘要",
+          "title": "Context Hash"
+        },
+        "descriptor_version": {
+          "const": "1",
+          "description": "缓存身份描述符格式版本",
+          "title": "Descriptor Version",
+          "type": "string"
+        },
+        "fact_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "候选确定性事实摘要",
+          "title": "Fact Hash"
+        },
+        "input_schema_hash": {
+          "description": "输入 Schema 原始字节摘要",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Input Schema Hash",
+          "type": "string"
+        },
+        "input_slice_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "原始上下文切片摘要",
+          "title": "Input Slice Hash"
+        },
+        "max_output_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "请求中发送的最大输出 token 数",
+          "title": "Max Output Tokens"
+        },
+        "model": {
+          "description": "产生缓存输出的模型 ID",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "model_input_hash": {
+          "description": "规范化模型输入对象摘要",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Input Hash",
+          "type": "string"
+        },
+        "output_model_name": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "用于校验缓存输出的严格模型名称",
+          "title": "Output Model Name"
+        },
+        "output_model_version": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "严格输出模型的协议版本",
+          "title": "Output Model Version"
+        },
+        "output_schema_hash": {
+          "description": "输出 Schema 原始字节摘要",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Output Schema Hash",
+          "type": "string"
+        },
+        "prompt_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "组合 Prompt 模板身份摘要",
+          "title": "Prompt Hash"
+        },
+        "prompt_id": {
+          "description": "产生输出的 Prompt ID",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Prompt Id",
+          "type": "string"
+        },
+        "prompt_version": {
+          "description": "产生输出的精确 Prompt 版本",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "protocol_version": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "结构化输出协议版本",
+          "title": "Protocol Version"
+        },
+        "provider_kind": {
+          "description": "模型服务协议类型",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+          "title": "Provider Kind",
+          "type": "string"
+        },
+        "request_hash": {
+          "description": "实际模型请求载荷摘要",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Hash",
+          "type": "string"
+        },
+        "schema_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "组合输入输出 Schema 身份摘要",
+          "title": "Schema Hash"
+        },
+        "scope_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "候选稳定作用域摘要",
+          "title": "Scope Hash"
+        },
+        "system_template_hash": {
+          "description": "system 模板原始字节摘要",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "System Template Hash",
+          "type": "string"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "请求中影响模型输出的 temperature",
+          "title": "Temperature"
+        },
+        "user_template_hash": {
+          "description": "user 模板原始字节摘要",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "User Template Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "descriptor_version",
+        "provider_kind",
+        "base_url_hash",
+        "model",
+        "analyzer_version",
+        "prompt_id",
+        "prompt_version",
+        "system_template_hash",
+        "user_template_hash",
+        "input_schema_hash",
+        "output_schema_hash",
+        "model_input_hash",
+        "request_hash"
+      ],
+      "title": "AICacheDescriptor",
+      "type": "object"
+    },
+    "JsonValue": {}
+  },
+  "additionalProperties": false,
+  "description": "任务本地 AI 缓存的严格、版本化持久化记录。",
+  "properties": {
+    "accepted_output": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "description": "已通过严格输出模型校验的 JSON 对象",
+      "title": "Accepted Output",
+      "type": "object"
+    },
+    "accepted_output_hash": {
+      "description": "规范化 accepted_output 的 SHA-256",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Accepted Output Hash",
+      "type": "string"
+    },
+    "created_at": {
+      "description": "首次写入该缓存记录的带时区时间",
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "descriptor": {
+      "$ref": "#/$defs/AICacheDescriptor",
+      "description": "决定缓存是否可复用的完整身份描述"
+    },
+    "schema_version": {
+      "const": "1",
+      "description": "缓存持久化记录格式版本",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "updated_at": {
+      "description": "最近更新该缓存记录的带时区时间",
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "descriptor",
+    "accepted_output",
+    "accepted_output_hash",
+    "created_at",
+    "updated_at"
+  ],
+  "title": "AICacheEntry",
+  "type": "object"
+}

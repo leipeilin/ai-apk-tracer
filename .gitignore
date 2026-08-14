@@ -1,0 +1,27 @@
+.ai-apk-tracer/
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.DS_Store
+.env
+frontend/node_modules/
+frontend/dist/
+manual-verification-report/
+apk/
+docs/updates/
+
+# 编辑器/工具本地目录
+.idea/
+.vscode/
+.codebuddy/
+.workbuddy/
+
+# 构建产物与临时文件
+tools/*/build/
+tools/*/app/build/
+*.zip
+tmp_*.py
+.venv/
+

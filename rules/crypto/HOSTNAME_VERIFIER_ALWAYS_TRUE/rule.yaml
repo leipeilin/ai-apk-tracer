@@ -1,0 +1,9 @@
+id: HOSTNAME_VERIFIER_ALWAYS_TRUE
+version: 1.0.0
+protocol_version: 1.0.0
+component: crypto
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "HostnameVerifier.verify 恒真返回，域名校验被绕过 → MITM"
