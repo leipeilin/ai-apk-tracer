@@ -17,6 +17,7 @@ from shared.receiver_registration import parse_receiver_registrations
 RULE_META = {
     "ACTIVITY_EXPORTED_NO_PERMISSION": ("activity", "L1", "informational"),
     "ACTIVITY_INTENT_TO_SENSITIVE_SINK": ("activity", "L2", "medium"),
+    "ACTIVITY_EXTERNAL_ROUTE_INJECTION": ("activity", "L2", "medium"),
     "SERVICE_EXPORTED_NO_PERMISSION": ("service", "L1", "informational"),
     "SERVICE_BINDER_CALLER_CHECK_MISSING": ("service", "L2", "high"),
     "SERVICE_IPC_INPUT_TO_SINK": ("service", "L2", "high"),
@@ -104,9 +105,47 @@ SENSITIVE_BINDER_METHOD_RE = re.compile(
 )
 COMPONENT_FLOW_ENTRIES = {
     "ACTIVITY_INTENT_TO_SENSITIVE_SINK": {"onCreate", "onNewIntent"},
+    "ACTIVITY_EXTERNAL_ROUTE_INJECTION": {"onCreate", "onNewIntent"},
     "SERVICE_IPC_INPUT_TO_SINK": {"onStartCommand", "onBind"},
     "RECEIVER_INPUT_TO_SINK": {"onReceive"},
 }
+# P2-6（2026-08-15）：外部可控路由注入。
+#
+# 与 ACTIVITY_INTENT_TO_SENSITIVE_SINK 的本质差异是 **sink 语义**：
+# 后者追"值流到达已知敏感 API"，因此应用自定义的路由 wrapper（如
+# BasePluginFragment.Fasade.startNewPluginActivity）不在 effect 表内、永远不成 sink；
+# 且 dataflow.classify_operation_taxonomy 对 resolved_target 非空的调用直接返回
+# is_effect=False（要求进入真实 callee），插件 Activity 不在 manifest 组件索引中、
+# resolve 失败即丢弃。
+#
+# v04 真机验证成立的漏洞（extra_splashinfo → startNewPluginActivity → ACTION_ROOT
+# 隐式路由启动任意插件 + 全量 extras 注入）正是因此漏检。本规则把 sink 改为
+# 「路由能力」：外部输入决定了 **启动目标** 或被 **全量透传** 进目标组件。
+ROUTE_TARGET_METHODS = re.compile(
+    r"\b(?:setClassName|setComponent|setClass|setAction|setPackage)\s*\(",
+)
+# 全量 extras 透传：攻击者可注入任意 key，是 v04 危害的核心。
+# 两种形态都要覆盖：
+#   ① putExtras/replaceExtras 整体搬运一个 Bundle；
+#   ② 以**非字面量键名**逐条写入（v04 真实形态是
+#      `for (key : json.keys()) bundle.putString(key, ...)`——键名同样由攻击者 JSON 决定）。
+# 形态 ② 只认首参非字符串字面量的 put*，在基线 APK 上命中 1157/244752 个方法（0.47%）。
+ROUTE_BULK_EXTRAS_METHODS = re.compile(r"\b(?:putExtras|replaceExtras)\s*\(")
+ROUTE_DYNAMIC_KEY_PUT = re.compile(
+    r"\b(?:putString|putExtra|putInt|putBoolean|putLong|putFloat|putDouble"
+    r"|putSerializable|putParcelable|putCharSequence|putStringArrayList)\s*\(\s*"
+    r"(?![\"'])[A-Za-z_$][\w$.\[\]()]*\s*,",
+)
+ROUTE_LAUNCH_METHODS = re.compile(
+    # 平台 API + 应用自定义路由 wrapper。后者是本规则存在的理由：v04 实证成立的漏洞
+    # 走的是 BasePluginFragment.Fasade.startNewPluginActivity，不在平台 effect 表内，
+    # 只匹配平台 API 会原样漏掉它（实测基线 APK 上确实漏检）。
+    # 泛化 start*Activity*/start*Activities* 在基线 APK 上新增 71 个调用点、
+    # 12 个 wrapper 方法名，量级可控。
+    r"\b(?:startActivit(?:y|ies)\w*"
+    r"|start\w+Activit(?:y|ies)\w*"
+    r"|startService|startForegroundService|bindService)\s*\(",
+)
 PROVIDER_FLOW_RULES = {
     "PROVIDER_CALLER_CHECK_MISSING",
     "PROVIDER_URI_TO_FILE",
@@ -228,7 +267,11 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
                         matched_files = []
                     else:
                         matched_files = reader.component_files(component.get("name", "")) if reader else _component_files(component, legacy_files)
-                if rule_id in COMPONENT_FLOW_ENTRIES:
+                if rule_id == "ACTIVITY_EXTERNAL_ROUTE_INJECTION":
+                    candidates.extend(_route_injection_candidates(
+                        rule_id, component, matched_files, manifest, flow_scope or {}
+                    ))
+                elif rule_id in COMPONENT_FLOW_ENTRIES:
                     candidates.extend(_component_flow_rule_candidates(
                         rule_id, component, matched_files, manifest, flow_scope or {}
                     ))
@@ -316,6 +359,180 @@ def _stable_chain_evidence(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     return {field: value[field] for field in _CHAIN_EVIDENCE_FIELDS if value.get(field) is not None}
+
+
+def _is_component_method(method: dict[str, Any], component: dict[str, Any]) -> bool:
+    """方法是否属于该组件类本身（兼容索引中 FQCN 与短类名两种形态）。"""
+
+    name = str(component.get("name") or "")
+    if not name:
+        return False
+    if str(method.get("qualified_class") or "") == name:
+        return True
+    class_name = str(method.get("class_name") or "")
+    return bool(class_name) and class_name == name.rsplit(".", 1)[-1]
+
+
+def _route_injection_candidates(
+    rule_id: str,
+    component: dict[str, Any],
+    files: list[dict[str, Any]],
+    manifest: dict[str, Any],
+    scope: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """P2-6：识别「外部输入决定启动目标 / 被全量透传」的路由注入面。
+
+    与值流规则的关键区别：这里**不要求 sink 是已知敏感 API**。只要满足
+    「外部可控输入 → 目标决定或 extras 透传 → 组件启动」，路由能力本身就是攻击面。
+
+    保守约束（避免制造新噪声）：
+    - 路由方法必须从**读取外部输入的入口方法**经已解析调用边可达。v04 的真实形态正是
+      跨方法的（onCreate 读 extra_splashinfo → handleSplashInfo 组装并启动），
+      只在单方法内匹配会漏掉它；但可达性只沿 `resolve_status=resolved` 的确定边走，
+      不做跨类猜测；
+    - 组件必须外部可达（exported 且非强权限保护）；
+    - 目标 resolve 失败（插件/动态注册组件不在 manifest 索引中）时**保留候选并产 gap**，
+      不静默丢弃——这正是 v04 漏洞此前被丢掉的原因。
+    """
+
+    if component.get("exported") != "true" or not files:
+        return []
+    authorization = _authorization(component, rule_id, manifest)
+    if authorization["status"] == "strongly_protected" and not authorization["has_uri_grant_alternative"]:
+        return []
+
+    scope_files = scope.get("files") or files
+    entry_ids = {str(item) for item in (scope.get("entry_method_ids") or []) if item}
+    methods_by_id: dict[str, tuple[dict[str, Any], str]] = {}
+    for file in scope_files:
+        for method in file.get("methods") or []:
+            method_id = str(method.get("id") or "")
+            if method_id:
+                methods_by_id[method_id] = (method, str(file.get("path") or ""))
+
+    # 从"读取了外部输入"的入口出发，沿已解析调用边求可达闭包。
+    tainted_roots = {
+        method_id
+        for method_id, (method, _) in methods_by_id.items()
+        if SOURCE_PATTERNS["intent_extra"].search(str(method.get("content") or ""))
+        and (not entry_ids or method_id in entry_ids or _is_component_method(method, component))
+    }
+    reachable: dict[str, str] = {method_id: method_id for method_id in tainted_roots}
+    frontier = list(tainted_roots)
+    while frontier:
+        current = frontier.pop()
+        entry = methods_by_id.get(current)
+        if not entry:
+            continue
+        for call in entry[0].get("call_sites") or []:
+            if call.get("resolve_status") != "resolved":
+                continue
+            target = str(call.get("resolved_target_id") or "")
+            if target and target in methods_by_id and target not in reachable:
+                reachable[target] = reachable[current]
+                frontier.append(target)
+
+    results: list[dict[str, Any]] = []
+    for method_id, root_id in sorted(reachable.items()):
+        method, path = methods_by_id[method_id]
+        content = str(method.get("content") or "")
+        launch_match = ROUTE_LAUNCH_METHODS.search(content)
+        if not launch_match:
+            continue
+        target_match = ROUTE_TARGET_METHODS.search(content)
+        bulk_match = (
+            ROUTE_BULK_EXTRAS_METHODS.search(content)
+            or ROUTE_DYNAMIC_KEY_PUT.search(content)
+        )
+        if not target_match and not bulk_match:
+            continue
+
+        root_method, root_path = methods_by_id[root_id]
+        root_content = str(root_method.get("content") or "")
+        source_match = SOURCE_PATTERNS["intent_extra"].search(root_content)
+        if not source_match:
+            continue
+        start_line = int(method.get("start_line") or 1)
+        root_start = int(root_method.get("start_line") or 1)
+        injection = "bulk_extras_forwarding" if bulk_match else "target_selection"
+        gaps: list[dict[str, Any]] = [{
+            "code": "ROUTE_TARGET_RESOLUTION_UNVERIFIED",
+            "critical": True,
+            "method": method_id,
+            "message": (
+                "路由目标由运行期值决定（插件/动态组件可能不在 manifest 索引中），"
+                "静态无法枚举全部可达目标；需人工或动态确认目标集合"
+            ),
+        }]
+        if bulk_match:
+            gaps.append({
+                "code": "BULK_EXTRAS_FORWARDING",
+                "critical": True,
+                "method": method_id,
+                "message": "putExtras/replaceExtras 整体透传外部 Bundle，攻击者可注入任意 key",
+            })
+
+        source_line = root_start + root_content[: source_match.start()].count("\n")
+        launch_line = start_line + content[: launch_match.start()].count("\n")
+        decision = target_match or bulk_match
+        decision_line = start_line + content[: decision.start()].count("\n")
+        propagation = [{
+            "path": path, "line": decision_line, "text": decision.group(0),
+            "kind": "route_decision", "status": "fact", "method_id": method_id,
+            "evidence_id": f"{path}:{decision_line}",
+        }]
+        if method_id != root_id:
+            propagation.insert(0, {
+                "path": root_path, "line": source_line,
+                "text": f"{root_method.get('name')} 读取外部输入后经已解析调用边到达路由方法",
+                "kind": "call", "status": "fact", "method_id": root_id,
+                "evidence_id": f"{root_path}:{source_line}",
+            })
+        chain = {
+            "entry_method_id": root_id,
+            "entry_method_name": root_method.get("name"),
+            "path_model": "route_injection_v1",
+            "flow_kind": "external_route_control",
+            "source": {
+                "path": root_path, "line": source_line,
+                "text": source_match.group(0)[:120],
+                "kind": "intent_extra", "status": "fact",
+                "method_id": root_id, "method_name": root_method.get("name"),
+                "evidence_id": f"{root_path}:{source_line}",
+            },
+            "sink": {
+                "path": path, "line": launch_line,
+                "text": launch_match.group(0),
+                "kind": "component_launch", "taxonomy": "ui_navigation",
+                "status": "fact", "effect_verified": True,
+                "method_id": method_id, "method_name": method.get("name"),
+                "evidence_id": f"{path}:{launch_line}",
+            },
+            "path": propagation,
+            "blocking_gaps": gaps,
+            "dataflow_status": "not_proven",
+        }
+        base = _base(
+            rule_id, component, "L2", files, manifest,
+            "外部可控输入参与决定组件启动目标或被全量透传，构成路由注入面",
+        )
+        result = chain_to_candidate(base, chain, source_kind="intent_extra")
+        result.update({
+            "operation_taxonomy": "ui_navigation",
+            "dataflow_status": "not_proven",
+            "deterministic_chain_verified": False,
+            "impact_status": "potential",
+            "route_injection_kind": injection,
+            "coverage_gaps": list(scope.get("gaps") or []),
+            "guard_status": "unknown",
+            "authorization_status": authorization["status"],
+            "authorization_matrix": authorization["rows"],
+            "authorization_operation": operation_for_rule(rule_id, chain["sink"])[0],
+            "blocking_gaps": _unique_records(gaps),
+            "reachability_status": "reachable",
+        })
+        results.append(result)
+    return sorted(results, key=_candidate_sort_key)
 
 
 def _component_flow_rule_candidates(

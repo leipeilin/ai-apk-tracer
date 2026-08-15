@@ -10,4 +10,4 @@ fi
 "$PYTHON" -m compileall -q "$ROOT/backend/app" "$ROOT/rules"
 cd "$ROOT/backend"
 "$PYTHON" -m pytest
-"$PYTHON" -c 'from pathlib import Path; import yaml; root=Path("../rules"); paths=list(root.glob("*/*/rule.yaml")); assert len(paths)==29, f"expected 29 rule contracts, got {len(paths)}"; assert sum(not yaml.safe_load(p.read_text())["builtin"] for p in paths)==0; print("规则契约检查通过: 29")'
+"$PYTHON" -c 'from pathlib import Path; import yaml; root=Path("../rules"); paths=list(root.glob("*/*/rule.yaml")); assert len(paths)==30, f"expected 30 rule contracts, got {len(paths)}"; assert sum(not yaml.safe_load(p.read_text())["builtin"] for p in paths)==0; print("规则契约检查通过: 30")'

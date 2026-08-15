@@ -1,0 +1,9 @@
+id: ACTIVITY_EXTERNAL_ROUTE_INJECTION
+version: 1.0.0
+protocol_version: 1.0.0
+component: activity
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "路由目标由运行期值决定，静态无法枚举全部可达目标；插件/动态组件不在 manifest 索引中，需人工或动态确认目标集合与参数消费点。"

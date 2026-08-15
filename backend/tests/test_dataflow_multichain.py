@@ -840,3 +840,157 @@ class RouterActivity {
     assert "CONTROL_SCOPE_UNRESOLVED" in emitted, (
         f"block_end_line 缺失时必须产出 CONTROL_SCOPE_UNRESOLVED，实际 gap：{emitted}"
     )
+
+
+def test_route_injection_detects_cross_method_plugin_routing(tmp_path: Path) -> None:
+    """P2-6：复刻 v04 真机验证成立的插件路由注入形态。
+
+    该漏洞此前完全漏检——ACTIVITY_INTENT_TO_SENSITIVE_SINK 只追"值流到达已知敏感 API"，
+    应用自定义路由 wrapper 不在 effect 表内；且 classify_operation_taxonomy 对
+    resolved_target 非空的调用直接返回 is_effect=False，插件 Activity 不在 manifest
+    索引中、resolve 失败即丢弃。
+
+    真实形态是跨方法的：onCreate 读 extra_splashinfo → handleSplashInfo 组装 Intent
+    并 putExtras 全量透传 → startActivity。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String info = getIntent().getStringExtra("extra_splashinfo");
+  handleSplashInfo(info);
+ }
+ private void handleSplashInfo(String str) {
+  Bundle bundle = new Bundle();
+  Intent intent = new Intent();
+  intent.putExtras(bundle);
+  intent.setAction("com.example.ACTION_ROOT");
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+
+    assert len(candidates) == 1, "跨方法路由注入必须被检出（v04 实证成立的真实攻击面）"
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "bulk_extras_forwarding"
+    assert candidate["flow_kind"] == "external_route_control"
+    assert candidate["entry_method_name"] == "onCreate"
+    gap_codes = {gap["code"] for gap in candidate["blocking_gaps"]}
+    assert "ROUTE_TARGET_RESOLUTION_UNVERIFIED" in gap_codes, (
+        "路由目标由运行期值决定，必须如实产 gap 而非静默丢弃候选"
+    )
+    assert "BULK_EXTRAS_FORWARDING" in gap_codes
+
+
+def test_route_injection_ignores_launch_without_external_input(tmp_path: Path) -> None:
+    """无外部输入的固定跳转不得成候选——避免制造新噪声。"""
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  Intent intent = new Intent();
+  intent.setClassName("com.example", "com.example.Other");
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert candidates == []
+
+
+def test_route_injection_ignores_input_without_route_decision(tmp_path: Path) -> None:
+    """读了外部输入但既不决定目标也不透传 extras → 非路由注入面。"""
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ WebView web;
+ void onCreate(Bundle b) {
+  String value = getIntent().getStringExtra("url");
+  web.loadUrl(value);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert candidates == []
+
+
+def test_route_injection_requires_exported_component(tmp_path: Path) -> None:
+    """非导出组件无外部攻击面，不出候选。"""
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String pid = getIntent().getStringExtra("pid");
+  Intent intent = new Intent();
+  intent.putExtras(new Bundle());
+  startActivity(intent);
+ }
+}
+"""
+    payload = _activity_payload(tmp_path, source)
+    payload["manifest"]["components"][0]["exported"] = "false"
+    assert execute("ACTIVITY_EXTERNAL_ROUTE_INJECTION", payload)["candidates"] == []
+
+
+def test_route_injection_detects_dynamic_key_bundle_assembly(tmp_path: Path) -> None:
+    """v04 真实形态：以攻击者 JSON 的键名逐条 putString，而非 putExtras 整体搬运。
+
+    最初只匹配 putExtras/replaceExtras，在真实 APK 上漏掉了 v04 漏洞——
+    MainActivity.handleSplashInfo 用 `for (key : json.keys()) bundle.putString(key, ...)`
+    组装 Bundle，键名同样完全由攻击者决定。非字面量键名必须视为全量注入。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String info = getIntent().getStringExtra("extra_splashinfo");
+  handleSplashInfo(info);
+ }
+ private void handleSplashInfo(String str) {
+  JSONObject json = new JSONObject(str);
+  Bundle bundle = new Bundle();
+  Iterator<String> keys = json.keys();
+  while (keys.hasNext()) {
+   String next = keys.next();
+   bundle.putString(next, String.valueOf(json.get(next)));
+  }
+  Fasade.startNewPluginActivity(this, json.getString("pid"), bundle);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+
+    assert len(candidates) == 1, "动态键名组装 + 自定义路由 wrapper 必须被检出"
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "bulk_extras_forwarding"
+    assert "startNewPluginActivity" in candidate["sinks"][0]["text"], (
+        "应用自定义路由 wrapper 必须能作为 sink——只匹配平台 API 会漏掉 v04 这类真实漏洞"
+    )
+
+
+def test_route_injection_ignores_constant_key_extras(tmp_path: Path) -> None:
+    """常量键名的 putExtra 不构成"全量注入"——键集合固定，攻击者无法任意扩展。"""
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String value = getIntent().getStringExtra("id");
+  Intent intent = new Intent();
+  intent.putExtra("fixed_key", value);
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert candidates == [], "键名为字面量时不应判为 bulk_extras_forwarding"
