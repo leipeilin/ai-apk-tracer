@@ -880,6 +880,10 @@ def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         # 若切片不下发该字段，AI 无从输出 fixed_local_target，交叉验证永不触发
         # （safe 但无效）。顶层摘要与 deterministic_facts 双通道下发。
         "resolved_target_fixed",
+        # P1-5 打通（2026-08-15）：规则层产出的 sink 调用点事实——constant_sink_argument
+        # 反证依赖 sink_argument_constant，no_real_call_site 反证依赖 call_site_exists
+        # （红线 13 死代码）。缺这两个字段时 AI 无从输出对应 basis，交叉验证永不触发。
+        "call_site_exists", "sink_argument_constant",
     }
     summary = {key: deepcopy(value) for key, value in candidate.items() if key in allowed}
     summary["deterministic_facts"] = _deterministic_facts(candidate)
@@ -922,6 +926,12 @@ def _deterministic_facts(candidate: dict[str, Any]) -> dict[str, Any]:
         # P1-5 打通（2026-08-15）：路由注入规则输出的目标固定性事实（仅 target_selection
         # 类候选产出；bulk_extras_forwarding 无目标决策，该字段为 None 时不输出）。
         "resolved_target_fixed": candidate.get("resolved_target_fixed"),
+        # P1-5 打通（2026-08-15）：sink 调用点事实——call_site_exists=False 支撑
+        # no_real_call_site（红线 13 死代码），sink_argument_constant=True 支撑
+        # constant_sink_argument。规则层已产出（_attach_sink_argument_facts），
+        # 随切片下发供 AI 输出 basis。
+        "call_site_exists": candidate.get("call_site_exists"),
+        "sink_argument_constant": candidate.get("sink_argument_constant"),
     }
 
 

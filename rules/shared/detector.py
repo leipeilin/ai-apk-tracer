@@ -2522,10 +2522,14 @@ def _attach_sink_argument_facts(
     判定规则（保守，宁可漏判不可误判——误判会被决策层采信为 ai_false_positive）：
     - sink 方法是组件生命周期/框架回调入口 → `call_site_exists=True`（系统调用，
       索引中不存在 resolved 调用者是正常形态，不是死代码）；
-    - 其余方法：全索引无任何 resolved 调用者 → `call_site_exists=False`；
-    - 有调用者时：**所有调用点**中，除首个"上下文"实参（ctx/this/App 实例形态）
-      外的数据实参**全部为字符串字面量** → `sink_argument_constant=True`；
-      任一数据实参是变量/常量引用/表达式，或调用点形态不符 → False（不采信）。
+    - 其余方法：全索引无任何 resolved 调用者且**无解析失败的同名调用点**
+      → `call_site_exists=False`（真死代码）；存在解析失败的同名调用点
+      （pending/ambiguous，receiver 类型匹配）→ `call_site_exists=True`
+      （resolve 失败 ≠ 无调用者，可能是重载/泛型/Receiver 推断不足）；
+    - 有 resolved 调用者且**无任何解析失败调用点**时：所有调用点的数据实参
+      （排除首个"上下文"实参）**全部为字符串字面量** → `sink_argument_constant=True`；
+      存在解析失败调用点、或任一数据实参是变量/常量引用/表达式
+      → False（不采信——pending 调用点里的变量实参可能被漏统计）。
     """
 
     if reader is None:
@@ -2540,14 +2544,28 @@ def _attach_sink_argument_facts(
             continue
         short = method_id.rsplit("#", 1)[-1]
         method_name = short.split(":", 1)[0].rsplit(".", 1)[-1]
+        # 目标类名：method_id 形如 `com/x/Y.java#Y.foo:12`，取 # 前路径的
+        # 类文件主干（去掉 .java）用于 receiver 类型匹配（保守子串）。
+        class_name = method_id.rsplit("/", 1)[-1]
+        class_name = class_name.split(".java", 1)[0].split("#", 1)[0]
         if method_name in _COMPONENT_LIFECYCLE_ENTRIES:
             candidate["call_site_exists"] = True
             continue
-        callers = reader.sink_callers(method_id)
+        callers, has_unresolved = reader.sink_callers(
+            method_id, class_name=class_name, method_name=method_name
+        )
         if not callers:
-            candidate["call_site_exists"] = False
+            # 无 resolved 调用者：仅当也不存在解析失败的同名调用点才判死代码
+            # （resolve 失败 ≠ 无调用者——重载/泛型/Receiver 推断不足时
+            # 调用点存在但解析不成功，判死代码会被采信为 no_real_call_site）。
+            candidate["call_site_exists"] = has_unresolved
             continue
         candidate["call_site_exists"] = True
+        if has_unresolved:
+            # 存在解析失败的调用点：其实参可能含变量（pending 调用点里的
+            # new Gson().toJson(...)/cityName/str 等），不得据此判常量。
+            candidate["sink_argument_constant"] = False
+            continue
         candidate["sink_argument_constant"] = all(
             _call_args_literal_except_context(args) for args in callers
         )

@@ -117,13 +117,23 @@ class RuleIndexReader:
         """关闭当前规则执行期间持有的索引连接。"""
         self.db.close()
 
-    def sink_callers(self, method_id: str) -> list[list[str]]:
-        """全索引中 resolved 到指定方法的调用点实参列表（解压后字符串化）。
+    def sink_callers(
+        self, method_id: str, *, class_name: str, method_name: str
+    ) -> tuple[list[list[str]], bool]:
+        """全索引中指向指定方法的调用点信息。
 
-        P1-5 打通（2026-08-15）：供规则层产出 `call_site_exists` 与
-        `sink_argument_constant` 两项候选事实——sink wrapper（如
-        PreferenceUtil.removePref）在索引中的真实调用点存在性，以及各调用点
-        实参的常量性。只读查询，返回空列表表示无调用者（死代码信号）。
+        P1-5 打通（2026-08-15，修订）：返回 ``(resolved_callers, has_unresolved)``——
+        resolved_callers 是 resolve 成功调用点的实参列表（解压后字符串化）；
+        has_unresolved 表示是否存在**解析失败的同名调用点**（pending/ambiguous，
+        按 receiver 类名 + 方法名匹配）。
+
+        修订前只查 ``resolved_target_id``，把"解析失败"的调用者当成"不存在"，
+        导致两个假阴性方向错误：
+        - call_site_exists 把 resolve 失败误判为死代码（红线 13 反证可被采信）；
+        - sink_argument_constant 漏掉 pending 调用点里的变量实参而误判 True。
+        保守原则：存在任何解析失败的调用点时，调用方不得据此判"死代码"或
+        "参数全部常量"——resolve 失败 ≠ 无调用者（可为重载/泛型/Receiver 推断
+        不足），宁可漏判不可误判（误判会被决策层采信为 ai_false_positive）。
         """
 
         rows = self.db.execute(
@@ -138,7 +148,16 @@ class RuleIndexReader:
                 continue
             if isinstance(parsed, list):
                 callers.append([str(item) for item in parsed])
-        return callers
+        # 解析失败的同名调用点：receiver 类型与目标类一致（或子串匹配类名）。
+        # resolve_status != 'resolved' 覆盖 pending/ambiguous；无 arguments 匹配
+        # 语义时按 receiver+方法名保守计数，避免把同名无关方法算入。
+        unresolved = self.db.execute(
+            "SELECT count(*) FROM call_sites "
+            "WHERE method_name = ? AND resolve_status != 'resolved' "
+            "AND receiver_type LIKE ?",
+            (method_name, f"%{class_name}%"),
+        ).fetchone()[0]
+        return callers, bool(unresolved)
 
     def component_files(self, component_name: str) -> list[dict[str, Any]]:
         """按 FQCN 或精确源码路径查询组件，简单名仅在全局唯一时回退。"""

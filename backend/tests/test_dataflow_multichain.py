@@ -1360,3 +1360,130 @@ class RouterActivity extends Activity {
         reader.close()
     assert candidates[0]["call_site_exists"] is False, "无调用者的 sink 必须标记死代码"
     assert "sink_argument_constant" not in candidates[0]
+
+
+def test_sink_argument_facts_reach_ai_slice_and_decision(tmp_path: Path) -> None:
+    """端到端流转：规则事实 → 切片摘要与 deterministic_facts → 决策生产路径采信。
+
+    修订前 sink_argument_constant / call_site_exists 未注入 _candidate_summary 白名单
+    与 deterministic_facts——3.0.7 提示词要求 refutation_basis 每项在
+    candidate.deterministic_facts 中可查，AI 看不到字段就无从输出
+    constant_sink_argument / no_real_call_site basis，交叉验证永不触发（safe 但无效）。
+    本用例验证：切片双通道下发 + DecisionEngine.decide（生产入口）采信。
+    """
+
+    from app.analysis.context_builder import ContextBuilder
+    from app.findings.decision import DecisionEngine
+    from test_context_builder import build_index, candidate as _ctx_candidate
+
+    builder = ContextBuilder(build_index(tmp_path))
+    payload = _ctx_candidate()
+    payload.update({
+        "flow_kind": "control_to_sink",
+        "call_site_exists": True,
+        "sink_argument_constant": True,
+        "sinks": [{"path": "com/example/ExportedActivity.java", "line": 12,
+                   "method_id": "com/example/PreferenceUtil.java#PreferenceUtil.removePref:210"}],
+    })
+    document = builder.build_initial(payload)
+    summary = document["candidate"]
+
+    # ① 顶层摘要必须携带两个字段（_candidate_summary 白名单）
+    assert summary.get("call_site_exists") is True
+    assert summary.get("sink_argument_constant") is True
+    # ② deterministic_facts 也必须携带（3.0.7 提示词要求 basis 事实在此可查）
+    assert summary["deterministic_facts"].get("call_site_exists") is True
+    assert summary["deterministic_facts"].get("sink_argument_constant") is True
+
+    # ③ 生产决策路径采信：AI 输出 basis 且字段为 True → ai_false_positive
+    decision_input = dict(summary)
+    decision_input.update({
+        "review_status": "pending_ai",
+        "analysis_status": "ai_completed",
+        "evidence_level": "L2",
+        "verified_evidence_refs": [{"context_id": "ctx-1", "line": 12, "claim": "verified"}],
+        "invalid_evidence_refs": [],
+        "locations": [{"artifact": "code", "path": "com/example/ExportedActivity.java", "line": 12}],
+        "ai_analysis": {
+            "verdict": "refutes_candidate",
+            "refutation_basis": ["constant_sink_argument"],
+            "verified_evidence_refs": [{"context_id": "ctx-1", "line": 12, "claim": "verified"}],
+            "evidence_refs_valid": True,
+            "semantic_evidence_complete": True,
+            "flaw_holds": False,
+            "exploitability": {"entry_reachable": False, "exfiltration_channel": "absent"},
+            "harm": {"impact_type": "none"},
+            "reachability_class": "remote",
+            "impact_vector": {"confidentiality": "none", "integrity": "none", "availability": "none"},
+            "summary": "sink 参数为编译期常量，攻击者不可控",
+            "confidence_tier": "high",
+            "guard_status": "unknown",
+            "analysis_complete": True,
+        },
+    })
+    decision = DecisionEngine().decide(decision_input)
+    assert decision.get("evidence_decision") == "ai_false_positive", (
+        f"sink_argument_constant=True 时 constant_sink_argument 应被生产路径采信为 "
+        f"ai_false_positive，实际 {decision.get('evidence_decision')}"
+    )
+
+
+def test_attach_sink_argument_facts_unresolved_caller_not_dead_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """保守化负例：存在解析失败（pending/ambiguous）的同名调用点时不得判死代码。
+
+    修订前 sink_callers 只查 resolved_target_id，resolve 失败被当成"无调用者"——
+    call_site_exists=False → AI 可输出 no_real_call_site → ai_false_positive →
+    真漏洞压成漏报（假阴性，方向更坏）。本用例验证：有 unresolved 调用者时
+    call_site_exists 必须为 True，且 sink_argument_constant 不得判 True。
+    """
+
+    from shared.detector import _attach_sink_argument_facts
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String x = getIntent().getStringExtra("x");
+ }
+ static void doRemove(String key) {
+  getSharedPreferences("p", 0).edit().remove(key).apply();
+ }
+}
+"""
+    payload = _activity_payload(tmp_path, source)
+    reader = RuleIndexReader(payload["index"])
+    try:
+        # 场景①：无 resolved 调用者，但存在解析失败的同名调用点（receiver 类匹配）。
+        # 真实形态如 setStringPref 的 9 个 pending 调用点（重载/泛型/Receiver 推断不足）。
+        monkeypatch.setattr(
+            reader, "sink_callers",
+            lambda method_id, **kw: ([], True),
+        )
+        candidates = [{
+            "sinks": [{"method_id": "com/example/RouterActivity.java#RouterActivity.doRemove:8"}],
+        }]
+        _attach_sink_argument_facts(candidates, reader)
+        assert candidates[0]["call_site_exists"] is True, (
+            "存在解析失败的调用者时不得判死代码——resolve 失败 ≠ 无调用者"
+        )
+        assert "sink_argument_constant" not in candidates[0], (
+            "无 resolved 调用者时不输出常量判定"
+        )
+
+        # 场景②：有 resolved 调用者 + 存在 unresolved 调用点 → 常量判定必须 False
+        # （pending 调用点实参可能含变量，漏统计会误判 True → 假阴性）。
+        monkeypatch.setattr(
+            reader, "sink_callers",
+            lambda method_id, **kw: ([["this", '"fixed_key"']], True),
+        )
+        candidates2 = [{
+            "sinks": [{"method_id": "com/example/RouterActivity.java#RouterActivity.doRemove:8"}],
+        }]
+        _attach_sink_argument_facts(candidates2, reader)
+        assert candidates2[0]["call_site_exists"] is True
+        assert candidates2[0]["sink_argument_constant"] is False, (
+            "存在 unresolved 调用点时不判常量——pending 调用点实参可能含变量"
+        )
+    finally:
+        reader.close()
