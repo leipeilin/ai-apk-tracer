@@ -3,7 +3,9 @@
 > **日期**：2026-08-15
 > **依据**：`2026-08-15-dynamic-receiver-282-candidates-analysis.md` §4 建议 2 +
 > informational 语义实证评估（今日完成）+ 用户补充观察（P2-6 误报实例）
-> **状态**：待审查（未实施）
+> **状态**：✅ **已实施完成**（提交 698104b，2026-08-15 23:08 确认）
+> **遗留（非缺陷）**：§3.3 review_status 联动为可选二期，方案明确范围外；exposure_only 保留面
+> 若后续实证"送 AI 零增量"再评估收紧——新决策，不在本方案范围。
 
 ---
 
@@ -75,7 +77,12 @@ def _l1_skip_ai(candidate) -> bool:
     return True
 ```
 
-**判据依据（125744Z 实测）**：L1 375 条 = exposure_only 83（ACTIVITY 35 / SERVICE 21 / RECEIVER 17 / PROVIDER 8 / DYNAMIC_RECEIVER 2，全 informational）+ high_risk_uncertain 1 + coverage_insufficient 279（DYNAMIC_RECEIVER gap 形态，282 报告核心问题）+ deterministically_refuted 12。例外 = 84 条 AI 有输入的面；挡掉 = 291 条（279 gap 白烧面 + 12 已反驳）。
+**判据依据（125744Z 实测）**：L1 375 条 = exposure_only 83（ACTIVITY 35 / SERVICE 21 / RECEIVER 17 / PROVIDER 8 / DYNAMIC_RECEIVER 2，全 informational）+ high_risk_uncertain 1 + coverage_insufficient 279（DYNAMIC_RECEIVER gap 形态，282 报告核心问题）+ deterministically_refuted 12。
+
+**保留面的预算占用（重放 3 run 实测，2026-08-15 定稿修正）**：例外保留 ≠ 占用预算。`_pipeline_requires_ai` 对 L1 `exposure_only` 返回 False（v2026-08-09 既有逻辑：纯 manifest 事实、无代码上下文，AI 无内容可分析不送），因此：
+- exposure_only 83 条**从不进 AI 预算**（ai_required 全 False），例外② 的语义 = "保持不进 AI + 候选/gap/人工队列保留"，不存在"送 AI 零增量需收紧"的问题；
+- 真正占用预算的只有 high_risk_uncertain（125744Z 1 条）与新 run 中 receiver clean 面（例外①，R-1 分级生效后 `confirmed_exported_clean` 有代码上下文才送 AI）。
+- 重放：125744Z 挡掉 291 / 保留 84 / 进预算 1；110600Z 挡掉 85 / 保留 42 / 进预算 0；124147Z 挡掉 86 / 保留 42 / 进预算 0。与方案预测一致（291/84）。
 
 ### 3.3 复核状态联动（可选，单独实施）
 
