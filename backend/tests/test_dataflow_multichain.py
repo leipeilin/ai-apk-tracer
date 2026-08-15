@@ -994,3 +994,88 @@ class RouterActivity extends Activity {
         "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
     )["candidates"]
     assert candidates == [], "键名为字面量时不应判为 bulk_extras_forwarding"
+
+
+def test_route_injection_target_fixed_class_literal(tmp_path: Path) -> None:
+    """setClass(this, Foo.class)：类字面量目标 → resolved_target_fixed=True。
+
+    P1-5 打通（2026-08-15）：fixed_local_target 反证依赖候选事实
+    resolved_target_fixed。v04 §1.6 实证的 WbShareResultActivity 正是此形态
+    （setClass(this, WbShareTransActivity.class)），目标固定本包、非任意启动。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String action = getIntent().getAction();
+  Intent intent = new Intent(action);
+  if (Constants.ACTIVITY_REQ_SDK.equals(action)) {
+   intent.setClass(this, WbShareTransActivity.class);
+  } else {
+   intent.setClass(this, WbShareToStoryActivity.class);
+  }
+  startActivity(intent);
+ }
+}
+class WbShareTransActivity extends Activity {}
+class WbShareToStoryActivity extends Activity {}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1, "外部 action 参与目标决策必须被检出"
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "target_selection"
+    assert candidate.get("resolved_target_fixed") is True, (
+        "类字面量目标（Foo.class）必须判为固定——v04 §1.6 实证形态"
+    )
+
+
+def test_route_injection_target_not_fixed_variable(tmp_path: Path) -> None:
+    """setClassName(this, str)：变量目标 → resolved_target_fixed=False。"""
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String target = getIntent().getStringExtra("target");
+  Intent intent = new Intent();
+  intent.setClassName(this, target);
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "target_selection"
+    assert candidate.get("resolved_target_fixed") is False, (
+        "变量目标不得判为固定——误判 fixed 会被采信为 ai_false_positive（假阴性）"
+    )
+
+
+def test_route_injection_bulk_has_no_target_field(tmp_path: Path) -> None:
+    """bulk_extras_forwarding 无目标决策 → 不输出 resolved_target_fixed。"""
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String info = getIntent().getStringExtra("extra_splashinfo");
+  Bundle bundle = new Bundle();
+  bundle.putString("pid", info);
+  Intent intent = new Intent();
+  intent.putExtras(bundle);
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "bulk_extras_forwarding"
+    assert "resolved_target_fixed" not in candidate, (
+        "无目标决策时不得输出该字段——避免把'无目标决策'误读为'目标不固定'"
+    )

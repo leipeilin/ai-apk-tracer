@@ -124,6 +124,59 @@ COMPONENT_FLOW_ENTRIES = {
 ROUTE_TARGET_METHODS = re.compile(
     r"\b(?:setClassName|setComponent|setClass|setAction|setPackage)\s*\(",
 )
+# 目标决策调用中"目标静态固定"的强证据（P1-5 打通，2026-08-15）：
+#   - 类字面量：setClass(this, WbShareTransActivity.class)；
+#   - 字符串字面量：setClassName("pkg","cls") / setAction("ACTION") / setPackage("pkg")
+#     / setComponent(new ComponentName("pkg","cls"))。
+# 变量、表达式、常量引用（setAction(intent.getAction()) / setClassName(this, str)
+# / setAction(Constants.XXX)）一律不算固定——判定错误方向是：误判 fixed 会被决策层
+# 采信为 fixed_local_target 反证（ai_false_positive），等于把真漏洞压成漏报，因此
+# 只认强证据，其余全部返回 False。
+_TARGET_CLASS_LITERAL_RE = re.compile(r"\b\w+(?:\.\w+)*\.class\b")
+_TARGET_STRING_LITERAL_RE = re.compile(r"[\"'][^\"']*[\"']")
+
+
+def _matching_paren_end(content: str, opening: int) -> int | None:
+    """返回与 ``opening`` 处左括号配对的右括号下标（处理嵌套与引号转义）。"""
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for index in range(opening, len(content)):
+        char = content[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {'"', "'"}:
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _target_decision_is_fixed(match: re.Match[str], content: str) -> bool:
+    """目标决策调用（setClassName/setComponent/setClass/setAction/setPackage）的目标
+    是否静态固定。仅供 target_selection 类候选使用；bulk_extras_forwarding 无目标
+    决策，不适用。
+
+    返回 True 仅在参数中存在类字面量或字符串字面量（保守）；其余一律 False。
+    """
+
+    opening = match.end() - 1  # 正则已消费到 '('，其前一位即左括号
+    closing = _matching_paren_end(content, opening)
+    if closing is None:
+        return False
+    args = content[opening + 1: closing]
+    return bool(_TARGET_CLASS_LITERAL_RE.search(args) or _TARGET_STRING_LITERAL_RE.search(args))
+
 # 全量 extras 透传：攻击者可注入任意 key，是 v04 危害的核心。
 # 两种形态都要覆盖：
 #   ① putExtras/replaceExtras 整体搬运一个 Bundle；
@@ -455,6 +508,14 @@ def _route_injection_candidates(
         start_line = int(method.get("start_line") or 1)
         root_start = int(root_method.get("start_line") or 1)
         injection = "bulk_extras_forwarding" if bulk_match else "target_selection"
+        # P1-5 打通（2026-08-15）：target_selection 类候选输出目标固定性事实
+        # `resolved_target_fixed`，供决策层交叉验证 fixed_local_target 反证。
+        # 仅 target_selection 输出：bulk_extras_forwarding 即使同方法命中目标决策调用
+        # （setAction/putExtras 并存），其注入面核心仍是 extras 透传，输出该字段
+        # 会把"无目标决策/目标与注入面无关"误读为"目标固定或不固定"。
+        target_fixed: bool | None = None
+        if injection == "target_selection" and target_match:
+            target_fixed = _target_decision_is_fixed(target_match, content)
         gaps: list[dict[str, Any]] = [{
             "code": "ROUTE_TARGET_RESOLUTION_UNVERIFIED",
             "critical": True,
@@ -523,6 +584,7 @@ def _route_injection_candidates(
             "deterministic_chain_verified": False,
             "impact_status": "potential",
             "route_injection_kind": injection,
+            **({"resolved_target_fixed": target_fixed} if target_fixed is not None else {}),
             "coverage_gaps": list(scope.get("gaps") or []),
             "guard_status": "unknown",
             "authorization_status": authorization["status"],
