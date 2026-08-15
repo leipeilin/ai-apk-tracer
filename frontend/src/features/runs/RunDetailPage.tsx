@@ -21,7 +21,15 @@ export function RunDetailPage() {
     [id],
   )
   const active = runState.data ? isRunActive(runState.data.status) : true
-  const findingState = usePolling(() => api.getFindings(id), active ? 2000 : false, [id])
+  // 锁/并发优化（2026-08-15）：findings 轮询在 run 数据就绪后才启动，且与
+  // getRun 共用同一活跃判定——避免扫描运行中两个 2s 轮询并发压测 SQLite 读锁
+  // （页面卡顿根因之一）。run 未返回时不发起 findings 请求（findings_count 已在
+  // getRun 响应中，hero 区数字不受影响）。
+  const findingState = usePolling(
+    () => api.getFindings(id),
+    runState.data ? (active ? 2000 : false) : false,
+    [id],
+  )
 
   if (runState.loading && !runState.data) return <div className="detail-loading"><SkeletonRows count={5} /></div>
   if (runState.error && !runState.data) return <ErrorState error={runState.error} onRetry={() => void runState.reload()} />

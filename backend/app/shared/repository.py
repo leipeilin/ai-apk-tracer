@@ -348,29 +348,48 @@ class SQLiteRepository:
         return self.get_run(run_id)
 
     def list_runs(self) -> list[dict[str, Any]]:
-        """按创建时间倒序列出任务及其发现项数量。"""
+        """按创建时间倒序列出任务及其发现项数量。
+
+        锁优化（2026-08-15）：findings_count 改为独立分组计数，避免关联子查询
+        在扫描写锁持有时阻塞 runs 主查询（任务列表页卡顿根因之一）。
+        """
 
         with self.connect() as db:
-            rows = db.execute(
-                "SELECT runs.*, (SELECT COUNT(*) FROM findings "
-                "WHERE findings.run_id = runs.id AND findings.deleted_at IS NULL) AS findings_count "
-                "FROM runs ORDER BY created_at DESC"
-            ).fetchall()
-        return [self._run_row(row) for row in rows]
+            rows = db.execute("SELECT runs.* FROM runs ORDER BY created_at DESC").fetchall()
+            counts = {
+                row["run_id"]: row["n"]
+                for row in db.execute(
+                    "SELECT run_id, COUNT(*) AS n FROM findings "
+                    "WHERE deleted_at IS NULL GROUP BY run_id"
+                )
+            }
+        results = []
+        for row in rows:
+            result = self._run_row(row)
+            result["findings_count"] = counts.get(row["id"], 0)
+            results.append(result)
+        return results
 
     def get_run(self, run_id: str) -> dict[str, Any]:
-        """读取单个任务及其发现项数量，不存在时抛出 ``NotFoundError``。"""
+        """读取单个任务及其发现项数量，不存在时抛出 ``NotFoundError``。
+
+        锁优化（2026-08-15）：findings_count 拆为独立轻量 COUNT（走
+        idx_findings_run_active 索引），不再作为 runs 主查询的关联子查询——
+        扫描运行中 replace_findings 持写锁时，runs 行读取与 COUNT 各自尽快
+        完成，缩短单连接内锁等待窗口。
+        """
 
         with self.connect() as db:
-            row = db.execute(
-                "SELECT runs.*, (SELECT COUNT(*) FROM findings "
-                "WHERE findings.run_id = runs.id AND findings.deleted_at IS NULL) AS findings_count "
-                "FROM runs WHERE id=?",
+            row = db.execute("SELECT runs.* FROM runs WHERE id=?", (run_id,)).fetchone()
+            if row is None:
+                raise NotFoundError("run", run_id)
+            count = db.execute(
+                "SELECT COUNT(*) FROM findings WHERE run_id=? AND deleted_at IS NULL",
                 (run_id,),
-            ).fetchone()
-        if row is None:
-            raise NotFoundError("run", run_id)
-        return self._run_row(row)
+            ).fetchone()[0]
+        result = self._run_row(row)
+        result["findings_count"] = count
+        return result
 
     def delete_run_record(self, run_id: str) -> None:
         """删除任务数据库记录，并由外键级联清理关联数据。"""
@@ -384,44 +403,55 @@ class SQLiteRepository:
         冲突更新只替换机器可重算字段，不覆盖 review_status/reason、created_at 或历史；同 run
         本轮未出现的 finding 仅软删除，再次出现则恢复。run-scoped ID 防止跨 run 主键冲突，
         ``WHERE findings.run_id=excluded.run_id`` 仍作为最终隔离边界。
+
+        锁优化（2026-08-15）：按批次提交小事务，避免单笔大事务长期持有写锁阻塞
+        get_run/get_findings 读请求（扫描运行中前端轮询卡顿根因）。删除（软删本轮
+        未出现的 finding）放最后一笔小事务，保证批间失败时本轮的软删仍可推进；
+        批次内失败整体回滚该批，不会留下半写状态。
         """
 
         now = utc_now()
         incoming_ids: list[str] = []
+        _BATCH = 200
         with self.connect() as db:
+            for start in range(0, len(findings), _BATCH):
+                batch = findings[start:start + _BATCH]
+                db.execute("BEGIN IMMEDIATE")
+                for finding in batch:
+                    # Finding 语义哈希在相同 APK 的不同 run 中可能一致；API ID 必须包含 run 作用域，
+                    # 否则 findings.id 全局主键会阻止同一样本复测。
+                    finding_id = scope_finding_id(run_id, finding)
+                    finding.setdefault("pipeline_version", "2.0.0")
+                    finding.setdefault("schema_version", "2.0.0")
+                    incoming_ids.append(finding_id)
+                    db.execute(
+                        """INSERT INTO findings
+                        (id, run_id, rule_ids_json, title, component, component_name, severity,
+                         confidence, evidence_level, review_status, review_reason, payload_json,
+                         created_at, updated_at, deleted_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                        ON CONFLICT(id) DO UPDATE SET
+                            rule_ids_json=excluded.rule_ids_json,
+                            title=excluded.title,
+                            component=excluded.component,
+                            component_name=excluded.component_name,
+                            severity=excluded.severity,
+                            confidence=excluded.confidence,
+                            evidence_level=excluded.evidence_level,
+                            payload_json=excluded.payload_json,
+                            deleted_at=NULL
+                        WHERE findings.run_id=excluded.run_id""",
+                        (
+                            finding_id, run_id, json.dumps(finding["rule_ids"]), finding["title"],
+                            finding["component"], finding.get("component_name"), finding["severity"],
+                            finding["confidence"], finding["evidence_level"],
+                            finding.get("review_status", "pending_ai"), finding.get("review_reason"),
+                            json.dumps(finding, ensure_ascii=False), now, now,
+                        ),
+                    )
+                db.execute("COMMIT")
+            # 软删本轮未出现的 finding（独立小事务；findings 为空时同样执行全量软删）
             db.execute("BEGIN IMMEDIATE")
-            for finding in findings:
-                # Finding 语义哈希在相同 APK 的不同 run 中可能一致；API ID 必须包含 run 作用域，
-                # 否则 findings.id 全局主键会阻止同一样本复测。
-                finding_id = scope_finding_id(run_id, finding)
-                finding.setdefault("pipeline_version", "2.0.0")
-                finding.setdefault("schema_version", "2.0.0")
-                incoming_ids.append(finding_id)
-                db.execute(
-                    """INSERT INTO findings
-                    (id, run_id, rule_ids_json, title, component, component_name, severity,
-                     confidence, evidence_level, review_status, review_reason, payload_json,
-                     created_at, updated_at, deleted_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-                    ON CONFLICT(id) DO UPDATE SET
-                        rule_ids_json=excluded.rule_ids_json,
-                        title=excluded.title,
-                        component=excluded.component,
-                        component_name=excluded.component_name,
-                        severity=excluded.severity,
-                        confidence=excluded.confidence,
-                        evidence_level=excluded.evidence_level,
-                        payload_json=excluded.payload_json,
-                        deleted_at=NULL
-                    WHERE findings.run_id=excluded.run_id""",
-                    (
-                        finding_id, run_id, json.dumps(finding["rule_ids"]), finding["title"],
-                        finding["component"], finding.get("component_name"), finding["severity"],
-                        finding["confidence"], finding["evidence_level"],
-                        finding.get("review_status", "pending_ai"), finding.get("review_reason"),
-                        json.dumps(finding, ensure_ascii=False), now, now,
-                    ),
-                )
             if incoming_ids:
                 placeholders = ",".join("?" for _ in incoming_ids)
                 db.execute(
@@ -434,6 +464,7 @@ class SQLiteRepository:
                     "UPDATE findings SET deleted_at=? WHERE run_id=? AND deleted_at IS NULL",
                     (now, run_id),
                 )
+            db.execute("COMMIT")
 
     def list_findings(self, run_id: str) -> list[dict[str, Any]]:
         """校验任务存在后返回其全部发现项。"""
