@@ -858,11 +858,13 @@ def test_deterministic_facts_flag_proven_value_flow(tmp_path: Path) -> None:
 
 
 def test_sink_file_outside_scope_loaded_on_demand(tmp_path: Path) -> None:
-    """P1-4 修 sink 静默丢失：sink anchor 文件不在组件 flow scope 时按需加载。
+    """P1-4 修 sink 静默丢失：sink 文件不在 self.files 时按需从索引加载。
 
-    修订前 `build_initial` 对 scope 外文件只记 `PATH_NOT_INDEXED` unresolved——
-    AI 看不到 sink 上下文（实证 slice_bb21709c 8 个 context 无一含 sink 文件
-    PreferenceUtil.java）。修订后 sink anchor 文件按需从索引加载进切片。
+    真实流水线中 build_code_index 全量索引，sink 文件几乎总在 self.files 里
+    （走正常分支）；但为防御未来引入组件 flow scope 子集索引，且覆盖
+    "文件在索引中但未进 files"的场景，本用例模拟：从 builder.files 移除
+    PreferenceUtil 后，build_initial 必须通过 _load_file_on_demand 恢复它，
+    而不是记 PATH_NOT_INDEXED 静默丢弃（AI 看不到 sink 上下文）。
     """
 
     source_root = tmp_path / "sources"
@@ -889,17 +891,29 @@ public class PreferenceUtil {
     )
     index = build_code_index(source_root, tmp_path / "code-index.json")
     builder = ContextBuilder(index)
+    # 模拟"文件在索引中但未进 self.files"：移除该文件及其方法/类注册。
+    # （真实流水线当前全量索引不会出现，但防御 scope 子集索引与索引重建边界）
+    sink_path = "com/example/PreferenceUtil.java"
+    removed_file = builder.files.pop(sink_path, None)
+    assert removed_file is not None, "前置：PreferenceUtil 必须在索引中"
+    for method in removed_file.get("methods", []):
+        mid = str(method["id"])
+        builder.methods.pop(mid, None)
+    for class_info in removed_file.get("classes", []):
+        builder.classes.pop(str(class_info["id"]), None)
+
     payload = candidate()
-    payload["sinks"] = [{"path": "com/example/PreferenceUtil.java", "line": 3, "text": "removePref"}]
+    payload["sinks"] = [{"path": sink_path, "line": 3, "text": "removePref"}]
     document = builder.build_initial(payload)
     sink_contexts = [
         ctx for ctx in document["contexts"]
         if "PreferenceUtil" in ctx.get("path", "")
     ]
-    assert sink_contexts, "sink 文件不在 scope 时必须被按需加载进切片"
+    assert sink_contexts, "sink 文件不在 self.files 时必须被按需加载进切片"
     assert not any(
         item.get("reason") == "PATH_NOT_INDEXED" for item in document["unresolved"]
     ), "sink 文件按需加载成功后不得再有 PATH_NOT_INDEXED"
+    assert builder.files.get(sink_path) is not None, "按需加载后文件应注册回 self.files"
 
 
 def test_sink_file_unloadable_produces_gap(tmp_path: Path) -> None:

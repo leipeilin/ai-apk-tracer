@@ -23,8 +23,10 @@
 |---|---|---|---|
 | AI unresolved 占比 | 99.3% | ≤60% | ⏳ 需真实 AI 重跑（3.0.7 + 事实注入） |
 | AI refutes 占比 | 0.4% | ≥30% | ⏳ 同上 |
-| 切片含 sink 上下文比例 | 0%（抽样） | 100% | ✅ 机制已修（SINK_CONTEXT_UNAVAILABLE gap + 按需加载，本轮落地） |
+| 切片含 sink 上下文比例 | 待实测（见注） | 100% | ✅ 机制已加固（SINK_CONTEXT_UNAVAILABLE gap + 按需加载，本轮落地） |
 | refutation_basis 交叉验证通过率 | 0%（无 basis） | ≥80% | ⏳ 需真实 AI 重跑 |
+
+> **注（2026-08-15 勘误）**：方案 §8 引用的"切片 8 context 无一是 sink 文件 PreferenceUtil.java（slice_bb21709c）"经复核为**误读**——该切片对应候选的 sink 实际是 `SplashCommonUtils.java:128`（startActivity），本就不该含 PreferenceUtil。真实流水线 `build_code_index` 全量索引，sink 文件几乎总在 `self.files` 中（走正常分支）。P1-4 的实际价值是**防御性**：覆盖"文件在索引中但未进 files"的边界（未来 scope 子集索引），且无法加载时产精确的 `SINK_CONTEXT_UNAVAILABLE` gap 而非通用 `PATH_NOT_INDEXED`。
 
 > ⚠️ **口径 A 的复算依赖真实 AI 调用**（136 条 × 3.0.7 prompt + P1-4 事实注入切片），耗时与成本高。机制侧已全部就绪（P1-4 事实注入、P1-5 交叉验证、3.0.7 协议放开），但**模型行为未实测**——这是方案遗留的最大未验证项，见"遗留"。
 
