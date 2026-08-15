@@ -101,6 +101,34 @@ class ContextBuilder:
             self._loaded_gaps.update(self.methods)
             self._symbol_resolution_gap_count = len(self.symbol_resolution_gaps)
 
+    def _load_file_on_demand(self, path: str) -> dict[str, Any] | None:
+        """按需加载索引中存在但不在组件 flow scope 内的文件（P1-4 修 sink 静默丢失）。
+
+        ``self.files`` 初始只含组件 flow scope 的轻量结构；sink anchor 所在文件不在
+        scope 时此前静默丢弃（`PATH_NOT_INDEXED` unresolved），AI 看不到 sink 上下文。
+        本方法从 SQLite 索引按路径加载完整文件结构并注册进查找表；索引中不存在
+        （无法加载）返回 ``None``，由调用方产出 ``SINK_CONTEXT_UNAVAILABLE`` gap。
+        """
+
+        if not self.index_reader:
+            return None
+        file = self.index_reader.get_file_metadata(path)
+        if file is None:
+            return None
+        self.files[path] = file
+        for method in file.get("methods", []):
+            method_id = str(method["id"])
+            self.methods[method_id] = (file, method)
+            self.methods_by_name.setdefault(str(method["name"]), []).append(method_id)
+            self.methods_by_symbol_key.setdefault(_canonical_target(method), []).append(method_id)
+        for class_info in file.get("classes", []):
+            match = (file, class_info)
+            self.classes[str(class_info["id"])] = match
+            if class_info.get("qualified_name"):
+                self.classes[str(class_info["qualified_name"])] = match
+            self.classes_by_simple.setdefault(str(class_info["name"]), []).append(match)
+        return file
+
     def build_initial(self, candidate: dict[str, Any]) -> dict[str, Any]:
         """从候选锚点和组件入口方法构建首轮最小切片。"""
 
@@ -140,7 +168,32 @@ class ContextBuilder:
                         reason=anchor.get("reason", "candidate_anchor"),
                     )
             elif path and path != "AndroidManifest.xml":
-                slice_document["unresolved"].append({"type": "anchor", "path": path, "line": line, "reason": "PATH_NOT_INDEXED"})
+                # P1-4（2026-08-15）修 sink 静默丢失：sink anchor 所在文件不在组件
+                # flow scope 时按需加载（此前静默 PATH_NOT_INDEXED，AI 看不到 sink
+                # 上下文）；索引中确实无法加载时才产出 SINK_CONTEXT_UNAVAILABLE gap。
+                if anchor.get("reason") == "sensitive_sink":
+                    loaded_file = self._load_file_on_demand(path)
+                    if loaded_file:
+                        method_id = self._method_at(path, line) if line else None
+                        if method_id:
+                            self._add_method(
+                                slice_document, method_id, selected, budget_state,
+                                reason="sensitive_sink",
+                            )
+                        else:
+                            self._add_window(
+                                slice_document, path, line or 1, selected, budget_state,
+                                reason="sensitive_sink",
+                            )
+                    else:
+                        slice_document["unresolved"].append({
+                            "type": "sink_context_unavailable",
+                            "path": path,
+                            "line": line,
+                            "reason": "SINK_CONTEXT_UNAVAILABLE",
+                        })
+                else:
+                    slice_document["unresolved"].append({"type": "anchor", "path": path, "line": line, "reason": "PATH_NOT_INDEXED"})
 
         component_name = candidate.get("component_name")
         class_match = self._resolve_class(component_name) if component_name else None

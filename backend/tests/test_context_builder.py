@@ -855,3 +855,78 @@ def test_deterministic_facts_flag_proven_value_flow(tmp_path: Path) -> None:
 
     assert facts["value_flow_reaches_sink_argument"] is True
     assert facts["deterministic_chain_verified"] is True
+
+
+def test_sink_file_outside_scope_loaded_on_demand(tmp_path: Path) -> None:
+    """P1-4 修 sink 静默丢失：sink anchor 文件不在组件 flow scope 时按需加载。
+
+    修订前 `build_initial` 对 scope 外文件只记 `PATH_NOT_INDEXED` unresolved——
+    AI 看不到 sink 上下文（实证 slice_bb21709c 8 个 context 无一含 sink 文件
+    PreferenceUtil.java）。修订后 sink anchor 文件按需从索引加载进切片。
+    """
+
+    source_root = tmp_path / "sources"
+    (source_root / "com" / "example").mkdir(parents=True)
+    (source_root / "com" / "example" / "ExportedActivity.java").write_text(
+        """package com.example;
+import android.app.Activity; import android.os.Bundle;
+public class ExportedActivity extends Activity {
+    public void onCreate(Bundle state) {
+        String url = getIntent().getStringExtra("url");
+        PreferenceUtil.removePref(url);
+    }
+}
+""", "utf-8",
+    )
+    (source_root / "com" / "example" / "PreferenceUtil.java").write_text(
+        """package com.example;
+public class PreferenceUtil {
+    public static void removePref(String key) {
+        getSharedPreferences("p", 0).edit().remove(key).apply();
+    }
+}
+""", "utf-8",
+    )
+    index = build_code_index(source_root, tmp_path / "code-index.json")
+    builder = ContextBuilder(index)
+    payload = candidate()
+    payload["sinks"] = [{"path": "com/example/PreferenceUtil.java", "line": 3, "text": "removePref"}]
+    document = builder.build_initial(payload)
+    sink_contexts = [
+        ctx for ctx in document["contexts"]
+        if "PreferenceUtil" in ctx.get("path", "")
+    ]
+    assert sink_contexts, "sink 文件不在 scope 时必须被按需加载进切片"
+    assert not any(
+        item.get("reason") == "PATH_NOT_INDEXED" for item in document["unresolved"]
+    ), "sink 文件按需加载成功后不得再有 PATH_NOT_INDEXED"
+
+
+def test_sink_file_unloadable_produces_gap(tmp_path: Path) -> None:
+    """P1-4 修 sink 静默丢失：sink 文件在索引中不存在时必须产出
+    SINK_CONTEXT_UNAVAILABLE gap，而不是无声丢弃。"""
+
+    source_root = tmp_path / "sources"
+    (source_root / "com" / "example").mkdir(parents=True)
+    (source_root / "com" / "example" / "ExportedActivity.java").write_text(
+        """package com.example;
+import android.app.Activity; import android.os.Bundle;
+public class ExportedActivity extends Activity {
+    public void onCreate(Bundle state) {
+        String url = getIntent().getStringExtra("url");
+        dispatch(url);
+    }
+}
+""", "utf-8",
+    )
+    index = build_code_index(source_root, tmp_path / "code-index.json")
+    builder = ContextBuilder(index)
+    payload = candidate()
+    payload["sinks"] = [{"path": "com/ghost/NoSuchFile.java", "line": 5, "text": "ghost"}]
+    document = builder.build_initial(payload)
+    gap = [
+        item for item in document["unresolved"]
+        if item.get("type") == "sink_context_unavailable"
+    ]
+    assert gap, "索引中不存在 sink 文件时必须产出 SINK_CONTEXT_UNAVAILABLE gap"
+    assert gap[0]["reason"] == "SINK_CONTEXT_UNAVAILABLE"
