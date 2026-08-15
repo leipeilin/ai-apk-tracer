@@ -282,6 +282,20 @@ a { color: inherit; text-decoration: none; }
 .review-ai_false_positive { color: var(--faint); background: var(--bg-soft); }
 .review-manual_false_positive { color: var(--faint); background: var(--bg-soft); text-decoration: line-through; }
 .review-dismissed { color: var(--faint); text-decoration: line-through; }
+/* R-4（2026-08-15）：动态 Receiver 暴露面按注册模块（owner）分组展示 */
+.findings-list { display: grid; gap: 22px; }
+.receiver-group { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.receiver-group-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 14px; border-bottom: 1px solid var(--line-strong); }
+.receiver-group-owner { min-width: 0; overflow: hidden; padding: 4px 9px; border-radius: 8px; background: var(--bg-soft); color: var(--text); font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.receiver-group-count { color: var(--muted); font-size: 10px; font-weight: 600; }
+.receiver-group-tiers { display: flex; flex-wrap: wrap; gap: 5px; margin-left: auto; }
+.receiver-tier-dot { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-solid); font-size: 9px; font-weight: 650; }
+.receiver-group .findings-table { border-top: 0; }
+.receiver-tier-badge { flex: none; padding: 3px 6px; border-radius: 6px; border: 1px solid currentColor; font-size: 8.5px; font-weight: 750; letter-spacing: .02em; }
+.receiver-tier-clean { color: var(--danger); background: var(--danger-soft); }
+.receiver-tier-gap { color: var(--warning); background: rgba(155,118,57,.1); }
+.receiver-tier-unresolved, .receiver-tier-unknown { color: var(--muted); background: var(--bg-soft); }
+.receiver-tier-unknown { opacity: .75; }
 
 .drawer-root { position: fixed; z-index: 50; inset: 0; display: flex; justify-content: flex-end; }
 .drawer-backdrop { position: absolute; inset: 0; border: 0; background: rgba(25, 23, 19, .48); backdrop-filter: blur(4px); cursor: default; }
@@ -399,6 +413,9 @@ a { color: inherit; text-decoration: none; }
   .filters label:last-child { border-left: 1px solid var(--line); }
   .finding-head { display: none; }
   .finding-row { grid-template-columns: 1fr 18px; padding: 14px 7px; }
+  .finding-primary > span { flex-wrap: wrap; }
+  .receiver-tier-badge { white-space: nowrap; }
+  .receiver-group-tiers { margin-left: 0; width: 100%; }
   .finding-signals, .review-state { grid-column: 1; }
   .finding-signals { grid-row: 2; }
   .review-state { grid-row: 3; }

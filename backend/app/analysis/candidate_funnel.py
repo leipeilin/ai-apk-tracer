@@ -352,6 +352,11 @@ _PIPELINE_IDENTITY_EXCLUDED_FIELDS = {
     # funnel 自身写回的分级结果：由候选事实推导而来，不得反过来参与身份计算，
     # 否则同一候选在开关开/关两种配置下会得到不同 candidate_id。
     "demotion_reason", "flow_evidence_tier",
+    # R-4（2026-08-15）：receiver 分组展示字段（owner/tier/actions），由
+    # receiver_binding + receiver_flag_tier 推导并写回候选以透传到 finding JSON；
+    # 不参与身份计算，否则 recompute 校验（_pipeline_identity_compatible）会因
+    # 写回前后字段集合不同而误判组内身份不一致。
+    "receiver_semantics",
 }
 # 组件级数据流 trace：由 detector 的 common_metadata 统一下发给同组件的每条链
 # （rules/shared/detector.py `common_metadata`），随链路数量波动且非判定依据。
@@ -439,6 +444,19 @@ class CandidateFunnel:
             candidate.pop("analysis_track", None)
             identity = build_candidate_identity(candidate)
             candidate.update(identity.as_dict())
+            # R-4（2026-08-15）：动态 receiver 候选写回分组语义（owner/tier/actions），
+            # 随候选透传到 finding JSON，供前端按业务模块分组展示（confirmed_exported
+            # 置顶）。owner 取注册点路径包前缀（前 3 段），与 R-3 聚合身份口径一致；
+            # 该字段已加入 identity 排除列表，不参与去重键。
+            if candidate.get("flow_kind") == "receiver_exposure":
+                candidate["receiver_semantics"] = {
+                    "flag_tier": candidate.get("receiver_flag_tier") or "tier_unknown",
+                    "owner": _pipeline_registration_owner(candidate),
+                    "actions": sorted({
+                        str(action)
+                        for action in (candidate.get("receiver_binding") or {}).get("actions") or []
+                    }),
+                }
             candidate["candidate_id"] = _pipeline_candidate_id(candidate, identity)
             candidate["funnel_disposition"] = deterministic_precheck(
                 candidate, self.min_l1_risk_score

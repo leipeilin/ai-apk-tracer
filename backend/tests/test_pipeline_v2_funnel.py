@@ -588,3 +588,47 @@ def test_receiver_exposure_identity_aggregation() -> None:
     d = make("control_to_sink", "com/example/util/Reg.java", None, "RECEIVER_TARGET_UNRESOLVED")
     id_ = build_candidate_identity(d)
     assert id_.scope_key != ia.scope_key, "非 receiver 候选的 scope 身份不得用 owner 投影"
+
+
+def test_receiver_semantics_written_back_for_grouping() -> None:
+    """R-4：process() 写回 receiver_semantics（owner/tier/actions）供前端按业务模块分组；
+    写回不得改变 identity（recompute 一致性）；非 receiver 候选不写回。"""
+
+    from app.analysis.candidate_funnel import CandidateFunnel, build_candidate_identity
+
+    def make(flow_kind: str, name: str, tier: str | None) -> dict:
+        return {
+            "rule_id": "DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION",
+            "flow_kind": flow_kind,
+            "component": "receiver",
+            "component_name": f"dynamic:{name}",
+            "entry_method_id": f"{name}#l:10",
+            "entry_points": [f"{name}#l:10"],
+            "entry_method_name": "registerReceiver",
+            "receiver_flag_tier": tier,
+            "receiver_binding": {
+                "registration": {"path": name},
+                "actions": ["com.example.ACTION_B", "com.example.ACTION_A"],
+            },
+            "blocking_gaps": [],
+            "sources": [{"path": name, "line": 10, "kind": "external_receiver"}],
+            "sinks": [], "propagation_paths": [],
+            "authorization_matrix": [],
+        }
+
+    rx = make("receiver_exposure", "com/xiaomi/fitness/lpa/BaseESim.java", "confirmed_exported_clean")
+    other = make("control_to_sink", "com/xiaomi/fitness/lpa/BaseESim.java", None)
+    identity_before = build_candidate_identity(rx).as_dict()
+    CandidateFunnel().process([rx, other])
+
+    # receiver 候选写回结构化分组语义（owner 取注册点路径前 3 段、actions 排序）
+    assert rx["receiver_semantics"] == {
+        "flag_tier": "confirmed_exported_clean",
+        "owner": "com/xiaomi/fitness",
+        "actions": ["com.example.ACTION_A", "com.example.ACTION_B"],
+    }, "receiver 候选必须写回 owner/tier/actions 供前端分组"
+    # 写回前后 identity 一致——receiver_semantics 在排除列表，recompute 校验不受影响
+    assert build_candidate_identity(rx).as_dict() == identity_before, \
+        "receiver_semantics 不得参与身份计算（recompute 一致性）"
+    # 非 receiver 候选不写回
+    assert "receiver_semantics" not in other, "非 receiver 候选不得写回 receiver_semantics"

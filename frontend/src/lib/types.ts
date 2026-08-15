@@ -124,6 +124,14 @@ export interface Finding {
   dataflow_status?: 'not_applicable' | 'not_proven' | 'intraprocedural' | 'interprocedural' | 'verified'
   authorization_status?: 'unknown' | 'conditional' | 'unprotected' | 'protected' | 'strongly_protected'
   guard_status?: 'absent' | 'present_effective' | 'present_partial' | 'present_bypassable' | 'unknown'
+  /** R-1（2026-08-15）：动态 receiver 暴露面的可判定性分级（规则层标注）。 */
+  receiver_flag_tier?: 'confirmed_exported_clean' | 'confirmed_exported_gap' | 'unresolved_flag' | string
+  /** R-4（2026-08-15）：动态 receiver 分组语义（funnel 写回，随候选透传）。 */
+  receiver_semantics?: {
+    flag_tier?: string
+    owner?: string
+    actions?: string[]
+  }
   authorization_matrix?: Array<{
     operation?: string
     access?: string
@@ -141,8 +149,16 @@ export interface Finding {
   impact_status?: 'potential' | 'statically_confirmed' | 'dynamically_confirmed'
   analysis_incomplete?: boolean
   review_priority?: number
+  flow_kind?: string
   component?: string
   component_name?: string
+  receiver_binding?: {
+    registration?: { path?: string; line?: number; text?: string; kind?: string; method_name?: string }
+    actions?: string[]
+    flag_status?: string
+    export_status?: string
+    [key: string]: unknown
+  }
   category?: string
   cwe?: string
   location?: string
