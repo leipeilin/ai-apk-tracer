@@ -501,6 +501,14 @@ def _refutation_basis_confirmed(
             or candidate.get("provider_exported") is False
         )
     if basis == "fixed_local_target":
+        # P0①（2026-08-15）：目标固定 ≠ 安全——未注册目标是"另一种危害（崩溃 DoS）"
+        # 而非"安全"。采信前提是"目标固定**且可达**"：registered 为 False（未注册）或
+        # 未知（规则未产出该字段）时不得采信（fail-closed），否则 AI 的 fixed_local_target
+        # 会把 DoS 候选误判为 ai_false_positive 吞掉。
+        if candidate.get("resolved_target_registered") is False:
+            return False
+        if candidate.get("resolved_target_registered") is None:
+            return False
         return candidate.get("resolved_target_fixed") is True
     if basis == "constant_sink_argument":
         return candidate.get("sink_argument_constant") is True

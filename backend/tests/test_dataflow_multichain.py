@@ -42,24 +42,29 @@ def _analyzer(
     )
 
 
-def _activity_payload(tmp_path: Path, source: str) -> dict:
+def _activity_payload(
+    tmp_path: Path, source: str, *, extra_components: list[dict] | None = None
+) -> dict:
     source_root = tmp_path / "sources"
     path = source_root / "com/example/RouterActivity.java"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, "utf-8")
     index_root = tmp_path / "index"
     descriptor = build_code_index(source_root, index_root / "code-index.json")
+    components = [{
+        "kind": "activity",
+        "name": "com.example.RouterActivity",
+        "exported": "true",
+        "permission": None,
+        "permission_protection": None,
+        "intent_filters": [],
+    }]
+    if extra_components:
+        components.extend(extra_components)
     return {
         "manifest": {
             "analysis_platform_api": 36,
-            "components": [{
-                "kind": "activity",
-                "name": "com.example.RouterActivity",
-                "exported": "true",
-                "permission": None,
-                "permission_protection": None,
-                "intent_filters": [],
-            }],
+            "components": components,
             "custom_permissions": {},
             "authority_conflicts": {},
         },
@@ -1021,10 +1026,19 @@ class WbShareTransActivity extends Activity {}
 class WbShareToStoryActivity extends Activity {}
 """
     candidates = execute(
-        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION",
+        _activity_payload(tmp_path, source, extra_components=[
+            {"kind": "activity", "name": "com.example.WbShareTransActivity", "exported": "true",
+             "permission": None, "permission_protection": None, "intent_filters": [], "actions": []},
+            {"kind": "activity", "name": "com.example.WbShareToStoryActivity", "exported": "true",
+             "permission": None, "permission_protection": None, "intent_filters": [], "actions": []},
+        ]),
     )["candidates"]
     assert len(candidates) == 1, "外部 action 参与目标决策必须被检出"
     candidate = candidates[0]
+    assert candidate.get("resolved_target_registered") is True, (
+        "WbShare 类已注册 → 目标可达，fixed 字段可采信（非 DoS）"
+    )
     assert candidate["route_injection_kind"] == "target_selection"
     assert candidate.get("resolved_target_fixed") is True, (
         "类字面量目标（Foo.class）必须判为固定——v04 §1.6 实证形态"
@@ -1210,6 +1224,7 @@ def test_resolved_target_fixed_reaches_ai_slice_and_decision(tmp_path: Path) -> 
         "flow_kind": "external_route_control",
         "route_injection_kind": "target_selection",
         "resolved_target_fixed": True,
+        "resolved_target_registered": True,
         "sinks": [{
             "path": "com/example/ExportedActivity.java", "line": 12,
             "effect_verified": True, "resolve_status": "resolved",
@@ -1487,3 +1502,213 @@ class RouterActivity extends Activity {
         )
     finally:
         reader.close()
+
+
+def _unregistered_target_payload(tmp_path: Path, source: str, *, register_web: bool) -> dict:
+    """构造路由注入 payload：MainActivity 已注册，WebActivity 可选注册。"""
+    source_root = tmp_path / "sources"
+    path = source_root / "com/example/MainActivity.java"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, "utf-8")
+    index_root = tmp_path / "index"
+    descriptor = build_code_index(source_root, index_root / "code-index.json")
+    components = [
+        {"kind": "activity", "name": "com.example.MainActivity", "exported": "true",
+         "permission": None, "permission_protection": None, "intent_filters": [], "actions": []},
+    ]
+    if register_web:
+        components.append(
+            {"kind": "activity", "name": "com.example.WebActivity", "exported": "true",
+             "permission": None, "permission_protection": None, "intent_filters": [], "actions": []},
+        )
+    return {
+        "manifest": {"analysis_platform_api": 36, "components": components,
+                     "permissions": [], "requested_permissions": []},
+        "index": {**descriptor, "allowed_index_root": index_root.resolve().as_posix()},
+    }
+
+
+def test_route_injection_unregistered_target_is_dos(tmp_path: Path) -> None:
+    """P0①：显式启动目标未在 manifest 注册 → 崩溃 DoS 候选（L1/低危）。
+
+    v04 动态验证实证：extra_close_url → go2CloseSet → WebActivity（未注册）→
+    ActivityNotFoundException → 进程崩溃（可重复触发）。**目标固定 ≠ 安全**——
+    未注册目标是"另一种危害（DoS）"而非"安全"，不得被 fixed_local_target 反证吞掉。
+    """
+
+    source = """package com.example;
+class MainActivity extends Activity {
+ void onNewIntent(Intent intent) {
+  String u = intent.getStringExtra("extra_close_url");
+  if (u != null) {
+   go2CloseSet(u);
+  }
+ }
+ void go2CloseSet(String str) {
+  Intent intent = new Intent(this, WebActivity.class);
+  intent.putExtra(WebFragment.EXTRA_URL, str);
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION",
+        _unregistered_target_payload(tmp_path, source, register_web=False),
+    )["candidates"]
+    assert len(candidates) == 1, "未注册目标显式启动必须被检出"
+    candidate = candidates[0]
+    assert candidate["resolved_target_registered"] is False, (
+        "WebActivity 未注册 → resolved_target_registered 必须为 False"
+    )
+    assert candidate["evidence_level"] == "L1", "DoS 确定性可判，降级 L1"
+    assert candidate["impact_status"] == "denial_of_service"
+    gap_codes = {gap["code"] for gap in candidate["blocking_gaps"]}
+    assert "UNREGISTERED_LAUNCH_TARGET" in gap_codes, "必须产 DoS gap"
+
+
+def test_route_injection_registered_target_keeps_l2(tmp_path: Path) -> None:
+    """P0① 对照：目标已注册 → registered=True、维持 L2、无 DoS gap。"""
+
+    source = """package com.example;
+class MainActivity extends Activity {
+ void onNewIntent(Intent intent) {
+  String u = intent.getStringExtra("extra_close_url");
+  if (u != null) {
+   go2CloseSet(u);
+  }
+ }
+ void go2CloseSet(String str) {
+  Intent intent = new Intent(this, WebActivity.class);
+  intent.putExtra(WebFragment.EXTRA_URL, str);
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION",
+        _unregistered_target_payload(tmp_path, source, register_web=True),
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["resolved_target_registered"] is True
+    assert candidate["evidence_level"] == "L2", "已注册目标维持 L2"
+    assert candidate["impact_status"] == "potential"
+    assert "UNREGISTERED_LAUNCH_TARGET" not in {
+        gap["code"] for gap in candidate["blocking_gaps"]
+    }
+
+
+def test_route_injection_local_broadcast_receiver_isolated(tmp_path: Path) -> None:
+    """P0②：LocalBroadcastManager 注册的 onReceive 入口 → 本地广播隔离 gap。
+
+    候选 11 动态验证实证：MainActivity 通过 LocalBroadcastManager.registerReceiver
+    注册 onReceive 回调（进程内分发，红线 9），外部应用无法跨进程触发——注入面
+    不成立。对齐 RECEIVER_INPUT_TO_SINK 的本地广播检测。
+    """
+
+    source = """package com.example;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  LocalBroadcastManager.getInstance(this).registerReceiver(new BroadcastReceiver() {
+   public void onReceive(Context context, Intent intent) {
+    String x = intent.getStringExtra("spm");
+    Intent i = new Intent();
+    i.setClassName("com.example", "com.example.StatService");
+    i.putExtra(StatConstant.INTENT_STAT_TYPE, x);
+    startService(i);
+   }
+  }, new IntentFilter("SYSTEM_LOGIN_ACCOUNTS_SUCCESS"));
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    receiver_candidates = [
+        c for c in candidates if c.get("entry_method_name") == "onReceive"
+    ]
+    assert receiver_candidates, "onReceive 入口候选必须存在"
+    for candidate in receiver_candidates:
+        assert candidate.get("input_control") == "local_broadcast_isolated"
+        gap_codes = {gap["code"] for gap in candidate["blocking_gaps"]}
+        assert "LOCAL_BROADCAST_ISOLATED" in gap_codes, (
+            "LocalBroadcastManager 进程内分发（红线 9）必须产隔离 gap"
+        )
+    # 对照：onCreate 入口（外部可触发）不应被误标
+    for candidate in candidates:
+        if candidate.get("entry_method_name") != "onReceive":
+            assert candidate.get("input_control") is None, (
+                "非 receiver 入口不得误标本地广播隔离"
+            )
+
+
+def test_route_injection_statistics_consumer_demoted_to_signal(tmp_path: Path) -> None:
+    """P1③：bulk + 统计语义消费方（StatService2）→ consumer_semantics=statistics。
+
+    v04 动态验证显示"目标固定 + 统计/SDK 语义消费方"5/5 误报（AuthActivity/
+    StatService2/SplashCommonUtils）——外部输入的 extras 进入固定统计服务仅触发
+    埋点上报，无敏感副作用面。开关开启时降级 signal（不占 AI 预算），默认关闭
+    行为不变。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String spm = getIntent().getStringExtra("spm");
+  Intent i = new Intent();
+  i.setClassName(ShopApp.instance, "com.example.StatService2");
+  i.putExtra(StatConstant.INTENT_STAT_TYPE, 16);
+  i.putExtra("spm", spm);
+  startService(i);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["consumer_semantics"] == "statistics", (
+        "StatService2 是明确统计消费方，必须标 statistics"
+    )
+    from app.analysis.candidate_funnel import CandidateFunnel, unproven_flow_demotion_reason
+    assert unproven_flow_demotion_reason(candidate) == "bulk_statistics_consumer"
+
+    # 默认关闭：行为不变（ai_required=True）
+    disabled = CandidateFunnel().process([dict(candidate)])
+    assert disabled.candidates[0]["ai_required"] is True
+    # 开启：降级 signal 不占 AI 预算
+    enabled = CandidateFunnel({"demote_unproven_flow": True}).process([dict(candidate)])
+    assert enabled.candidates[0]["flow_evidence_tier"] == "signal"
+    assert enabled.candidates[0]["ai_required"] is False
+
+
+def test_route_injection_non_statistics_consumer_keeps_l2(tmp_path: Path) -> None:
+    """P1③ 对照：非统计消费方（WebActivity/插件）不标 statistics、不降级。"""
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String url = getIntent().getStringExtra("extra_close_url");
+  Intent i = new Intent();
+  i.setClassName("com.example", "com.example.WebActivity");
+  i.putExtra(WebFragment.EXTRA_URL, url);
+  startActivity(i);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION",
+        _activity_payload(tmp_path, source, extra_components=[
+            {"kind": "activity", "name": "com.example.WebActivity", "exported": "true",
+             "permission": None, "permission_protection": None, "intent_filters": [], "actions": []},
+        ]),
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.get("consumer_semantics") is None, (
+        "WebActivity 消费方非统计语义，不得误标 statistics"
+    )
+    from app.analysis.candidate_funnel import unproven_flow_demotion_reason
+    assert unproven_flow_demotion_reason(candidate) is None

@@ -736,6 +736,13 @@ def deterministic_refutation_basis(candidate: Mapping[str, Any]) -> list[str]:
         # sink 的 receiver_text 由规则层确定性记录（v2026-08-09），decision 层据此
         # 为 AI 的 refutes_candidate 提供确定性反证背书（docs/CHANGELOG.md 0.3.1）。
         basis.append("local_broadcast_intra_process")
+    # P0②（2026-08-15）：入口侧本地广播隔离（对齐红线 9 语义）。路由注入规则
+    # 对 LocalBroadcastManager/EventBus 注册的 onReceive 入口产出
+    # input_control=local_broadcast_isolated + LOCAL_BROADCAST_ISOLATED gap——
+    # 进程内分发，外部应用无法跨进程触发（候选 11 动态验证实证）。与 sink 侧
+    # local_broadcast_intra_process 同根因，合并为同一确定性反证 basis。
+    if candidate.get("input_control") == "local_broadcast_isolated":
+        basis.append("local_broadcast_intra_process")
     return basis
 
 
@@ -826,6 +833,12 @@ def unproven_flow_demotion_reason(candidate: Mapping[str, Any]) -> str | None:
         return "legacy_fallback"
     if flow_kind == "control_to_sink" and "CONTROL_SCOPE_UNRESOLVED" in gap_codes:
         return "scope_unresolved"
+    # P1③（2026-08-15）：bulk_extras_forwarding 且消费方为统计语义（sink 方法名含
+    # Stat/Report 等 SDK 统计惯例）→ 降级 signal。v04 动态验证显示该形态 5/5 误报
+    # （AuthActivity/StatService2/SplashCommonUtils 固定消费方）；判定仅认规则层
+    # 显式输出的 consumer_semantics=statistics，语义未知的保留 L2。
+    if candidate.get("consumer_semantics") == "statistics":
+        return "bulk_statistics_consumer"
     return None
 
 

@@ -234,6 +234,62 @@ def _target_decision_is_fixed(match: re.Match[str], content: str) -> bool:
         return len(params) == 1 and bool(_COMPONENT_NAME_LITERAL_RE.match(params[0]))
     return False
 
+
+# 显式启动目标类提取（P0①，2026-08-15）：从 sink 方法内容中识别启动目标的
+# 类字面量形态——new Intent(this, X.class) / setClass(this, X.class) /
+# setComponent(new ComponentName("pkg","cls"))。仅匹配**类字面量**（X.class）
+# 或 ComponentName 双字符串字面量，变量/表达式（new Intent(this, clsVar)）不提取
+# ——目标类无法静态确定时不做注册检查（保守，避免把"目标不可知"误判为"未注册"）。
+_EXPLICIT_LAUNCH_CLASS_RE = re.compile(
+    r"(?:new\s+Intent\s*\(\s*[^,]+,\s*\(\s*Class\s*<\s*\?\s*>\s*\)\s*)?"
+    r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.class\b",
+)
+_EXPLICIT_COMPONENT_NAME_RE = re.compile(
+    r"new\s+ComponentName\s*\(\s*\"([^\"]+)\"\s*,\s*\"([^\"]+)\"\s*\)",
+)
+
+
+def _explicit_launch_targets(content: str) -> list[str]:
+    """提取方法中的显式启动目标 FQCN（类字面量 + ComponentName 双字面量）。
+
+    返回去重后的目标类名列表；无显式目标（目标由变量/表达式决定）返回空列表。
+    """
+
+    targets: list[str] = []
+    for match in _EXPLICIT_LAUNCH_CLASS_RE.finditer(content):
+        # 排除 setClass 自身的匹配重复：类字面量正则已覆盖 Foo.class 形态
+        class_name = match.group(1)
+        if class_name not in targets:
+            targets.append(class_name)
+    for match in _EXPLICIT_COMPONENT_NAME_RE.finditer(content):
+        combined = f"{match.group(1)}.{match.group(2)}"
+        if combined not in targets:
+            targets.append(combined)
+    return targets
+
+
+def _resolve_explicit_target_fqcn(target: str, file: dict[str, Any]) -> str:
+    """把显式目标解析为 FQCN：imports 精确映射优先，其次同包（简单名）。"""
+
+    if target.count(".") >= 1 and not target.endswith(".class"):
+        # 已含点号视为 FQCN（ComponentName 组合或 import 完整类名）
+        return target
+    imports = file.get("imports") or []
+    for imported in imports:
+        if isinstance(imported, str) and imported.endswith(f".{target}"):
+            return imported
+    package = str(file.get("package") or "")
+    return f"{package}.{target}" if package else target
+
+
+def _manifest_component_names(manifest: dict[str, Any]) -> set[str]:
+    """manifest 组件集合（FQCN）。"""
+    return {
+        str(comp.get("name") or "")
+        for comp in (manifest.get("components") or [])
+        if isinstance(comp, dict)
+    }
+
 # 全量 extras 透传：攻击者可注入任意 key，是 v04 危害的核心。
 # 两种形态都要覆盖：
 #   ① putExtras/replaceExtras 整体搬运一个 Bundle；
@@ -516,17 +572,17 @@ def _route_injection_candidates(
 
     scope_files = scope.get("files") or files
     entry_ids = {str(item) for item in (scope.get("entry_method_ids") or []) if item}
-    methods_by_id: dict[str, tuple[dict[str, Any], str]] = {}
+    methods_by_id: dict[str, tuple[dict[str, Any], str, dict[str, Any]]] = {}
     for file in scope_files:
         for method in file.get("methods") or []:
             method_id = str(method.get("id") or "")
             if method_id:
-                methods_by_id[method_id] = (method, str(file.get("path") or ""))
+                methods_by_id[method_id] = (method, str(file.get("path") or ""), file)
 
     # 从"读取了外部输入"的入口出发，沿已解析调用边求可达闭包。
     tainted_roots = {
         method_id
-        for method_id, (method, _) in methods_by_id.items()
+        for method_id, (method, _, _) in methods_by_id.items()
         if SOURCE_PATTERNS["intent_extra"].search(str(method.get("content") or ""))
         and (not entry_ids or method_id in entry_ids or _is_component_method(method, component))
     }
@@ -547,7 +603,7 @@ def _route_injection_candidates(
 
     results: list[dict[str, Any]] = []
     for method_id, root_id in sorted(reachable.items()):
-        method, path = methods_by_id[method_id]
+        method, path, file = methods_by_id[method_id]
         content = str(method.get("content") or "")
         launch_match = ROUTE_LAUNCH_METHODS.search(content)
         if not launch_match:
@@ -560,7 +616,7 @@ def _route_injection_candidates(
         if not target_match and not bulk_match:
             continue
 
-        root_method, root_path = methods_by_id[root_id]
+        root_method, root_path, root_file = methods_by_id[root_id]
         root_content = str(root_method.get("content") or "")
         source_match = SOURCE_PATTERNS["intent_extra"].search(root_content)
         if not source_match:
@@ -576,6 +632,21 @@ def _route_injection_candidates(
         target_fixed: bool | None = None
         if injection == "target_selection" and target_match:
             target_fixed = _target_decision_is_fixed(target_match, content)
+        # P0①（2026-08-15）：显式启动目标注册检查——独立于 resolved_target_fixed。
+        # v04 动态验证发现 extra_close_url → go2CloseSet → WebActivity（com.xiaomi.shop2.
+        # closeset.WebActivity）**未在 manifest 注册** → startActivity 抛
+        # ActivityNotFoundException → 崩溃 DoS（可重复触发）。**目标固定 ≠ 安全**：
+        # 未注册目标是"另一种危害（DoS）"而非"安全"，fixed_local_target 采信前提
+        # 是"目标固定且可达"。因此从 sink 方法提取显式目标类字面量，查 manifest
+        # 组件集合；未注册 → resolved_target_registered=False + DoS gap + 降级 L1。
+        registered: bool | None = None
+        explicit_targets = _explicit_launch_targets(content)
+        if explicit_targets:
+            component_names = _manifest_component_names(manifest)
+            registered = all(
+                _resolve_explicit_target_fqcn(target, file) in component_names
+                for target in explicit_targets
+            )
         gaps: list[dict[str, Any]] = [{
             "code": "ROUTE_TARGET_RESOLUTION_UNVERIFIED",
             "critical": True,
@@ -585,6 +656,75 @@ def _route_injection_candidates(
                 "静态无法枚举全部可达目标；需人工或动态确认目标集合"
             ),
         }]
+        if registered is False:
+            # 目标类未在 manifest 注册：显式启动必崩（ActivityNotFoundException）。
+            # 这是确定性静态可判的 DoS——外部可触发进程崩溃（v04 实证
+            # extra_close_url → WebActivity 崩溃链）。降级 L1/低危但仍保留候选：
+            # DoS 是真实攻击面，不应被 fixed_local_target 反证吞掉。
+            gaps.append({
+                "code": "UNREGISTERED_LAUNCH_TARGET",
+                "critical": True,
+                "method": method_id,
+                "message": (
+                    "显式启动目标未在 manifest 注册，startActivity 将抛 "
+                    "ActivityNotFoundException 导致进程崩溃（外部可重复触发 = 本地 DoS）"
+                ),
+            })
+        # P0②（2026-08-15）：receiver 入口本地广播隔离（红线 9，对齐
+        # RECEIVER_INPUT_TO_SINK 的检测）。候选 11 实证：MainActivity 通过
+        # LocalBroadcastManager.registerReceiver 注册的 onReceive 回调（进程内分发）
+        # 触发 startService——外部应用无法跨进程触发本地广播（红线 9），
+        # 注入面不成立。判定：root 方法是 onReceive 且所在文件引入
+        # LocalBroadcastManager/EventBus（进程内分发框架）→ 产 gap + input_control 标记。
+        local_broadcast_isolated = False
+        if str(root_method.get("name") or "") == "onReceive":
+            root_imports = " ".join(
+                str(item) for item in (root_file.get("imports") or [])
+                if isinstance(item, str)
+            )
+            root_content_all = str(root_file.get("content") or "")
+            if re.search(
+                r"LocalBroadcastManager|EventBus", root_imports + root_content_all
+            ):
+                local_broadcast_isolated = True
+                gaps.append({
+                    "code": "LOCAL_BROADCAST_ISOLATED",
+                    "critical": True,
+                    "method": root_id,
+                    "message": (
+                        "receiver 入口经 LocalBroadcastManager/EventBus 注册（进程内分发，"
+                        "红线 9），外部应用无法跨进程触发——注入面不成立"
+                    ),
+                })
+        # P1③（2026-08-15）：bulk 消费方语义分级（保守）——v04 动态验证显示
+        # bulk_extras_forwarding 中"目标固定 + 统计/SDK 语义消费方"5/5 误报
+        # （AuthActivity/StatService2/SplashCommonUtils 等）。仅在**显式启动目标**
+        # （setClassName/setComponent 的类名）含**明确统计语义**（Stat/Report/
+        # Trace/Log/Umeng 等 SDK 统计惯例）时输出 consumer_semantics="statistics"，
+        # 供 funnel 降级为 signal（受开关控制）；其余语义（含未知）不输出该字段——
+        # 保留 L2，不做强行推断（消费方消费外部 URL/敏感参数属语义判断，规则层不猜，
+        # 避免新误判方向）。
+        consumer_semantics: str | None = None
+        if injection == "bulk_extras_forwarding" and registered is not False:
+            class_name_match = re.search(
+                r"setClassName\s*\([^,]+,\s*\"([^\"]+)\"", content,
+            )
+            component_match = re.search(
+                r"setComponent\s*\(\s*new\s+ComponentName\s*\(\s*\"([^\"]+)\"\s*,\s*\"([^\"]+)\"\s*\)",
+                content,
+            )
+            if class_name_match:
+                consumer_name = class_name_match.group(1).rsplit(".", 1)[-1]
+            elif component_match:
+                consumer_name = component_match.group(2).rsplit(".", 1)[-1]
+            else:
+                consumer_name = ""
+            if re.search(
+                r"(?:^|\.)(?:Stat|Report|Trace|Track|Log|Umeng|Flurry|Firebase|Bugly)"
+                r"(?:Service|Helper|Trigger|Manager|Util)?(?:\d*)$",
+                consumer_name,
+            ) or re.search(r"Stat(?:istic|istics|us)?|Report|Umeng|Flurry|Bugly", consumer_name):
+                consumer_semantics = "statistics"
         if bulk_match:
             gaps.append({
                 "code": "BULK_EXTRAS_FORWARDING",
@@ -638,13 +778,21 @@ def _route_injection_candidates(
             "外部可控输入参与决定组件启动目标或被全量透传，构成路由注入面",
         )
         result = chain_to_candidate(base, chain, source_kind="intent_extra")
+        is_dos = registered is False
         result.update({
             "operation_taxonomy": "ui_navigation",
             "dataflow_status": "not_proven",
             "deterministic_chain_verified": False,
-            "impact_status": "potential",
+            # P0①（2026-08-15）：未注册目标 = 崩溃 DoS（确定性静态可判），降级 L1/低危
+            # 但仍保留候选——DoS 是真实攻击面，外部可重复触发进程崩溃。
+            "impact_status": "denial_of_service" if is_dos else "potential",
             "route_injection_kind": injection,
-            **({"resolved_target_fixed": target_fixed} if target_fixed is not None else {}),
+            # P0①（2026-08-15）：目标未注册时**不得输出 resolved_target_fixed**——
+            # "目标固定"会被决策层采信为 fixed_local_target 反证（ai_false_positive），
+            # 把 DoS 误判为误报吞掉。未注册目标不是"安全"而是"另一种危害"。
+            **({"resolved_target_fixed": target_fixed}
+               if target_fixed is not None and not is_dos else {}),
+            **({"resolved_target_registered": registered} if registered is not None else {}),
             "coverage_gaps": list(scope.get("gaps") or []),
             "guard_status": "unknown",
             "authorization_status": authorization["status"],
@@ -652,7 +800,23 @@ def _route_injection_candidates(
             "authorization_operation": operation_for_rule(rule_id, chain["sink"])[0],
             "blocking_gaps": _unique_records(gaps),
             "reachability_status": "reachable",
+            # P0②（2026-08-15）：本地广播隔离标记——AI 判定时可据此排除
+            # （红线 9 进程内分发，外部不可达）。
+            **({"input_control": "local_broadcast_isolated"} if local_broadcast_isolated else {}),
+            # P1③（2026-08-15）：bulk 消费方语义分类——statistics 供 funnel 降级 signal
+            # （受 demote_unproven_flow 开关控制）；未输出 = 语义未知，保留 L2。
+            **({"consumer_semantics": consumer_semantics} if consumer_semantics else {}),
         })
+        if is_dos:
+            result["evidence_level"] = "L1"
+            result["severity_hint"] = "low"
+            result["confidence_tier"] = "high"
+            result["title"] = "外部可控输入触发未注册目标显式启动（崩溃 DoS）"
+            result["description"] = (
+                "外部可控输入决定组件启动目标，且目标类未在 manifest 注册——"
+                "显式 startActivity 抛 ActivityNotFoundException 导致进程崩溃，"
+                "外部应用可重复触发（本地 DoS，低危）"
+            )
         results.append(result)
     return sorted(results, key=_candidate_sort_key)
 
