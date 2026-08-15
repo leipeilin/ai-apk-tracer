@@ -1807,3 +1807,27 @@ class RouterActivity extends Activity {
     )
     from app.analysis.candidate_funnel import unproven_flow_demotion_reason
     assert unproven_flow_demotion_reason(candidate) is None
+
+
+def test_receiver_flag_tier_classification(tmp_path: Path) -> None:
+    """R-1 v3：动态 receiver flag 分级三值。
+
+    实测 exported 43 条中仅 6 条干净（无三大 gap），37 条带 gap 仍无法判定——
+    分级必须 exported 叠加"无关键 gap"才算真实可判定暴露面。
+    本用例直接测 detector 的分级函数（_receiver_flag_tier），三种形态。
+    """
+
+    from shared.detector import _receiver_flag_tier
+
+    assert _receiver_flag_tier(
+        "exported", {"RECEIVER_ACTION_UNRESOLVED"},
+    ) == "confirmed_exported_gap", "exported + gap → gap 形态"
+    assert _receiver_flag_tier(
+        "exported", set(),
+    ) == "confirmed_exported_clean", "exported + 无 gap → clean 形态"
+    assert _receiver_flag_tier(
+        "unknown", {"RECEIVER_FLAG_UNKNOWN"},
+    ) == "unresolved_flag", "unknown → unresolved"
+    assert _receiver_flag_tier(
+        "legacy_unspecified", set(),
+    ) == "unresolved_flag", "legacy → unresolved（targetSdk≥26 默认 not exported）"

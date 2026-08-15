@@ -416,6 +416,12 @@ class CandidateFunnel:
         self.demote_unproven_flow = bool(
             _pipeline_setting(settings, "demote_unproven_flow", False)
         )
+        # R-2（2026-08-15）：L1 预算按可判定性排序——receiver_flag_tier 高的
+        # （confirmed_exported_clean）优先进预算。默认关闭走守门（口径 A/B 对比
+        # 后翻默认），避免改变既有预算选择行为。
+        self.l1_priority_clean = bool(
+            _pipeline_setting(settings, "l1_priority_clean", False)
+        )
 
     def process(self, candidates: list[dict[str, Any]]) -> FunnelResult:
         """原地标注候选、按三重身份分组，并只为代表项分配 AI 路由。
@@ -506,14 +512,31 @@ class CandidateFunnel:
                 representative["ai_eligible"] = True
                 representative_indexes.append(representative_index)
 
-        l1_representatives.sort(
-            key=lambda index: (
-                candidate_risk_score(candidates[index]),
-                int(candidates[index].get("review_priority") or 0),
-                candidates[index]["candidate_id"],
-            ),
-            reverse=True,
-        )
+        # R-2（2026-08-15）：L1 预算排序——开启 l1_priority_clean 时，可判定性
+        # 分级（receiver_flag_tier）优先于 risk_score：confirmed_exported_clean
+        # （6 条真实暴露面）> confirmed_exported_gap > unresolved_flag > 默认。
+        # 关闭时维持原排序（risk_score 优先），行为不变。
+        def _l1_sort_key(index: int) -> tuple:
+            candidate = candidates[index]
+            if self.l1_priority_clean:
+                tier_priority = {
+                    "confirmed_exported_clean": 4,
+                    "confirmed_exported_gap": 3,
+                    "unresolved_flag": 2,
+                }.get(candidate.get("receiver_flag_tier"), 1)
+                return (
+                    tier_priority,
+                    candidate_risk_score(candidate),
+                    int(candidate.get("review_priority") or 0),
+                    candidate["candidate_id"],
+                )
+            return (
+                candidate_risk_score(candidate),
+                int(candidate.get("review_priority") or 0),
+                candidate["candidate_id"],
+            )
+
+        l1_representatives.sort(key=_l1_sort_key, reverse=True)
         selected_l1 = l1_representatives[: self.max_l1_candidates_per_run]
         deferred_l1 = l1_representatives[self.max_l1_candidates_per_run :]
         for index in selected_l1:
@@ -576,20 +599,35 @@ def build_candidate_identity(candidate: Mapping[str, Any]) -> CandidateIdentity:
     组件级 trace 字段（随链路波动、非判定依据）不参与身份。
     """
 
+    # R-3（2026-08-15）：DYNAMIC_RECEIVER 的暴露入口是注册点文件（逐候选不同），
+    # 若按注册点文件做 scope 身份则永不合组——投影为 owner（包前缀），
+    # 与 chain 的 receiver_semantics（tier+owner+action）配合聚合。
+    _is_receiver_exposure = candidate.get("flow_kind") == "receiver_exposure"
     scope = {
         "component": {
             "kind": candidate.get("component") or candidate.get("component_kind"),
-            "name": candidate.get("component_name"),
+            "name": (
+                _pipeline_registration_owner(candidate)
+                if _is_receiver_exposure else candidate.get("component_name")
+            ),
         },
         "entry_points": candidate.get("entry_points") or [],
-        "entry_method_id": candidate.get("entry_method_id"),
+        "entry_method_id": (
+            str(candidate.get("entry_method_id") or "").split(":", 1)[0]
+            if _is_receiver_exposure else candidate.get("entry_method_id")
+        ),
         "authorization_operation": candidate.get("authorization_operation") or "component_entry",
         "path_regions": _pipeline_path_regions(candidate.get("authorization_matrix") or []),
     }
+    # R-3：receiver_exposure 候选的 entry_method_id 是注册点方法（含行号：
+    # "path#Method:line"），同方法内多行注册行号不同——投影去行号。
+    _receiver_entry = candidate.get("entry_method_id")
+    if _is_receiver_exposure and isinstance(_receiver_entry, str):
+        _receiver_entry = _receiver_entry.split(":", 1)[0]
     chain = {
         # chain_id 逐候选唯一（dataflow.py:259 对 entry/source/sink/path 取哈希），保留在候选体内
         # 供追溯，但不参与身份——否则任何两条链都不可能同组。
-        "entry_method_id": candidate.get("entry_method_id"),
+        "entry_method_id": _receiver_entry,
         "path_model": candidate.get("path_model"),
         "flow_kind": candidate.get("flow_kind"),
         "sources": _pipeline_endpoint_projection(candidate.get("sources") or []),
@@ -599,6 +637,22 @@ def build_candidate_identity(candidate: Mapping[str, Any]) -> CandidateIdentity:
         # 同一语义链在不同候选间必然波动的表层差异。
         "propagation_path_shape": _pipeline_path_shape(candidate.get("propagation_paths") or []),
     }
+    # R-3（2026-08-15）：DYNAMIC_RECEIVER 候选按 flag 分级 + 注册点 owner + action
+    # 聚合，剔除注册点行号/调用点差异——同形态（同 owner 同 tier 同 action 组合）
+    # 的 receiver 暴露面合并为一组复核，避免 277 条各自占位。sources 投影为
+    # owner+path（去行号），因为 receiver 候选的 source 就是注册点（逐行号不同）。
+    if _is_receiver_exposure:
+        chain["receiver_semantics"] = {
+            "flag_tier": candidate.get("receiver_flag_tier") or "tier_unknown",
+            "owner": _pipeline_registration_owner(candidate),
+            "actions": sorted({
+                str(action) for action in
+                (candidate.get("receiver_binding") or {}).get("actions") or []
+            }),
+        }
+        chain["sources"] = _pipeline_receiver_source_projection(
+            candidate.get("sources") or []
+        )
     facts = {
         _pipeline_fact_key(key): _pipeline_fact_projection(key, value)
         for key, value in candidate.items()
@@ -607,6 +661,18 @@ def build_candidate_identity(candidate: Mapping[str, Any]) -> CandidateIdentity:
         and key not in {"sources", "sinks", "propagation_paths"}
         and not key.startswith("ai_")
     }
+    # R-3：receiver_exposure 的 component_name 是注册点文件（dynamic:<path>），
+    # 逐注册点唯一——投影为 owner；entry_points 含行号（注册点方法行）也投影
+    # 为 owner+path，避免 facts 身份拆散同形态组。
+    if _is_receiver_exposure:
+        if "component_name" in facts:
+            facts["component_name"] = _pipeline_registration_owner(candidate)
+        if "entry_points" in facts and isinstance(facts["entry_points"], (list, tuple)):
+            facts["entry_points"] = [
+                _pipeline_entry_projection(item) for item in facts["entry_points"]
+            ]
+        if "entry_method_name" in facts:
+            facts["entry_method_name"] = "registerReceiver"
     if not candidate.get("chain_id"):
         facts["legacy_rule_identity"] = {
             "rule_id": candidate.get("rule_id"),
@@ -641,9 +707,56 @@ def _pipeline_endpoint_projection(endpoints: Sequence[Any]) -> list[Any]:
     return projected
 
 
+def _pipeline_registration_owner(candidate: Mapping[str, Any]) -> str:
+    """动态 receiver 注册点 owner：注册点文件路径的包前缀（前 3 段）。
+
+    R-3（2026-08-15）：同 owner 同 flag 同 action 的 receiver 暴露面合并为一组
+    复核（如 com/xiaomi/fitness 的多个注册点）；未知路径回退 'owner_unknown'。
+    """
+
+    registration = (candidate.get("receiver_binding") or {}).get("registration") or {}
+    path = str(registration.get("path") or candidate.get("component_name") or "")
+    if path.startswith("dynamic:"):
+        path = path[len("dynamic:"):]
+    parts = [part for part in path.split("/") if part]
+    return "/".join(parts[:3]) if len(parts) >= 3 else (path or "owner_unknown")
+
+
+def _pipeline_entry_projection(entry: Any) -> Any:
+    """receiver 入口投影：entry 字符串/对象去行号（注册点方法行逐候选不同）。"""
+
+    if isinstance(entry, str):
+        # "path#Method:line" → "path#Method"
+        return entry.split(":", 1)[0]
+    if isinstance(entry, Mapping):
+        projected = dict(entry)
+        if "method_id" in projected:
+            projected["method_id"] = str(projected["method_id"]).split(":", 1)[0]
+        return projected
+    return entry
+
+
+def _pipeline_receiver_source_projection(sources: Sequence[Any]) -> list[Any]:
+    """receiver 候选的 source 投影：注册点 source 按 owner+path 聚合（去行号）。
+
+    R-3（2026-08-15）：DYNAMIC_RECEIVER 的 source 是 registerReceiver 调用点，
+    逐注册点行号不同——按 path（去 line）保留"哪个文件注册"的语义即可。
+    """
+
+    projected: list[Any] = []
+    for source in sources:
+        if not isinstance(source, Mapping):
+            projected.append(source)
+            continue
+        projected.append({
+            "path": source.get("path"),
+            "kind": source.get("kind"),
+        })
+    return projected
+
+
 def _pipeline_path_shape(paths: Sequence[Any]) -> list[Any]:
     """Ordered method sequence of a propagation path (call shape without表层细节).
-
     顺序敏感：列表不参与 set-like 归并，因此调换顺序会产生不同的 chain_key。
     节点缺少 method_id/path 时回退到节点自身的规范化内容——否则多个无标识节点会被
     投影成同一个 None，顺序差异随之消失（实测基线 run 1660 个节点中有 4 个属此情形）。

@@ -937,6 +937,10 @@ def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         # 且可达"（已注册）；未注册目标是崩溃 DoS，不得被反证吞掉。随切片下发供 AI
         # 区分"固定且可达的误报"与"固定但未注册的 DoS"。
         "resolved_target_registered",
+        # R-1（2026-08-15）：动态 receiver flag 分级——AI 区分"确认暴露且可判定"
+        # （confirmed_exported_clean）与"无法排除暴露"（unresolved_flag），
+        # 避免对 gap 未解析形态浪费判定。
+        "receiver_flag_tier",
         # P1-5 打通（2026-08-15）：规则层产出的 sink 调用点事实——constant_sink_argument
         # 反证依赖 sink_argument_constant，no_real_call_site 反证依赖 call_site_exists
         # （红线 13 死代码）。缺这两个字段时 AI 无从输出对应 basis，交叉验证永不触发。
@@ -986,6 +990,9 @@ def _deterministic_facts(candidate: dict[str, Any]) -> dict[str, Any]:
         # P0①（2026-08-15）：目标注册事实——False 表示未注册（崩溃 DoS），
         # None 表示无显式目标可查（不参与 fixed_local_target 采信前置）。
         "resolved_target_registered": candidate.get("resolved_target_registered"),
+        # R-1（2026-08-15）：动态 receiver flag 分级（DYNAMIC_RECEIVER 规则产出；
+        # 其他规则候选无此字段为 None 时不输出）。
+        "receiver_flag_tier": candidate.get("receiver_flag_tier"),
         # P1-5 打通（2026-08-15）：sink 调用点事实——call_site_exists=False 支撑
         # no_real_call_site（红线 13 死代码），sink_argument_constant=True 支撑
         # constant_sink_argument。规则层已产出（_attach_sink_argument_facts），

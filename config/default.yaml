@@ -70,6 +70,10 @@ funnel:
   # 默认 false——开启前须完成历史回归（被降级集合中真漏洞数 = 0）与至少 3 个不同编码风格
   # APK 的复现验证，详见 docs/analysis/2026-08-15-precision-optimization-plan.md §5。
   demote_unproven_flow: false
+  # L1 预算按可判定性排序（R-2）：receiver_flag_tier 高的（confirmed_exported_clean
+  # 真实暴露面）优先进 AI 预算。默认 false——开启前须口径 A/B 对比确认 clean 形态
+  # 判定质量（详见 docs/analysis/2026-08-15-dynamic-receiver-fix-plan.md §2）。
+  l1_priority_clean: false
 
 # 上下文和请求预算。max_input_tokens 是确定性 UTF-8 近似值；max_output_tokens 会作为模型 API 的 max_tokens 发送。
 context_budget:

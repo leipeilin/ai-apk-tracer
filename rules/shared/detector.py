@@ -2334,6 +2334,24 @@ def _expand_dynamic_receiver_effects(
     }
 
 
+# R-1（2026-08-15，v3）：动态 receiver flag 分级三值——exported 需叠加"无关键 gap"
+# 才是真实可判定暴露面（实测 exported 43 条中仅 6 条干净，37 条带 target/action/
+# flag gap 仍无法判定）；供 funnel L1 预算按可判定性排序（R-2）。
+_BIG_RECEIVER_GAPS = frozenset({
+    "RECEIVER_FLAG_UNKNOWN", "RECEIVER_TARGET_UNRESOLVED", "RECEIVER_ACTION_UNRESOLVED",
+})
+
+
+def _receiver_flag_tier(flag_status: str | None, candidate_gaps: set[str]) -> str:
+    """按 flag 状态 + 关键 gap 判定 receiver 候选的可判定性分级。"""
+
+    if flag_status == "exported" and not (candidate_gaps & _BIG_RECEIVER_GAPS):
+        return "confirmed_exported_clean"
+    if flag_status == "exported":
+        return "confirmed_exported_gap"
+    return "unresolved_flag"
+
+
 def _dynamic_receiver_binding_candidates(
     rule_id: str,
     file: dict[str, Any],
@@ -2394,6 +2412,14 @@ def _dynamic_receiver_binding_candidates(
             "reachability_status": "reachable" if binding.get("externally_reachable") is True else "conditional",
             "guard_status": "absent",
         })
+        # R-1（2026-08-15，v3）：flag 分级三值——exported 需叠加"无关键 gap"
+        # 才是真实可判定暴露面；供 funnel L1 预算按可判定性排序（R-2）。
+        _flag_status = binding.get("export_status") or binding.get("flag_status")
+        _candidate_gaps = {
+            str(gap.get("code")) for gap in critical_gaps
+            if isinstance(gap, dict)
+        }
+        result["receiver_flag_tier"] = _receiver_flag_tier(_flag_status, _candidate_gaps)
         result["platform_assumptions"].append(
             "显式导出 Receiver 注册路径"
             if binding.get("flag_status") == "exported" else

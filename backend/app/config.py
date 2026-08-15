@@ -126,6 +126,13 @@ class FunnelSettings(BaseModel):
             "与至少 3 个不同风格 APK 的复现验证，方可开启。"
         ),
     )
+    l1_priority_clean: bool = Field(
+        default=False,
+        description=(
+            "L1 预算按可判定性排序（R-2）：receiver_flag_tier 高的（confirmed_exported_clean "
+            "真实暴露面）优先进 AI 预算。默认关闭：需口径 A/B 对比确认 clean 形态判定质量后开启。"
+        ),
+    )
 
 
 class ContextBudgetSettings(BaseModel):

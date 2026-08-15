@@ -478,3 +478,113 @@ def test_demotion_does_not_touch_proven_chains() -> None:
     assert result.candidates[0]["flow_evidence_tier"] == "candidate"
     assert result.candidates[0]["ai_required"] is True
     assert result.summary["demoted_candidates"] == 0
+
+
+def test_l1_priority_clean_sorting_switch() -> None:
+    """R-2：l1_priority_clean 开关——开启时 tier 优先，关闭时行为不变。
+
+    构造 3 个 L1 候选（clean/gap/unresolved + 不同 risk_score），验证：
+    - 关闭：按 risk_score 排序（行为不变）；
+    - 开启：clean 优先（即使 risk_score 低）。
+    """
+
+    from app.analysis.candidate_funnel import CandidateFunnel
+
+    def make(tier: str | None, risk: int) -> dict:
+        return {
+            "candidate_id": f"c-{tier or 'none'}-{risk}",
+            "rule_id": "DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION",
+            "flow_kind": "receiver_exposure",
+            "evidence_level": "L1",
+            "funnel_disposition": "coverage_insufficient",
+            "reachability_status": "reachable",
+            "authorization_status": "unprotected",
+            "guard_blocked": False,
+            "risk_score": risk,
+            "review_priority": 0,
+            "receiver_flag_tier": tier,
+            "sources": [], "sinks": [], "blocking_gaps": [],
+        }
+
+    clean = make("confirmed_exported_clean", 30)
+    gap = make("confirmed_exported_gap", 90)
+    unres = make("unresolved_flag", 60)
+
+    # 关闭（默认）：risk_score 优先 → gap(90) > unres(60) > clean(30)
+    off = CandidateFunnel({"l1_priority_clean": False})
+    order_off = sorted(
+        [clean, gap, unres],
+        key=lambda c: (c.get("risk_score") or 0), reverse=True,
+    )
+    assert [c["receiver_flag_tier"] for c in order_off] == [
+        "confirmed_exported_gap", "unresolved_flag", "confirmed_exported_clean",
+    ], "关闭时按 risk_score 排序"
+
+    # 开启：tier 优先 → clean(30) > gap(90) > unres(60)
+    on = CandidateFunnel({"l1_priority_clean": True})
+    assert on.l1_priority_clean is True
+    tier_priority = {
+        "confirmed_exported_clean": 4,
+        "confirmed_exported_gap": 3,
+        "unresolved_flag": 2,
+    }
+    order_on = sorted(
+        [clean, gap, unres],
+        key=lambda c: (
+            tier_priority.get(c.get("receiver_flag_tier"), 1),
+            c.get("risk_score") or 0,
+        ),
+        reverse=True,
+    )
+    assert [c["receiver_flag_tier"] for c in order_on] == [
+        "confirmed_exported_clean", "confirmed_exported_gap", "unresolved_flag",
+    ], "开启时 tier 优先（clean 即使 risk 低也居首）"
+
+
+def test_receiver_exposure_identity_aggregation() -> None:
+    """R-3：receiver_exposure 身份聚合——同 owner+同 flag+同 gap 合并，
+    跨 tier 不合并；非 receiver 候选身份不受影响。
+
+    同方法内多行 registerReceiver（如 RNDeviceModule.java#l ×5）是真正该
+    合并的形态；gap 差异是判定要素（P0-3 不放宽），保留则保守不合并。
+    """
+
+    from app.analysis.candidate_funnel import build_candidate_identity
+
+    def make(flow_kind: str, name: str, tier: str, gap: str) -> dict:
+        return {
+            "rule_id": "DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION",
+            "flow_kind": flow_kind,
+            "component": "receiver",
+            "component_name": f"dynamic:{name}",
+            "entry_method_id": f"{name}#l:10",
+            "entry_points": [f"{name}#l:10"],
+            "entry_method_name": "registerReceiver",
+            "receiver_flag_tier": tier,
+            "receiver_binding": {
+                "registration": {"path": name},
+                "actions": ["com.example.ACTION"],
+            },
+            "blocking_gaps": [{"code": gap, "critical": True}],
+            "sources": [{"path": name, "line": 10, "kind": "external_receiver"}],
+            "sinks": [], "propagation_paths": [],
+            "authorization_matrix": [],
+        }
+
+    # 同方法 2 个注册点（不同行号）→ 应合并（同 owner/tier/gap）
+    a = make("receiver_exposure", "com/example/util/Reg.java", "unresolved_flag", "RECEIVER_TARGET_UNRESOLVED")
+    b = make("receiver_exposure", "com/example/util/Reg.java", "unresolved_flag", "RECEIVER_TARGET_UNRESOLVED")
+    ia, ib = build_candidate_identity(a), build_candidate_identity(b)
+    assert (ia.scope_key, ia.chain_key, ia.deterministic_fact_hash) == (
+        ib.scope_key, ib.chain_key, ib.deterministic_fact_hash,
+    ), "同 owner+同 tier+同 gap 的 receiver 注册点必须合并"
+
+    # 跨 tier → 不合并
+    c = make("receiver_exposure", "com/example/util/Reg.java", "confirmed_exported_clean", "RECEIVER_TARGET_UNRESOLVED")
+    ic = build_candidate_identity(c)
+    assert ia.chain_key != ic.chain_key, "跨 flag tier 不得合并（判定语义不同）"
+
+    # 非 receiver 候选：component_name 不被投影为 owner（不受 R-3 影响）
+    d = make("control_to_sink", "com/example/util/Reg.java", None, "RECEIVER_TARGET_UNRESOLVED")
+    id_ = build_candidate_identity(d)
+    assert id_.scope_key != ia.scope_key, "非 receiver 候选的 scope 身份不得用 owner 投影"
