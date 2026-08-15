@@ -816,7 +816,13 @@ def unproven_flow_demotion_reason(candidate: Mapping[str, Any]) -> str | None:
     因此降级判据交给 P0-1 的作用域分析：
     - `CONTROL_SCOPE_UNRESOLVED`：分支作用域无法推断，control_to_sink 的支配关系存疑。
       P0-1 生效后，作用域可解析的块外 sink 根本不会成链；能走到这里的只有边界未知的链。
-    - `LEGACY_FLOW_FALLBACK`：轻量正则回退匹配，语义链未闭合。
+
+    **`LEGACY_FLOW_FALLBACK` / `inferred_source_to_sink` 不降级（2026-08-15 v2 收紧）**：
+    轻量正则回退仅在主分析 0 链时触发（同方法 Source/Sink），语义链"未闭合"只表示
+    规则层精度不足，**不等于无漏洞**——恰是需要 AI 判定的候选。com.mi.health 实证：
+    RouterActivity（inferred_source_to_sink）被 AI 判 flaw_holds=True、exploitability
+    全绿，若降级即漏报真漏洞（§5 守门硬门槛被打破）。样本量极小（基线/shop 复扫各 1
+    条误报、mi.health 1 条真漏洞），降级收益 < 漏报风险。
 
     已被确定性验证的链（`deterministic_chain_verified`）永不降级。
     """
@@ -829,8 +835,6 @@ def unproven_flow_demotion_reason(candidate: Mapping[str, Any]) -> str | None:
         for gap in candidate.get("blocking_gaps") or []
         if isinstance(gap, Mapping)
     }
-    if flow_kind == "inferred_source_to_sink" or "LEGACY_FLOW_FALLBACK" in gap_codes:
-        return "legacy_fallback"
     if flow_kind == "control_to_sink" and "CONTROL_SCOPE_UNRESOLVED" in gap_codes:
         return "scope_unresolved"
     # P1③（2026-08-15）：bulk_extras_forwarding 且消费方为统计语义（sink 方法名含

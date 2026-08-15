@@ -1,6 +1,6 @@
-# §8 验收指标复算报告（2026-08-15）
+# §8 验收指标复算报告（2026-08-15，v2 多 APK 扩充）
 
-> **目的**：按方案 §8 双口径复算。口径 A（P0-2 关闭）验证 P1-4/P1-5 AI 质量效果；口径 B（P0-2 生效）验证数量收敛。基线 run：`20260809T110600Z_1c55d3fb9f95_98fbe158`（com.xiaomi.shop 5.53.0）。
+> **目的**：按方案 §8 双口径复算。口径 A（P0-2 关闭）验证 P1-4/P1-5 AI 质量效果；口径 B（P0-2 生效）验证数量收敛。基线 run：`20260809T110600Z_1c55d3fb9f95_98fbe158`（com.xiaomi.shop 5.53.0）；多 APK 样本：`20260815T124147Z`（com.xiaomi.shop 复扫）、`20260815T125744Z`（com.mi.health）。
 
 ## 口径 B —— P0-2 生效后数量收敛（已实测复算）
 
@@ -15,14 +15,32 @@
 
 **关键机制确认**：138 条 control_to_sink **全部**带 `CONTROL_SCOPE_UNRESOLVED` gap——基线索引的 flow IR 由旧版本生成（无 `block_end_line`），P0-1 降级路径在规则侧检测到 IR 缺失即产 gap（`dataflow.py:451-455`），链不会判高可信 → `scope_unresolved` 降级全部命中。**P0-1 的"缺失带 gap"兜底在旧索引上直接生效**。
 
+### P0-1 真实重跑实证（com.xiaomi.shop 复扫，8-15 新代码全量）
+
+| 指标 | 基线（8-09 产物） | 复扫（8-15 新代码） | 结论 |
+|---|---|---|---|
+| control_to_sink | 141 | **33**（-77%） | ✅ P0-1 作用域化消除误链源头 |
+| 候选总数 | 274 | 193 | 随规则演进 |
+| bulk_statistics_consumer 降级 | 0 | 4（StatService2） | ✅ consumer_semantics 常量解析生效 |
+| legacy_fallback 降级 | 1 | 1（WbShare） | 误报形态 |
+
+**com.mi.health（风格差异样本）**：480 候选，control_to_sink 仅 **15**（不同编码风格），receiver_exposure 282——**证明 98.6% 误报率是电商样本特性，非普适**；该样本暴露 `legacy_fallback` 吞真漏洞风险（见 §5 守门报告 v2）。
+
 ## 口径 A —— AI 质量指标（P0-2 关闭）
 
 **基线（修复前，8-09 产物）**：AI 分析的 142 条中 unresolved 99.3%（141）、refutes 0.4%（1）、`refutation_basis` 输出 0 条。
 
+**多 APK findings 决策分布（8-15 新代码，含 P1-4/P1-5 修复）**：
+
+| 样本 | findings | unresolved | ai_likely_supported | exposure_only | 其他 |
+|---|---|---|---|---|---|
+| com.xiaomi.shop 复扫 | 160 | 90 | 17 | 45 | mixed 6 / deterministically_refuted 1 / blocked 1 |
+| com.mi.health | 461 | 308 | 63 | 90 | — |
+
 | 指标 | 现状（修复前基线） | 目标 | 复算状态 |
 |---|---|---|---|
-| AI unresolved 占比 | 99.3% | ≤60% | ⏳ 需真实 AI 重跑（3.0.7 + 事实注入） |
-| AI refutes 占比 | 0.4% | ≥30% | ⏳ 同上 |
+| AI unresolved 占比 | 99.3%（基线） | ≤60% | ⏳ 8-15 新代码样本仍以 unresolved 为主（shop 90/160、mi.health 308/461），需按口径 A 严格口径重跑统计 |
+| AI refutes 占比 | 0.4% | ≥30% | ⏳ 需真实 AI 重跑统计 |
 | 切片含 sink 上下文比例 | 待实测（见注） | 100% | ✅ 机制已加固（SINK_CONTEXT_UNAVAILABLE gap + 按需加载，本轮落地） |
 | refutation_basis 交叉验证通过率 | 0%（无 basis） | ≥80% | ⏳ 需真实 AI 重跑 |
 
@@ -32,11 +50,12 @@
 
 ## 与 §5 守门的衔接
 
-- **被降级集合真漏洞 = 0**：§5 历史回归已核（唯一被降级 WbShareResultActivity 为 v04 §1.6 实证误报）✅
-- **P0-2 默认值**：维持 `false`。口径 B 数量达标不构成翻默认值的充分条件——口径 A 未实测 + 多 APK 验证缺失，按 §5 流程保持关闭。
+- **被降级集合真漏洞 = 0**：⚠️ **v2 已推翻**——com.mi.health 的 RouterActivity（legacy_fallback 降级）为 `ai_likely_supported` 疑似真漏洞，硬门槛**未通过**（详见 §5 守门报告 v2）。P0-2 **不得翻默认值**，且 `legacy_fallback` 分支需收紧。
+- **P0-2 默认值**：维持 `false`——口径 A 未实测 + **legacy_fallback 吞真漏洞实证**，双重理由。
 
 ## 遗留
 
-1. **口径 A 真实 AI 重跑**：需在 P0-2 关闭下用 3.0.7 重跑 136 条（或抽样），实测 unresolved/refutes/basis 通过率——**最高优先未验证项**。
-2. **多 APK 验证**：本地仅 1 个 APK，需用户提供 ≥2 个风格差异大的应用（混淆/插件体系/RN bridge）重跑确认 control_to_sink 占比可复现。
-3. ai-cache 822 条不含候选输入（仅哈希），且全部为 8-09 前产物（prompt ≤ 3.0.4），无法作为口径 A 重放源。
+1. **口径 A 真实 AI 重跑**：需在 P0-2 关闭下用 3.0.7 重跑（或抽样），实测 unresolved/refutes/basis 通过率——**最高优先未验证项**。
+2. **`legacy_fallback` 降级收紧（v2 新增，P0 级）**：mi.health RouterActivity 实证 `inferred_source_to_sink` 降级会吞掉 AI 已判定成立（flaw_holds=True）的候选。建议取消该分支无条件降级，或仅降级无 AI 判定依据的候选。
+3. **多 APK 验证**：已补齐 2 个新样本（shop 复扫 + mi.health），control_to_sink 占比证实非普适（15~33 vs 141）；仍需更多样本（RN bridge 等）确认 receiver_exposure 282 条（mi.health）是否为规则噪声。
+4. ai-cache 822 条不含候选输入（仅哈希），且全部为 8-09 前产物（prompt ≤ 3.0.4），无法作为口径 A 重放源。

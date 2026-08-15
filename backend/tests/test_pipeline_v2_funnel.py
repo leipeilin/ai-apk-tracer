@@ -394,18 +394,24 @@ def _unproven_candidate(**overrides) -> dict:
     return candidate
 
 
-def test_unproven_flow_demotion_reason_matches_scope_and_legacy_only() -> None:
-    """P0-2 判据：只认 P0-1 的作用域结论与 legacy 回退，不看 sink 参数字面量性。"""
+def test_unproven_flow_demotion_reason_matches_scope_only() -> None:
+    """P0-2 判据：只认 P0-1 的作用域结论，不看 sink 参数字面量性。
+
+    v2（2026-08-15）：LEGACY_FLOW_FALLBACK 不再降级——com.mi.health RouterActivity
+    （inferred_source_to_sink）被 AI 判 flaw_holds=True 成立，降级会漏报真漏洞
+    （§5 守门硬门槛被打破）；轻量回退只是规则层精度不足，恰需 AI 判定。
+    """
 
     from app.analysis.candidate_funnel import unproven_flow_demotion_reason
 
     assert unproven_flow_demotion_reason(_unproven_candidate()) == "scope_unresolved"
 
+    # v2：legacy 回退不再降级（真实调用点需 AI 判定）
     legacy = _unproven_candidate(
         flow_kind="inferred_source_to_sink",
         blocking_gaps=[{"code": "LEGACY_FLOW_FALLBACK", "critical": True}],
     )
-    assert unproven_flow_demotion_reason(legacy) == "legacy_fallback"
+    assert unproven_flow_demotion_reason(legacy) is None
 
     # 作用域已解析的 control_to_sink：P0-1 生效后块外 sink 根本不成链，
     # 能留下来的说明 sink 受分支支配，属真实攻击面，不得降级。
