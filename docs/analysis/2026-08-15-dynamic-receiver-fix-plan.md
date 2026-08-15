@@ -12,11 +12,15 @@
 | 阶段 | 措施 | 治理点 | 实测影响 | 风险 |
 |---|---|---|---|---|
 | **R-1** | 规则侧输出 `receiver_flag_tier`（flag 分级） | 85% 候选是"flag 无法排除暴露" | 分级字段下发，供预算排序 | 低 |
-| **R-2** | funnel L1 预算按可判定性排序 | **20 条预算里 17 条是 gap 形态、仅 3 条干净** | 干净暴露面优先进预算 | 中（排序规则需守门） |
+| **R-2** | funnel L1 预算按可判定性排序 | **20 条预算里 17 条 gap 形态、仅 3 条干净；真实可判定面（exported+干净）仅 6 条** | 6 条真实暴露面全部进预算 | 中（排序规则需守门） |
 | **R-3** | 修 P0-3 去重（owner/flag/action 聚合） | findings 277 条各自为代表 | 复核量下降 | 低 |
 | **R-4** | 注册点 owner/业务模块分组展示 | 应用自身 190 条（67%）与 SDK 混排 | 前端可读性 | 低 |
 
 > ⚠️ **v1→v2 关键修正**：原方案假设"275 条白烧 AI 预算"，复核实为**预算机制已在工作**（`max_l1_candidates_per_run=20`，255 条 deferred）。因此**不再需要"降量"**（预算已降），核心变为 **"把 20 条预算花在刀刃上"**——R-2 是主修复，R-1 为其提供分级输入。
+
+> ⚠️ **v2→v3 关键修正（审查核验 2026-08-15）**：exported 43 条中**仅 6 条干净**（无三大 gap），37 条（86%）仍带 gap——"exported 全送 AI"会让 86% 仍是 gap 未解析形态，AI 大概率照样 unresolved；且干净 38 条 = legacy_unspecified 32 + exported 6，**targetSdk=36（≥26）下 legacy_unspecified 默认 not exported，真实干净暴露面仅 6 条**。据此：
+> - **R-1 分级粒度修正**：不是"exported → 全送"，而是"**exported + 无关键 gap → 优先送**"（真实可判定面 = 6 条）；带 gap 的 exported 与 unknown/legacy 同列 `unresolved_flag`（仍需解析 target/action 才可判）
+> - **建议 1/2 冲突消解**：R-2 预算排序只对该规则（已做 flag 分级）生效；"L1 informational 默认不进 AI"（原建议 2）**不适用于已分级规则**——仅适用于未做分级升级的其他 L1 规则，避免两者互相抵消（exported 被"L1 不进 AI"挡回）
 
 ---
 
@@ -29,22 +33,27 @@
 在 `_dynamic_receiver_binding_candidates`（detector.py，`_dynamic_receiver_exposures` 消费点）组装候选时新增：
 
 ```python
-# R-1（2026-08-15）：flag 分级——exported 是"确认暴露"（AI 可判定），
-# legacy_unspecified/unknown 是"无法排除暴露"（AI 判定输入不足）。
-# 供 funnel L1 预算按可判定性排序（R-2）。
+# R-1 v3（2026-08-15）：分级粒度修正——exported 需叠加"无关键 gap"才是
+# 真实可判定面（实测 exported 43 条中仅 6 条干净，37 条带 target/action/
+# flag gap 仍无法判定）。三值分级供 funnel 预算排序（R-2）：
+_BIG_RECEIVER_GAPS = {"RECEIVER_FLAG_UNKNOWN", "RECEIVER_TARGET_UNRESOLVED", "RECEIVER_ACTION_UNRESOLVED"}
 flag_status = exposure.get("status")
-candidate["receiver_flag_tier"] = (
-    "confirmed_exported" if flag_status == "exported" else
-    "unresolved_flag"  # legacy_unspecified / unknown
-)
+candidate_gaps = {str(g.get("code")) for g in candidate.get("blocking_gaps") or [] if isinstance(g, dict)}
+if flag_status == "exported" and not (candidate_gaps & _BIG_RECEIVER_GAPS):
+    candidate["receiver_flag_tier"] = "confirmed_exported_clean"   # 真实可判定暴露面
+elif flag_status == "exported":
+    candidate["receiver_flag_tier"] = "confirmed_exported_gap"     # 暴露但 target/action 未解析
+else:
+    candidate["receiver_flag_tier"] = "unresolved_flag"            # legacy_unspecified / unknown
 ```
 
-- **字段**：`receiver_flag_tier` ∈ {`confirmed_exported`, `unresolved_flag`}（两值，避免过度细分）
+- **字段**：`receiver_flag_tier` ∈ {`confirmed_exported_clean`, `confirmed_exported_gap`, `unresolved_flag`}（三值）
 - 同时把 `flag_status` 原值带上（诊断用）
 - 该字段进 `_candidate_summary` 白名单（context_builder）与 `deterministic_facts`（供 AI 区分"确认暴露"与"无法排除"）
 
 ### 验收
-- 单测：`exported` → `confirmed_exported`；`unknown`/`legacy_unspecified` → `unresolved_flag`；`not_exported`/`local` 不产出（已 reportable=False）
+- 单测：`exported + 无三大 gap` → `confirmed_exported_clean`；`exported + 有 gap` → `confirmed_exported_gap`；`unknown`/`legacy_unspecified` → `unresolved_flag`；`not_exported`/`local` 不产出（已 reportable=False）
+- 样本复跑：282 条候选带 `receiver_flag_tier`，`confirmed_exported_clean` 数量 = **6**（与实测一致）
 - 样本复跑：282 条候选带 `receiver_flag_tier`，`confirmed_exported` 数量 ≈ 43（与 flag 分布一致）
 
 ---
@@ -59,22 +68,24 @@ candidate["receiver_flag_tier"] = (
 
 ```python
 def _l1_ai_sort_key(candidate):
-    # R-2（2026-08-15）：预算优先"可判定的干净暴露面"——
-    # confirmed_exported（AI 可判定）> unresolved_flag（AI 输入不足）> 默认。
+    # R-2 v3（2026-08-15）：预算优先"真实可判定的干净暴露面"——
+    # confirmed_exported_clean（6 条，AI 可判定）> confirmed_exported_gap
+    # （暴露但 target/action 未解析）> unresolved_flag（legacy/unknown）> 默认。
     tier = candidate.get("receiver_flag_tier")
-    tier_priority = 3 if tier == "confirmed_exported" else 2 if tier == "unresolved_flag" else 1
-    # 无三大 gap（flag/target/action 未解析）的干净形态再优先
-    gap_codes = {str(g.get("code")) for g in candidate.get("blocking_gaps") or [] if isinstance(g, dict)}
-    clean = int(not (gap_codes & {"RECEIVER_FLAG_UNKNOWN", "RECEIVER_TARGET_UNRESOLVED", "RECEIVER_ACTION_UNRESOLVED"}))
-    return (tier_priority, clean, candidate_risk_score(candidate))
+    tier_priority = {
+        "confirmed_exported_clean": 4,
+        "confirmed_exported_gap": 3,
+        "unresolved_flag": 2,
+    }.get(tier, 1)
+    return (tier_priority, candidate_risk_score(candidate))
 ```
 
-- 排序：`confirmed_exported + clean` > `confirmed_exported` > `unresolved_flag + clean` > 默认
+- 排序：`confirmed_exported_clean` > `confirmed_exported_gap` > `unresolved_flag` > 默认
 - **全局适用**（非 DYNAMIC_RECEIVER 专属）：无 `receiver_flag_tier` 的候选 tier_priority=1，排序靠后但不会被挤出（预算内按序）
 
 ### 验收（双口径）
 - **口径 A（R-2 关闭）**：行为不变（现排序）——回归测试保障
-- **口径 B（R-2 开启）**：样本复跑，20 条预算中干净形态占比从 3/20 提升至 ≥15/20；`confirmed_exported` 全部进预算（43 条若超预算，按 clean 优先）
+- **口径 B（R-2 开启）**：样本复跑，**6 条 `confirmed_exported_clean` 全部进预算**；20 条预算中干净形态（clean）占比从 3/20 提升至 ≥6/20（真实可判定面 6 条全覆盖），其余预算按 tier 序填充
 - 新增单测：构造 mixed tier 候选，断言排序键优先级正确
 
 ---
@@ -143,10 +154,10 @@ R-4 前端分组展示             ← 依赖 R-1 字段，最后
 
 | 指标 | 现状 | 目标（R-1+R-2+R-3 后） |
 |---|---|---|
-| 20 条预算中干净形态 | 3/20 | ≥15/20 |
-| `confirmed_exported` 进预算 | 部分（未按 flag 优先） | 全部（预算内） |
+| 20 条预算中干净形态 | 3/20 | **6 条真实可判定面（exported+干净）全覆盖**，干净占比 ≥6/20 |
+| `confirmed_exported_clean` 进预算 | 部分（未按 tier 优先） | **全部（预算内，6 条）** |
 | 该规则 findings 组数 | 277 | 30-60 组 |
-| AI unresolved 占比（该规则） | 269/277 | 预算内干净形态判定质量提升（目标以 R-2 复跑实测） |
-| 前端分组 | 平铺 | confirmed_exported 组置顶可见 |
+| AI unresolved 占比（该规则） | 269/277 | 预算内 clean 形态判定质量提升（目标以 R-2 复跑实测） |
+| 前端分组 | 平铺 | confirmed_exported_clean 组置顶可见 |
 
-> ⚠️ **守门**：R-2 改变预算选择策略，**默认关闭**（配置开关 `funnel.l1_priority_clean`，默认 false），先复跑对比口径 A/B，确认干净形态判定质量后翻默认——与 §5 守门同流程。
+> ⚠️ **守门**：R-2 改变预算选择策略，**默认关闭**（配置开关 `funnel.l1_priority_clean`，默认 false），先复跑对比口径 A/B，确认 clean 形态判定质量后翻默认——与 §5 守门同流程。
