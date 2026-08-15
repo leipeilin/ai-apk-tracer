@@ -1263,3 +1263,100 @@ def test_resolved_target_fixed_reaches_ai_slice_and_decision(tmp_path: Path) -> 
         f"resolved_target_fixed=True 时 fixed_local_target 应被生产路径采信为 "
         f"ai_false_positive，实际 {decision.get('evidence_decision')}"
     )
+
+
+def test_sink_argument_constant_all_literal_callers(tmp_path: Path) -> None:
+    """P1-5 打通：wrapper 的全部调用点实参为字面量 → sink_argument_constant=True。
+
+    removePref(context, "fixed_key") 形态——v04 实证的"写固定 key 的 SP 无危害"
+    误报场景，决策层可凭 constant_sink_argument 反证闭环。
+    """
+
+    source = """package com.example;
+import android.content.SharedPreferences;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String x = getIntent().getStringExtra("x");
+  if (x != null) {
+   doRemove("fixed_key");
+  }
+ }
+ static void doRemove(String key) {
+  SharedPreferences sp = getSharedPreferences("p", 0);
+  SharedPreferences.Editor ed = sp.edit();
+  ed.remove(key);
+  ed.apply();
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_INTENT_TO_SENSITIVE_SINK", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) >= 1, "control_to_sink 链必须被检出"
+    for candidate in candidates:
+        assert candidate["call_site_exists"] is True
+        assert candidate["sink_argument_constant"] is True, (
+            "wrapper 全部调用点实参为字面量时必须判常量——constant_sink_argument 反证的依据"
+        )
+
+
+def test_sink_argument_constant_variable_caller(tmp_path: Path) -> None:
+    """wrapper 存在变量实参调用点 → sink_argument_constant=False（不可采信）。"""
+
+    source = """package com.example;
+import android.content.SharedPreferences;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String x = getIntent().getStringExtra("x");
+  String key = getIntent().getStringExtra("key");
+  if (x != null) {
+   doRemove(key);
+  }
+ }
+ static void doRemove(String key) {
+  SharedPreferences sp = getSharedPreferences("p", 0);
+  SharedPreferences.Editor ed = sp.edit();
+  ed.remove(key);
+  ed.apply();
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_INTENT_TO_SENSITIVE_SINK", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) >= 1
+    for candidate in candidates:
+        assert candidate["call_site_exists"] is True
+        assert candidate["sink_argument_constant"] is False, (
+            "变量实参调用点存在时不得判常量——误判 True 会被采信为 ai_false_positive（假阴性）"
+        )
+
+
+def test_attach_sink_argument_facts_dead_code(tmp_path: Path) -> None:
+    """_attach_sink_argument_facts：sink 方法无任何调用者 → call_site_exists=False。"""
+
+    from shared.detector import _attach_sink_argument_facts
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String x = getIntent().getStringExtra("x");
+ }
+ static void neverCalled(String key) {
+  getSharedPreferences("p", 0).edit().remove(key).apply();
+ }
+}
+"""
+    payload = _activity_payload(tmp_path, source)
+    candidates = [{
+        "sinks": [{
+            "method_id": "com/example/RouterActivity.java#RouterActivity.neverCalled:13",
+        }],
+    }]
+    reader = RuleIndexReader(payload["index"])
+    try:
+        _attach_sink_argument_facts(candidates, reader)
+    finally:
+        reader.close()
+    assert candidates[0]["call_site_exists"] is False, "无调用者的 sink 必须标记死代码"
+    assert "sink_argument_constant" not in candidates[0]

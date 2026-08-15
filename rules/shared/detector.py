@@ -393,6 +393,9 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
                         candidates.append(candidate)
     finally:
         if reader:
+            # P1-5 打通（2026-08-15）：在 reader 关闭前为候选补齐
+            # call_site_exists / sink_argument_constant 两项规则事实。
+            _attach_sink_argument_facts(candidates, reader)
             reader.close()
     result = {
         "protocol_version": "1.0.0",
@@ -2490,6 +2493,91 @@ def _webview_crypto_match(rule_id: str, code: str, file: dict) -> dict | None:
         return None
 
     return None
+
+
+# 组件生命周期入口由系统调用，索引中不存在 resolved 调用者——不视为死代码。
+_COMPONENT_LIFECYCLE_ENTRIES = frozenset({
+    "onCreate", "onNewIntent", "onStart", "onResume", "onPause", "onStop",
+    "onDestroy", "onReceive", "onStartCommand", "onBind", "onRebind",
+    "onUnbind", "query", "insert", "update", "delete", "openFile", "call",
+    "onTransact", "handleMessage",
+})
+_STRING_LITERAL_RE = re.compile(r"[\"'][^\"']*[\"']")
+# 编译期常量引用（JADX 伪代码实参形态）：以全大写段结尾的点分路径
+# （AccountConstants.PREF_C_UID / PREF_MODE_LASTTIME）或单段全大写标识符。
+# Android 惯例 static final 常量全大写命名；JADX 局部变量几乎总是小写（str/str2）。
+# 末段非全大写（Constants.HomePageVersion.VersionType）无法静态确认，保守不认。
+_CONSTANT_REF_RE = re.compile(r"(?:[A-Z][A-Za-z0-9_]*\.)*[A-Z][A-Z0-9_]+")
+
+
+def _attach_sink_argument_facts(
+    candidates: list[dict[str, Any]], reader: "RuleIndexReader | None"
+) -> None:
+    """为候选补齐 `call_site_exists` / `sink_argument_constant` 两项规则事实。
+
+    P1-5 打通（2026-08-15）：`no_real_call_site` 反证依赖 `call_site_exists is False`
+    （红线 13 死代码）；`constant_sink_argument` 反证依赖
+    `sink_argument_constant is True`（sink 参数为编译期常量，攻击者不可控）。
+
+    判定规则（保守，宁可漏判不可误判——误判会被决策层采信为 ai_false_positive）：
+    - sink 方法是组件生命周期/框架回调入口 → `call_site_exists=True`（系统调用，
+      索引中不存在 resolved 调用者是正常形态，不是死代码）；
+    - 其余方法：全索引无任何 resolved 调用者 → `call_site_exists=False`；
+    - 有调用者时：**所有调用点**中，除首个"上下文"实参（ctx/this/App 实例形态）
+      外的数据实参**全部为字符串字面量** → `sink_argument_constant=True`；
+      任一数据实参是变量/常量引用/表达式，或调用点形态不符 → False（不采信）。
+    """
+
+    if reader is None:
+        return
+    for candidate in candidates:
+        sink = next((
+            item for item in candidate.get("sinks") or []
+            if isinstance(item, dict) and item.get("method_id")
+        ), None)
+        method_id = str(sink.get("method_id") or "") if sink else ""
+        if not method_id:
+            continue
+        short = method_id.rsplit("#", 1)[-1]
+        method_name = short.split(":", 1)[0].rsplit(".", 1)[-1]
+        if method_name in _COMPONENT_LIFECYCLE_ENTRIES:
+            candidate["call_site_exists"] = True
+            continue
+        callers = reader.sink_callers(method_id)
+        if not callers:
+            candidate["call_site_exists"] = False
+            continue
+        candidate["call_site_exists"] = True
+        candidate["sink_argument_constant"] = all(
+            _call_args_literal_except_context(args) for args in callers
+        )
+
+
+# 首个实参的"上下文形态"：this/context/ctx/App 实例/getContext() 等。识别后从
+# 数据参数中排除（PreferenceUtil(Context, key) 形态）；单数据参数方法
+# （doRemove(key)）无 context 首参时全部实参参与常量性判定。
+_CONTEXT_ARG_RE = re.compile(
+    r"(?:this|super|mContext|context|ctx|getContext\(\)"
+    r"|[\w$]+App\.instance|[\w$.]*(?:Activity|Context|Service|Application))"
+)
+
+
+def _call_args_literal_except_context(args: list[str]) -> bool:
+    """单个调用点的实参常量性：排除上下文首参后，数据实参全部为
+    字符串字面量或编译期常量引用。"""
+
+    if not args:
+        return False
+    start = 1 if _CONTEXT_ARG_RE.fullmatch(str(args[0]).strip()) else 0
+    data_args = args[start:]
+    if not data_args:
+        return False
+    for arg in data_args:
+        stripped = str(arg).strip()
+        if _STRING_LITERAL_RE.fullmatch(stripped) or _CONSTANT_REF_RE.fullmatch(stripped):
+            continue
+        return False
+    return True
 
 
 def _base(rule_id: str, component: dict, level: str, files: list[dict], manifest: dict, description: str) -> dict:

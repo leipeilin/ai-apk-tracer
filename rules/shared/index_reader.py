@@ -117,6 +117,29 @@ class RuleIndexReader:
         """关闭当前规则执行期间持有的索引连接。"""
         self.db.close()
 
+    def sink_callers(self, method_id: str) -> list[list[str]]:
+        """全索引中 resolved 到指定方法的调用点实参列表（解压后字符串化）。
+
+        P1-5 打通（2026-08-15）：供规则层产出 `call_site_exists` 与
+        `sink_argument_constant` 两项候选事实——sink wrapper（如
+        PreferenceUtil.removePref）在索引中的真实调用点存在性，以及各调用点
+        实参的常量性。只读查询，返回空列表表示无调用者（死代码信号）。
+        """
+
+        rows = self.db.execute(
+            "SELECT arguments_json FROM call_sites WHERE resolved_target_id = ?",
+            (method_id,),
+        ).fetchall()
+        callers: list[list[str]] = []
+        for row in rows:
+            try:
+                parsed = _load_json(row["arguments_json"])
+            except Exception:  # 单条脏数据不影响其余调用点
+                continue
+            if isinstance(parsed, list):
+                callers.append([str(item) for item in parsed])
+        return callers
+
     def component_files(self, component_name: str) -> list[dict[str, Any]]:
         """按 FQCN 或精确源码路径查询组件，简单名仅在全局唯一时回退。"""
 
