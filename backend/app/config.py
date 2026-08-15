@@ -133,6 +133,17 @@ class FunnelSettings(BaseModel):
             "真实暴露面）优先进 AI 预算。默认关闭：需口径 A/B 对比确认 clean 形态判定质量后开启。"
         ),
     )
+    l1_skip_ai: bool = Field(
+        default=True,
+        description=(
+            "L1 informational 候选默认不进 AI（建议 2）：L1 承载'暴露事实/无法判定'而非"
+            "'漏洞成立'（实证：AI 在 L1 上 0 supported、漏洞报告全来自 L2），coverage_insufficient/"
+            "deterministically_refuted 形态不占预算。例外保留 AI 有可判定输入的面："
+            "receiver_flag_tier=confirmed_exported_clean 与 funnel_disposition 在 "
+            "{exposure_only, high_risk_uncertain}（其他规则族 L1 确定性暴露面）。"
+            "false 完全回退旧行为。"
+        ),
+    )
 
 
 class ContextBudgetSettings(BaseModel):

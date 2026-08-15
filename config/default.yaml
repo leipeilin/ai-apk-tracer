@@ -74,6 +74,14 @@ funnel:
   # 真实暴露面）优先进 AI 预算。默认 false——开启前须口径 A/B 对比确认 clean 形态
   # 判定质量（详见 docs/analysis/2026-08-15-dynamic-receiver-fix-plan.md §2）。
   l1_priority_clean: false
+  # L1 informational 候选默认不进 AI（建议 2）：L1 承载"暴露事实/无法判定"而非
+  # "漏洞成立"（实证：AI 在 L1 上 0 supported、漏洞报告全来自 L2）。coverage_insufficient /
+  # deterministically_refuted 形态不占预算；例外保留 AI 有可判定输入的面：
+  # receiver_flag_tier=confirmed_exported_clean 与 funnel_disposition ∈
+  # {exposure_only, high_risk_uncertain}（其他规则族 L1 确定性暴露面）。
+  # 默认 true；false 完全回退旧行为。
+  # 详见 docs/analysis/2026-08-15-informational-skip-ai-plan.md。
+  l1_skip_ai: true
 
 # 上下文和请求预算。max_input_tokens 是确定性 UTF-8 近似值；max_output_tokens 会作为模型 API 的 max_tokens 发送。
 context_budget:

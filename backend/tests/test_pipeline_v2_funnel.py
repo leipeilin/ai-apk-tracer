@@ -541,6 +541,115 @@ def test_l1_priority_clean_sorting_switch() -> None:
     ], "开启时 tier 优先（clean 即使 risk 低也居首）"
 
 
+def test_l1_skip_ai_pure_function() -> None:
+    """建议 2：_l1_skip_ai 判据——L1 挡掉 coverage_insufficient/deterministically_refuted；
+    例外保留 receiver clean 可判定面 + 其他规则族 L1 确定性暴露面（exposure_only/
+    high_risk_uncertain）；L2（含 severity=informational 形态）完全不受影响。"""
+
+    from app.analysis.candidate_funnel import _l1_skip_ai
+
+    def make(level: str, disposition: str, tier: str | None = None) -> dict:
+        cand = {
+            "evidence_level": level,
+            "funnel_disposition": disposition,
+        }
+        if tier is not None:
+            cand["receiver_flag_tier"] = tier
+        return cand
+
+    # 挡掉：gap 未解析（282 报告核心白烧面）与确定性反驳
+    assert _l1_skip_ai(make("L1", "coverage_insufficient")) is True
+    assert _l1_skip_ai(make("L1", "deterministically_refuted")) is True
+    # 例外①：receiver clean 可判定面（即使 funnel 带 coverage_insufficient）
+    assert _l1_skip_ai(make("L1", "coverage_insufficient", "confirmed_exported_clean")) is False
+    assert _l1_skip_ai(make("L1", "exposure_only", "confirmed_exported_clean")) is False
+    # 例外②：其他规则族 L1 确定性暴露面（无 critical gap 的 L1）
+    assert _l1_skip_ai(make("L1", "exposure_only")) is False
+    assert _l1_skip_ai(make("L1", "high_risk_uncertain")) is False
+    # L2/L3 不受影响：L2 severity=informational 形态（IMPLICIT_BROADCAST_SENSITIVE_DATA 实测）
+    assert _l1_skip_ai(make("L2", "deterministically_refuted")) is False
+    assert _l1_skip_ai(make("L2", "coverage_insufficient")) is False
+    assert _l1_skip_ai(make("L3", "coverage_insufficient")) is False
+
+
+def test_l1_skip_ai_process_budget_default() -> None:
+    """建议 2：l1_skip_ai 默认 true——coverage_insufficient 的 L1 候选不进 AI 预算
+    （保留候选、不产生 ai_skipped）；开关 false 时行为不变（进预算）。"""
+
+    from app.analysis.candidate_funnel import CandidateFunnel
+
+    def make(cid: str) -> dict:
+        return {
+            "candidate_id": cid,
+            "rule_id": "DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION",
+            "flow_kind": "receiver_exposure",
+            "component": "receiver",
+            "component_name": "dynamic:com/xiaomi/fitness/lpa/BaseESim.java",
+            "entry_method_id": "com/xiaomi/fitness/lpa/BaseESim.java#onCreate:510",
+            "entry_points": ["com/xiaomi/fitness/lpa/BaseESim.java#onCreate:510"],
+            "entry_method_name": "registerReceiver",
+            "evidence_level": "L1",
+            "receiver_flag_tier": "unresolved_flag",
+            "receiver_binding": {
+                "registration": {"path": "com/xiaomi/fitness/lpa/BaseESim.java", "line": 510},
+                "actions": ["com.x.ACT"],
+            },
+            "blocking_gaps": [],
+            "coverage_gaps": [{"code": "RECEIVER_TARGET_UNRESOLVED", "critical": True}],
+            "sources": [{"path": "com/xiaomi/fitness/lpa/BaseESim.java", "line": 510, "kind": "external_receiver"}],
+            "sinks": [], "propagation_paths": [],
+            "authorization_status": "unprotected",
+            "authorization_matrix": [],
+            "locations": [{"artifact": "code", "path": "com/xiaomi/fitness/lpa/BaseESim.java", "line": 510}],
+            "limitations": [], "platform_assumptions": [],
+        }
+
+    # 默认（l1_skip_ai=true）：coverage_insufficient 不进预算
+    cand = make("c-gap")
+    result = CandidateFunnel({"max_l1_candidates_per_run": 1}).process([cand])
+    assert result.summary["l1_ai_selected_count"] == 0, "默认 true：gap 形态 L1 不得占用预算"
+    assert cand.get("ai_eligible") is not True
+    assert cand.get("analysis_status") != "ai_skipped", "不送 AI 不是分析缺陷，不得产生 ai_skipped"
+    assert cand.get("funnel_disposition") == "coverage_insufficient", "候选仍保留 gap 事实"
+
+    # 开关关闭：行为不变（gap 形态仍进预算，与现状一致）
+    cand2 = make("c-gap2")
+    result2 = CandidateFunnel({"max_l1_candidates_per_run": 1, "l1_skip_ai": False}).process([cand2])
+    assert result2.summary["l1_ai_selected_count"] == 1, "关闭时维持旧行为：gap 形态进预算"
+
+
+def test_l1_skip_ai_l2_untouched() -> None:
+    """建议 2：L2 候选不受影响——仍走 AI 预算（P1-5 交叉验证兜底照旧），
+    informational 治理与 P1-5 是互补非替代。"""
+
+    from app.analysis.candidate_funnel import CandidateFunnel
+
+    cand = {
+        "candidate_id": "c-l2",
+        "rule_id": "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+        "flow_kind": "control_to_sink",
+        "component": "activity",
+        "component_name": "com/example/WbShareResultActivity.java",
+        "entry_method_id": "com/example/WbShareResultActivity.java#onCreate:42",
+        "entry_points": ["com/example/WbShareResultActivity.java#onCreate:42"],
+        "evidence_level": "L2",
+        "deterministic_chain_verified": False,
+        "funnel_disposition": "coverage_insufficient",
+        "blocking_gaps": [],
+        "coverage_gaps": [{"code": "DATAFLOW_UNRESOLVED", "critical": True}],
+        "sources": [{"path": "com/example/WbShareResultActivity.java", "line": 42}],
+        "sinks": [{"path": "com/example/WbShareResultActivity.java", "line": 60, "kind": "sensitive_call"}],
+        "propagation_paths": [{"text": "onCreate -> sink", "status": "fact"}],
+        "authorization_status": "unknown",
+        "authorization_matrix": [],
+        "locations": [{"artifact": "code", "path": "com/example/WbShareResultActivity.java", "line": 42}],
+        "limitations": [], "platform_assumptions": [],
+    }
+    result = CandidateFunnel({"max_l1_candidates_per_run": 1}).process([cand])
+    assert result.summary["ai_representative_count"] == 1, "L2 候选不受 l1_skip_ai 影响，仍进 AI"
+    assert cand.get("ai_eligible") is True
+
+
 def test_receiver_exposure_identity_aggregation() -> None:
     """R-3：receiver_exposure 身份聚合——同 owner+同 flag+同 gap 合并，
     跨 tier 不合并；非 receiver 候选身份不受影响。

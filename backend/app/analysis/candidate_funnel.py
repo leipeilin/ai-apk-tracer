@@ -427,6 +427,14 @@ class CandidateFunnel:
         self.l1_priority_clean = bool(
             _pipeline_setting(settings, "l1_priority_clean", False)
         )
+        # 建议 2（2026-08-15）：L1 informational 候选默认不进 AI——L1 承载
+        # "暴露事实/无法判定"而非"漏洞成立"（实证：AI 在 L1 上 0 supported、
+        # 漏洞报告全来自 L2）。coverage_insufficient / deterministically_refuted
+        # 形态不占预算；例外保留 AI 有可判定输入的面（receiver clean 可判定面 +
+        # 其他规则族 L1 确定性暴露面）。默认 true；false 完全回退旧行为。
+        self.l1_skip_ai = bool(
+            _pipeline_setting(settings, "l1_skip_ai", True)
+        )
 
     def process(self, candidates: list[dict[str, Any]]) -> FunnelResult:
         """原地标注候选、按三重身份分组，并只为代表项分配 AI 路由。
@@ -525,6 +533,13 @@ class CandidateFunnel:
                 # 需要 AI，也不得把 guard_blocked 候选本身送进 AI 切片。
                 continue
             if representative.get("evidence_level") == "L1":
+                # 建议 2（2026-08-15）：L1 informational 默认不进 AI——L1 承载
+                # "暴露事实/无法判定"而非"漏洞成立"，AI 在 L1 上零增量（0 supported）。
+                # 只保留 AI 有可判定输入的面进预算（receiver clean 可判定面 +
+                # 其他规则族 L1 确定性暴露面）；挡掉的面保留候选+gap+人工队列，
+                # 不送 AI 判定（不产生 ai_skipped gap）。
+                if self.l1_skip_ai and _l1_skip_ai(representative):
+                    continue
                 l1_representatives.append(representative_index)
             else:
                 representative["ai_eligible"] = True
@@ -818,6 +833,32 @@ def representative_identity(candidate: Mapping[str, Any]) -> dict[str, str]:
         field: str(candidate.get(field) or "")
         for field in ("scope_key", "chain_key", "deterministic_fact_hash")
     }
+
+
+def _l1_skip_ai(candidate: Mapping[str, Any]) -> bool:
+    """建议 2（2026-08-15）：L1 informational 候选是否跳过 AI（返回 True = 不进预算）。
+
+    判据（依据 125744Z 实测：L1 375 条 = exposure_only 83 + high_risk_uncertain 1 +
+    coverage_insufficient 279 + deterministically_refuted 12）：
+    - 只作用于 evidence_level=L1；L2（含 severity=informational 形态，如
+      IMPLICIT_BROADCAST_SENSITIVE_DATA deterministically_refuted）完全不受影响，
+      P1-5 交叉验证兜底照旧——informational 治理与 P1-5 是互补非替代。
+    - 例外（AI 有可判定输入，保留）：
+      ① receiver_flag_tier=confirmed_exported_clean（R-1 receiver 确定性 clean 面）；
+      ② funnel_disposition ∈ {exposure_only, high_risk_uncertain}（其他规则族的
+        L1 确定性暴露面：ACTIVITY/SERVICE/RECEIVER/PROVIDER EXPORTED 等，无 critical gap）。
+    - 挡掉（AI 无输入或已被反驳）：coverage_insufficient（gap 未解析，282 报告核心
+      白烧面）/ deterministically_refuted（确定性反驳，无需 AI）。
+    挡掉的面保留候选+gap+人工队列，不送 AI 判定，也不产生 ai_skipped coverage gap。
+    """
+
+    if candidate.get("evidence_level") != "L1":
+        return False
+    if candidate.get("receiver_flag_tier") == "confirmed_exported_clean":
+        return False
+    if candidate.get("funnel_disposition") in {"exposure_only", "high_risk_uncertain"}:
+        return False
+    return True
 
 
 def deterministic_precheck(candidate: Mapping[str, Any], min_l1_risk_score: int = 80) -> str:
