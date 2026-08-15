@@ -233,6 +233,13 @@ def decide_candidate(candidate: Mapping[str, Any]) -> Decision:
                 "ai_false_positive",
                 "L2_REFUTED_WITH_DETERMINISTIC_NEGATIVE_PROOF",
             )
+        if _cross_validated_refutation_basis(snapshot, analysis):
+            return _decision(
+                evidence_level,
+                severity,
+                "ai_false_positive",
+                "L2_REFUTED_WITH_CROSS_VALIDATED_BASIS",
+            )
         return _decision(
             evidence_level,
             severity,
@@ -426,6 +433,75 @@ def _deterministic_negative_proof(candidate: Mapping[str, Any]) -> bool:
     return _nonempty_sequence(
         candidate.get("verified_invalid_sources")
     ) or _nonempty_sequence(candidate.get("verified_invalid_sinks"))
+
+
+def _cross_validated_refutation_basis(
+    candidate: Mapping[str, Any], analysis: Mapping[str, Any]
+) -> bool:
+    """P1-5：采信 AI 的 refutation_basis，但**每一项都必须被规则事实独立证实**。
+
+    设计要点（安全边界）：AI 自报的 basis 可能是幻觉。若无条件采信，真漏洞会被判成
+    ai_false_positive——把"高误报"翻转成"漏报"，方向更坏。项目已有先例：AI 自标
+    evidence_refs 无效必须拒绝（AI_EVIDENCE_REF_INVALID 不在证据不足白名单内）。
+
+    因此这里只做"AI 指认 + 机制复核"：AI 负责指出**哪一条**确定性反证成立，
+    验证完全由 candidate.deterministic_facts（P1-4 注入，规则层静态计算）完成。
+    任一项对不上、或所需事实缺失，整体不予采信 —— fail-closed。
+    """
+
+    # coverage 门禁与既有确定性负证保持同一标准：域内覆盖不完整时不允许自动否定。
+    if not coverage_allows(candidate, "negative_proof"):
+        return False
+
+    basis = _refutation_basis_values(candidate, analysis)
+    if not basis:
+        return False
+
+    facts = candidate.get("deterministic_facts")
+    if not isinstance(facts, Mapping) or not facts:
+        # 没有规则事实可交叉验证 → 无从复核 AI 断言，维持人工。
+        return False
+
+    return all(_refutation_basis_confirmed(item, candidate, facts) for item in basis)
+
+
+def _refutation_basis_values(
+    candidate: Mapping[str, Any], analysis: Mapping[str, Any]
+) -> list[str]:
+    for source in (candidate, analysis):
+        raw = source.get("refutation_basis") if isinstance(source, Mapping) else None
+        if isinstance(raw, (list, tuple)) and raw:
+            return [str(item) for item in raw if isinstance(item, str) and item.strip()]
+    return []
+
+
+def _refutation_basis_confirmed(
+    basis: str, candidate: Mapping[str, Any], facts: Mapping[str, Any]
+) -> bool:
+    """单项 basis 是否被规则层确定性事实证实。未知取值一律不采信。"""
+
+    if basis == "in_process_terminus":
+        # 值流未到达 Sink 实参 = 攻击者数据没有流出去，与"进程内终点"语义一致。
+        return facts.get("value_flow_reaches_sink_argument") is False
+    if basis == "guard_fail_closed":
+        return (
+            facts.get("guard_status") == "present_effective"
+            or candidate.get("guard_status") == "present_effective"
+        )
+    if basis == "non_exported_provider":
+        # 组件未导出/受强权限保护属确定性事实，规则层已在 authorization 中给出。
+        return (
+            facts.get("authorization_status") in _PROTECTED_AUTHORIZATION
+            or candidate.get("exported") is False
+            or candidate.get("provider_exported") is False
+        )
+    if basis == "fixed_local_target":
+        return candidate.get("resolved_target_fixed") is True
+    if basis == "constant_sink_argument":
+        return candidate.get("sink_argument_constant") is True
+    if basis == "no_real_call_site":
+        return candidate.get("call_site_exists") is False
+    return False
 
 
 def _negative_reason_data(value: Any) -> bool:

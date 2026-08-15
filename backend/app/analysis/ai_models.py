@@ -236,7 +236,22 @@ class L2ReviewOutput(StrictAIModel):
         default="", min_length=0, max_length=2000,
         description="为既有 confidence_tier 补充的一句理由；不改动 confidence_tier 本身",
     )
-    analysis_complete: bool = Field(description="当前 L2 阶段是否无需额外上下文即可结束；与 verdict 值相互独立")
+    refutation_basis: list[
+        Literal[
+            "non_exported_provider",
+            "fixed_local_target",
+            "constant_sink_argument",
+            "in_process_terminus",
+            "no_real_call_site",
+            "guard_fail_closed",
+        ]
+    ] = Field(
+        default_factory=list, max_length=8,
+        description=(
+            "refutes_candidate 的静态确定性反证依据；每项必须与 candidate.deterministic_facts "
+            "一致，决策层会逐项交叉验证，不一致或事实缺失即不予采信"
+        ),
+    )
     analysis_complete: bool = Field(description="当前 L2 阶段是否无需额外上下文即可结束；与 verdict 值相互独立")
 
 

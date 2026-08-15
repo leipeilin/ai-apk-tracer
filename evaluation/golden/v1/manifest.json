@@ -80,7 +80,7 @@
       "target_model": "L2ReviewOutput",
       "model_version": "1",
       "schema_file": "ai_l2_review_output.schema.json",
-      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+      "schema_sha256": "60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3"
     },
     {
       "id": "missing-analysis-complete",
@@ -89,7 +89,7 @@
       "target_model": "L2ReviewOutput",
       "model_version": "1",
       "schema_file": "ai_l2_review_output.schema.json",
-      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+      "schema_sha256": "60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3"
     },
     {
       "id": "extra-field",
@@ -98,7 +98,7 @@
       "target_model": "L2ReviewOutput",
       "model_version": "1",
       "schema_file": "ai_l2_review_output.schema.json",
-      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+      "schema_sha256": "60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3"
     },
     {
       "id": "invalid-enum",
@@ -107,7 +107,7 @@
       "target_model": "L2ReviewOutput",
       "model_version": "1",
       "schema_file": "ai_l2_review_output.schema.json",
-      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+      "schema_sha256": "60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3"
     },
     {
       "id": "repairable-json",
@@ -116,7 +116,7 @@
       "target_model": "L2ReviewOutput",
       "model_version": "1",
       "schema_file": "ai_l2_review_output.schema.json",
-      "schema_sha256": "bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952"
+      "schema_sha256": "60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3"
     }
   ]
 }

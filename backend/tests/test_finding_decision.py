@@ -948,3 +948,82 @@ def test_deterministic_supported_kept_with_entry_method_id() -> None:
     )
     DecisionEngine().apply([candidate])
     assert candidate["evidence_decision"] == "supported"
+
+
+def test_refutation_basis_accepted_only_when_confirmed_by_rule_facts() -> None:
+    """P1-5：AI 的 refutation_basis 每一项都必须被规则事实证实才采信。"""
+
+    from app.findings.decision import decide_candidate
+
+    confirmed = l2_candidate(
+        verdict="refutes_candidate",
+        deterministic_chain_verified=False,
+        refutation_basis=["in_process_terminus"],
+        deterministic_facts={"value_flow_reaches_sink_argument": False},
+    )
+    decision = decide_candidate(confirmed)
+    assert decision["review_status"] == "ai_false_positive"
+    assert "L2_REFUTED_WITH_CROSS_VALIDATED_BASIS" in decision["reason_codes"]
+
+
+def test_refutation_basis_rejected_when_facts_contradict() -> None:
+    """AI 声称"进程内终点"但规则事实显示值流已到达 Sink 实参 → 不采信。
+
+    这是本机制最重要的安全边界：无条件采信 AI 自报 basis 会把"高误报"翻转成"漏报"。
+    """
+
+    from app.findings.decision import decide_candidate
+
+    contradicted = l2_candidate(
+        verdict="refutes_candidate",
+        deterministic_chain_verified=False,
+        refutation_basis=["in_process_terminus"],
+        deterministic_facts={"value_flow_reaches_sink_argument": True},
+    )
+    decision = decide_candidate(contradicted)
+    assert decision["review_status"] == "pending_manual"
+    assert "L2_REFUTED_WITHOUT_DETERMINISTIC_NEGATIVE_PROOF" in decision["reason_codes"]
+
+
+def test_refutation_basis_rejected_when_facts_missing() -> None:
+    """没有 deterministic_facts 可交叉验证时 fail-closed，退回人工。"""
+
+    from app.findings.decision import decide_candidate
+
+    no_facts = l2_candidate(
+        verdict="refutes_candidate",
+        deterministic_chain_verified=False,
+        refutation_basis=["in_process_terminus"],
+    )
+    assert decide_candidate(no_facts)["review_status"] == "pending_manual"
+
+
+def test_refutation_basis_requires_every_item_confirmed() -> None:
+    """多项 basis 只要有一项对不上，整体不予采信——不做"部分采信"。"""
+
+    from app.findings.decision import decide_candidate
+
+    partial = l2_candidate(
+        verdict="refutes_candidate",
+        deterministic_chain_verified=False,
+        refutation_basis=["in_process_terminus", "guard_fail_closed"],
+        deterministic_facts={
+            "value_flow_reaches_sink_argument": False,
+            "guard_status": "absent",  # 与 guard_fail_closed 矛盾
+        },
+    )
+    assert decide_candidate(partial)["review_status"] == "pending_manual"
+
+
+def test_unknown_refutation_basis_never_accepted() -> None:
+    """未知取值一律不采信，防止 AI 编造 basis 绕过机制。"""
+
+    from app.findings.decision import decide_candidate
+
+    fabricated = l2_candidate(
+        verdict="refutes_candidate",
+        deterministic_chain_verified=False,
+        refutation_basis=["totally_made_up_reason"],
+        deterministic_facts={"value_flow_reaches_sink_argument": False},
+    )
+    assert decide_candidate(fabricated)["review_status"] == "pending_manual"

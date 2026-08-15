@@ -113,7 +113,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 2.0.3
   system_file: l2-review/2.0.3/system.md
@@ -129,7 +129,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 2.0.4
   system_file: l2-review/2.0.4/system.md
@@ -145,7 +145,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 3.0.0
   system_file: l2-review/3.0.0/system.md
@@ -161,7 +161,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 3.0.1
   system_file: l2-review/3.0.1/system.md
@@ -177,7 +177,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 3.0.4
   system_file: l2-review/3.0.4/system.md
@@ -193,7 +193,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 3.0.5
   system_file: l2-review/3.0.5/system.md
@@ -209,7 +209,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 3.0.6
   system_file: l2-review/3.0.6/system.md
@@ -225,7 +225,23 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
+- id: l2-review
+  version: 3.0.7
+  system_file: l2-review/3.0.7/system.md
+  user_file: l2-review/3.0.7/user.md
+  allowed_placeholders:
+  - l2_review_input_json
+  input_model: L2ReviewInput
+  output_model: L2ReviewOutput
+  input_schema_file: ai_l2_review_input.schema.json
+  output_schema_file: ai_l2_review_output.schema.json
+  template_sha256:
+    system: a2be8ec1391689000045f4b5b5450b0e873908501d92ff00082f3d8e402fd858
+    user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
+  schema_sha256:
+    input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 3.0.3
   system_file: l2-review/3.0.3/system.md
@@ -241,7 +257,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 3.0.2
   system_file: l2-review/3.0.2/system.md
@@ -257,7 +273,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: l2-review
   version: 2.0.2
   system_file: l2-review/2.0.2/system.md
@@ -273,7 +289,7 @@ prompts:
     user: b6ba71288d29b2c4e7e2e588a19e2a9db36b856942a743a115f42b0ef7b09717
   schema_sha256:
     input: cf0d607c9aea70271b548970f91fdf4b48d873fc015a60d279b210d56a6b803c
-    output: bcde19d81c0e9dc2137ade8115cbde3b5d4fb8f56a06cb9d98ad9214231cb952
+    output: 60fe5b0135eaf469382c249adc8578f7ac1d0992084a58747cd62eed8f8eb9f3
 - id: finalization
   version: 1.0.3
   system_file: finalization/1.0.3/system.md
@@ -288,7 +304,7 @@ prompts:
     system: f8ed1050668dcb89b4f3acb3b71d738e58af9b6534c12fdc5a301567fcabd4c2
     user: 8c8726df05dab208859d117efe83b070f08c62546373b16ace43935af2b41e52
   schema_sha256:
-    input: adf90e596fadf6de73407362a884798bd20e53a761602889454e0df2a1020895
+    input: c1e205659d9c502671813572c7e6c39f4be02d8787b610e72931602301c88b5f
     output: 5f5e15e3037583022bd478ccc4f3bf9db6d5aacc4e67445d0e7b42cab5afc4ba
 - id: finalization
   version: 1.0.2
@@ -304,7 +320,7 @@ prompts:
     system: c887e8ee77acfa1ec7ea221d5892fd385046d61dff82e18acd34faae7f72dee0
     user: 8c8726df05dab208859d117efe83b070f08c62546373b16ace43935af2b41e52
   schema_sha256:
-    input: adf90e596fadf6de73407362a884798bd20e53a761602889454e0df2a1020895
+    input: c1e205659d9c502671813572c7e6c39f4be02d8787b610e72931602301c88b5f
     output: 5f5e15e3037583022bd478ccc4f3bf9db6d5aacc4e67445d0e7b42cab5afc4ba
 - id: repair
   version: 1.0.1
@@ -336,5 +352,5 @@ prompts:
     system: bf9cd9d54d43c284b5d2d1d7934c985c49b132acc8be86778c610ff9e120aad5
     user: 8c8726df05dab208859d117efe83b070f08c62546373b16ace43935af2b41e52
   schema_sha256:
-    input: adf90e596fadf6de73407362a884798bd20e53a761602889454e0df2a1020895
+    input: c1e205659d9c502671813572c7e6c39f4be02d8787b610e72931602301c88b5f
     output: 5f5e15e3037583022bd478ccc4f3bf9db6d5aacc4e67445d0e7b42cab5afc4ba

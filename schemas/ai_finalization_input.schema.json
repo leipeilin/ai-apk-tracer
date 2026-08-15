@@ -655,6 +655,23 @@
           "title": "Reachability Class",
           "type": "string"
         },
+        "refutation_basis": {
+          "description": "refutes_candidate 的静态确定性反证依据；每项必须与 candidate.deterministic_facts 一致，决策层会逐项交叉验证，不一致或事实缺失即不予采信",
+          "items": {
+            "enum": [
+              "non_exported_provider",
+              "fixed_local_target",
+              "constant_sink_argument",
+              "in_process_terminus",
+              "no_real_call_site",
+              "guard_fail_closed"
+            ],
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Refutation Basis",
+          "type": "array"
+        },
         "reverse_exclusion": {
           "description": "逐项对照反向排除红线清单（§4），说明为何不算漏洞或为何排除；supports_candidate 时须给出",
           "items": {

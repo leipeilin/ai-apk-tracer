@@ -9,8 +9,23 @@ import pytest
 import yaml
 
 import app.analysis.prompt_registry as prompt_registry_module
+from app.analysis.ai import _PROMPT_VERSIONS
 from app.analysis.prompt_registry import PromptRegistry, PromptRegistryError
 from app.config import WORKSPACE_ROOT
+
+# 生效版本从 _PROMPT_VERSIONS 读取，不硬编码——否则切换生效版本后这两条防线仍在校验
+# 旧版本，新版本的漏声明会静默逃逸（2026-08-15 切 3.0.7 时实际发生过：测试报的是
+# 3.0.4 未声明 refutation_basis 枚举，而 3.0.4 根本不该有该字段）。
+_OUTPUT_SCHEMA_FILES = {
+    "preflight": "ai_preflight_output.schema.json",
+    "l1-triage": "ai_l1_triage_output.schema.json",
+    "l2-review": "ai_l2_review_output.schema.json",
+    "finalization": "ai_finalization_output.schema.json",
+}
+_ACTIVE_PROMPT_CASES = [
+    (prompt_id, _PROMPT_VERSIONS[prompt_id], schema_file)
+    for prompt_id, schema_file in _OUTPUT_SCHEMA_FILES.items()
+]
 
 
 def _isolated_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[PromptRegistry, Path, Path]:
@@ -185,14 +200,8 @@ def test_patch_prompts_state_strict_stage_boundaries() -> None:
 
 
 @pytest.mark.parametrize(
-    ("prompt_id", "version", "schema_file"),
-    [
-        ("preflight", "1.0.1", "ai_preflight_output.schema.json"),
-        ("l1-triage", "2.0.4", "ai_l1_triage_output.schema.json"),
-        ("l2-review", "3.0.4", "ai_l2_review_output.schema.json"),
-        ("finalization", "1.0.3", "ai_finalization_output.schema.json"),
-    ],
-    )
+    ("prompt_id", "version", "schema_file"), _ACTIVE_PROMPT_CASES
+)
 def test_prompt_declares_every_required_output_field(prompt_id, version, schema_file) -> None:
     """回归：提示词漏声明必填字段会导致该阶段 100% schema_invalid。
 
@@ -348,11 +357,7 @@ def _extract_all_enums(node: object, out: list[tuple[str, list[str]]]) -> None:
 
 @pytest.mark.parametrize(
     ("prompt_id", "version", "schema_file"),
-    [
-        ("l1-triage", "2.0.4", "ai_l1_triage_output.schema.json"),
-        ("l2-review", "3.0.4", "ai_l2_review_output.schema.json"),
-        ("finalization", "1.0.3", "ai_finalization_output.schema.json"),
-    ],
+    [case for case in _ACTIVE_PROMPT_CASES if case[0] != "preflight"],
 )
 def test_prompt_declares_every_schema_enum_value(prompt_id, version, schema_file) -> None:
     """回归：提示词未声明 schema 枚举值会导致 literal_error。
