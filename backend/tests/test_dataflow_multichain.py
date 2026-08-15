@@ -1079,3 +1079,187 @@ class RouterActivity extends Activity {
     assert "resolved_target_fixed" not in candidate, (
         "无目标决策时不得输出该字段——避免把'无目标决策'误读为'目标不固定'"
     )
+
+
+def test_route_injection_target_not_fixed_external_input_with_literal_key(tmp_path: Path) -> None:
+    """混合形态负例①：setAction(intent.getStringExtra("action_name"))。
+
+    2026-08-15 修订前用 search 匹配参数区任意字符串字面量，"action_name" 只是
+    getStringExtra 的 key、不是目标值，却被误判 fixed=True → AI 可凭 fixed_local_target
+    反证 → ai_false_positive → 真漏洞压成漏报（方向更坏）。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  Intent intent = new Intent();
+  intent.setAction(intent.getStringExtra("action_name"));
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1, "外部输入参与 action 决策必须被检出"
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "target_selection"
+    assert candidate.get("resolved_target_fixed") is False, (
+        "getStringExtra 的 key 不是目标值：action 完全由外部输入决定，不得判为固定"
+    )
+
+
+def test_route_injection_target_not_fixed_external_cls_with_literal_in_call(tmp_path: Path) -> None:
+    """混合形态负例②：setClassName(this, getIntent().getStringExtra("cls"))。
+
+    类名来自外部输入，"cls" 只是 extra key。修订前误判 fixed=True。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  Intent intent = new Intent();
+  intent.setClassName(this, getIntent().getStringExtra("cls"));
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "target_selection"
+    assert candidate.get("resolved_target_fixed") is False, (
+        "类名来自外部输入，任一参数外部可控即不得判为固定"
+    )
+
+
+def test_route_injection_target_not_fixed_external_pkg_fixed_cls(tmp_path: Path) -> None:
+    """混合形态负例③：setClassName(getIntent().getStringExtra("pkg"), "com.example.Target")。
+
+    类名虽为字面量，但包名来自外部输入——setClassName(pkg, cls) 中两者共同决定目标
+    组件，pkg 可控即目标不固定。修订前因 args 中存在任意字符串字面量误判 True。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  Intent intent = new Intent();
+  intent.setClassName(getIntent().getStringExtra("pkg"), "com.example.Target");
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "target_selection"
+    assert candidate.get("resolved_target_fixed") is False, (
+        "包名外部可控时目标不固定——setClassName 的两个分量必须都是字面量"
+    )
+
+
+def test_route_injection_target_not_fixed_concatenated_action(tmp_path: Path) -> None:
+    """混合形态负例④：setAction("prefix_" + evil)——拼接表达式。
+
+    字符串前缀 + 外部变量的拼接结果是外部可控的，不得判为固定。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  String evil = getIntent().getStringExtra("action");
+  Intent intent = new Intent();
+  intent.setAction("com.example.prefix_" + evil);
+  startActivity(intent);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "target_selection"
+    assert candidate.get("resolved_target_fixed") is False, (
+        "拼接表达式结果外部可控，不得判为固定"
+    )
+
+
+def test_resolved_target_fixed_reaches_ai_slice_and_decision(tmp_path: Path) -> None:
+    """端到端流转：规则字段 → 切片摘要与 deterministic_facts → decision 采信。
+
+    2026-08-15 修订前该字段只在决策层可读（candidate 顶层），AI 输入切片
+    （_candidate_summary 白名单 + deterministic_facts）均无——3.0.7 提示词要求
+    refutation_basis 每一项必须在 candidate.deterministic_facts 中找到对应事实，
+    AI 看不到字段就无从输出 basis，交叉验证永不触发（safe 但无效）。
+    本用例验证：切片双通道下发 + 决策层 _refutation_basis_confirmed 采信。
+    """
+
+    from app.analysis.context_builder import ContextBuilder
+    from app.findings.decision import decide_candidate
+    from test_context_builder import build_index, candidate as _ctx_candidate
+
+    builder = ContextBuilder(build_index(tmp_path))
+    payload = _ctx_candidate()
+    payload.update({
+        "rule_id": "ACTIVITY_EXTERNAL_ROUTE_INJECTION",
+        "flow_kind": "external_route_control",
+        "route_injection_kind": "target_selection",
+        "resolved_target_fixed": True,
+        "sinks": [{
+            "path": "com/example/ExportedActivity.java", "line": 12,
+            "effect_verified": True, "resolve_status": "resolved",
+        }],
+        "blocking_gaps": [{"code": "ROUTE_TARGET_RESOLUTION_UNVERIFIED", "critical": True}],
+    })
+    document = builder.build_initial(payload)
+    summary = document["candidate"]
+
+    # ① 顶层摘要必须携带该字段（_candidate_summary 白名单）
+    assert summary.get("resolved_target_fixed") is True, "切片候选摘要必须下发 resolved_target_fixed"
+    # ② deterministic_facts 也必须携带（3.0.7 提示词要求 basis 事实在此可查）
+    assert summary["deterministic_facts"].get("resolved_target_fixed") is True, (
+        "deterministic_facts 必须包含 resolved_target_fixed，否则 AI 无从输出 fixed_local_target"
+    )
+
+    # ③ 生产决策路径采信：DecisionEngine.decide（orchestrator 实际入口）读 AI 的
+    # refutation_basis，经 _cross_validated_refutation_basis 与 deterministic_facts
+    # 交叉验证后采信为 ai_false_positive。修订前该机制只接在 decide_candidate
+    # （测试入口），生产路径从不调用，且 ROUTE_TARGET_RESOLUTION_UNVERIFIED 不在
+    # 证据不足白名单——AI 否定在生产上被双重拦截（safe 但无效）。
+    from app.findings.decision import DecisionEngine
+
+    decision_input = dict(summary)
+    decision_input.update({
+        "review_status": "pending_ai",
+        "analysis_status": "ai_completed",
+        "evidence_level": "L2",
+        "verified_evidence_refs": [{"context_id": "ctx-1", "line": 12, "claim": "verified"}],
+        "invalid_evidence_refs": [],
+        "locations": [{"artifact": "code", "path": "com/example/ExportedActivity.java", "line": 12}],
+        "ai_analysis": {
+            "verdict": "refutes_candidate",
+            "refutation_basis": ["fixed_local_target"],
+            "verified_evidence_refs": [{"context_id": "ctx-1", "line": 12, "claim": "verified"}],
+            "evidence_refs_valid": True,
+            "semantic_evidence_complete": True,
+            "flaw_holds": False,
+            "exploitability": {"entry_reachable": False, "exfiltration_channel": "absent"},
+            "harm": {"impact_type": "none"},
+            "reachability_class": "remote",
+            "impact_vector": {"confidentiality": "none", "integrity": "none", "availability": "none"},
+            "summary": "目标固定本包，非任意启动",
+            "confidence_tier": "high",
+            "guard_status": "unknown",
+            "analysis_complete": True,
+        },
+    })
+    decision = DecisionEngine().decide(decision_input)
+    assert decision.get("evidence_decision") == "ai_false_positive", (
+        f"resolved_target_fixed=True 时 fixed_local_target 应被生产路径采信为 "
+        f"ai_false_positive，实际 {decision.get('evidence_decision')}"
+    )

@@ -875,6 +875,11 @@ def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         # （基线 run unresolved 135/136 = 99.3%）。
         "flow_kind", "dataflow_status", "deterministic_chain_verified",
         "operation_taxonomy", "impact_status", "final_reaching_state", "input_control",
+        # P1-5 打通（2026-08-15）：路由注入规则输出的目标固定性事实。3.0.7 提示词要求
+        # refutation_basis 每一项必须在 candidate.deterministic_facts 中找到对应事实；
+        # 若切片不下发该字段，AI 无从输出 fixed_local_target，交叉验证永不触发
+        # （safe 但无效）。顶层摘要与 deterministic_facts 双通道下发。
+        "resolved_target_fixed",
     }
     summary = {key: deepcopy(value) for key, value in candidate.items() if key in allowed}
     summary["deterministic_facts"] = _deterministic_facts(candidate)
@@ -914,6 +919,9 @@ def _deterministic_facts(candidate: dict[str, Any]) -> dict[str, Any]:
             for gap in candidate.get("blocking_gaps") or []
             if isinstance(gap, dict) and gap.get("critical") is True
         }),
+        # P1-5 打通（2026-08-15）：路由注入规则输出的目标固定性事实（仅 target_selection
+        # 类候选产出；bulk_extras_forwarding 无目标决策，该字段为 None 时不输出）。
+        "resolved_target_fixed": candidate.get("resolved_target_fixed"),
     }
 
 

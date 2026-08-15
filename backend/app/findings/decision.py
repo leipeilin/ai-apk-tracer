@@ -123,6 +123,11 @@ _EVIDENCE_INSUFFICIENCY_GAPS = frozenset({
     # 注意：AI_EVIDENCE_REF_INVALID（引用本身无效 = AI 自标证据无效）仍保持
     # 白名单外——防幻觉铁律不变，只有"引用有效但语义覆盖不全"才豁免。
     "AI_EVIDENCE_SEMANTIC_INCOMPLETE",
+    # P2-6（2026-08-15）：路由注入规则的目标解析 gap——"路由目标由运行期值决定，
+    # 静态无法枚举全部可达目标"是纯静态限制（证据不足），与 SYMBOL_TARGET_AMBIGUOUS
+    # 同类，非确定性冲突。若不入白名单，AI 的 refutes（fixed_local_target 反证）会被
+    # _applicable_critical_gap 拦回，交叉验证采信在生产上永不生效（safe 但无效）。
+    "ROUTE_TARGET_RESOLUTION_UNVERIFIED",
 })
 
 
@@ -876,6 +881,13 @@ class DecisionEngine:
                 basis for basis in deterministic_basis
                 if basis in _SDK_SEMANTIC_REFUTATIONS
             ]
+        # P1-5 接线（v2026-08-15 修订）：AI 的 refutation_basis 六值（fixed_local_target 等）
+        # 经 _cross_validated_refutation_basis 与 candidate.deterministic_facts 逐项交叉验证
+        # 通过后，同样构成确定性否定背书。修订前该机制只接在 decide_candidate（测试/兼容
+        # 入口），生产路径 DecisionEngine.decide 从未调用——AI 输入切片也看不到
+        # resolved_target_fixed 等字段，交叉验证在生产上永不触发（safe 但无效）。
+        if not deterministic_basis and _cross_validated_refutation_basis(candidate, analysis):
+            deterministic_basis = list(_refutation_basis_values(candidate, analysis)) or []
         if guard_blocked and verdict not in _REFUTATION_OUTCOMES:
             # 方案 X'（v2026-08-09）：guard 阻断 = "条件不可利用"（如 debuggable guard 在
             # release 包拦死链路），不是误报（区别于 deterministically_refuted）——调试

@@ -124,16 +124,23 @@ COMPONENT_FLOW_ENTRIES = {
 ROUTE_TARGET_METHODS = re.compile(
     r"\b(?:setClassName|setComponent|setClass|setAction|setPackage)\s*\(",
 )
-# 目标决策调用中"目标静态固定"的强证据（P1-5 打通，2026-08-15）：
+# 目标决策调用中"目标静态固定"的强证据（P1-5 打通，2026-08-15；2026-08-15 修订）：
 #   - 类字面量：setClass(this, WbShareTransActivity.class)；
-#   - 字符串字面量：setClassName("pkg","cls") / setAction("ACTION") / setPackage("pkg")
-#     / setComponent(new ComponentName("pkg","cls"))。
-# 变量、表达式、常量引用（setAction(intent.getAction()) / setClassName(this, str)
-# / setAction(Constants.XXX)）一律不算固定——判定错误方向是：误判 fixed 会被决策层
-# 采信为 fixed_local_target 反证（ai_false_positive），等于把真漏洞压成漏报，因此
-# 只认强证据，其余全部返回 False。
-_TARGET_CLASS_LITERAL_RE = re.compile(r"\b\w+(?:\.\w+)*\.class\b")
-_TARGET_STRING_LITERAL_RE = re.compile(r"[\"'][^\"']*[\"']")
+#   - 纯字符串字面量参数：setClassName("pkg","cls") / setAction("ACTION") / setPackage("pkg")；
+#   - setComponent(new ComponentName("pkg","cls"))：组件名两个分量均为字符串字面量。
+# 判定按方法语义 + 顶层参数整体匹配。修订前用 search 匹配参数区任意位置的字符串字面量，
+# 会把 getStringExtra("key") 的 key、拼接表达式的前缀误判为目标固定——方向恰是
+# "误判 fixed → 采信 fixed_local_target → ai_false_positive → 漏报"。因此：
+#   - setAction/setPackage：唯一参数必须是纯字符串字面量；
+#   - setClass：第二参数（目标类）必须是纯类字面量；
+#   - setClassName：前两个参数（包名+类名）必须**都是**纯字符串字面量——任一外部可控即不固定；
+#   - setComponent：唯一参数必须是 new ComponentName(纯字符串, 纯字符串)。
+# 变量、方法调用、拼接表达式、常量引用一律 False。
+_STRING_LITERAL_FULL = re.compile(r"^(?:\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')$")
+_CLASS_LITERAL_FULL = re.compile(r"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\.class$")
+_COMPONENT_NAME_LITERAL_RE = re.compile(
+    r"^new\s+ComponentName\s*\(\s*\"(?:[^\"\\]|\\.)*\"\s*,\s*\"(?:[^\"\\]|\\.)*\"\s*\)$"
+)
 
 
 def _matching_paren_end(content: str, opening: int) -> int | None:
@@ -162,20 +169,70 @@ def _matching_paren_end(content: str, opening: int) -> int | None:
     return None
 
 
+def _split_top_level_args(args: str) -> list[str]:
+    """按顶层逗号拆分参数列表（忽略括号内与引号内的逗号）。"""
+    parts: list[str] = []
+    depth = 0
+    quote: str | None = None
+    current: list[str] = []
+    for char in args:
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in {'"', "'"}:
+            quote = char
+            current.append(char)
+        elif char == "(":
+            depth += 1
+            current.append(char)
+        elif char == ")":
+            depth -= 1
+            current.append(char)
+        elif char == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    if current:
+        parts.append("".join(current).strip())
+    return parts
+
+
 def _target_decision_is_fixed(match: re.Match[str], content: str) -> bool:
     """目标决策调用（setClassName/setComponent/setClass/setAction/setPackage）的目标
     是否静态固定。仅供 target_selection 类候选使用；bulk_extras_forwarding 无目标
     决策，不适用。
 
-    返回 True 仅在参数中存在类字面量或字符串字面量（保守）；其余一律 False。
+    按方法语义对顶层参数做整体判定（保守）：只有纯字面量才算固定，其余一律 False。
     """
 
+    method = match.group(0).rstrip("(").strip()
     opening = match.end() - 1  # 正则已消费到 '('，其前一位即左括号
     closing = _matching_paren_end(content, opening)
     if closing is None:
         return False
     args = content[opening + 1: closing]
-    return bool(_TARGET_CLASS_LITERAL_RE.search(args) or _TARGET_STRING_LITERAL_RE.search(args))
+    params = _split_top_level_args(args)
+
+    if method == "setAction" or method == "setPackage":
+        # 唯一参数即目标值，必须整体为字符串字面量。
+        return len(params) == 1 and bool(_STRING_LITERAL_FULL.match(params[0]))
+    if method == "setClass":
+        # 第二参数是目标类；第一参数是 context/this，不参与判定。
+        return len(params) >= 2 and bool(_CLASS_LITERAL_FULL.match(params[1]))
+    if method == "setClassName":
+        # 包名与类名共同决定目标组件，任一外部可控即不固定。
+        return (
+            len(params) >= 2
+            and bool(_STRING_LITERAL_FULL.match(params[0]))
+            and bool(_STRING_LITERAL_FULL.match(params[1]))
+        )
+    if method == "setComponent":
+        # 目标组件由 ComponentName 决定，两个分量都必须为字符串字面量。
+        return len(params) == 1 and bool(_COMPONENT_NAME_LITERAL_RE.match(params[0]))
+    return False
 
 # 全量 extras 透传：攻击者可注入任意 key，是 v04 危害的核心。
 # 两种形态都要覆盖：
