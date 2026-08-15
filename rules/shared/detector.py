@@ -235,6 +235,53 @@ def _target_decision_is_fixed(match: re.Match[str], content: str) -> bool:
     return False
 
 
+# 常量引用形态的消费方类名解析（P1③ 补强，2026-08-15）：setClassName/setComponent
+# 的类名参数是**常量引用**（如 setClassName(ShopApp.instance, SERVICE_CLASS_NAME)）
+# 时，字面量正则不命中——v04 实证 StatService2 4 条候选均此形态，consumer_semantics
+# 漏判。补强：识别常量标识符后在同文件 content 查 `常量名 = "..."` 定义解析目标类名。
+# 仅同文件解析；跨文件常量（查不到定义）保守返回空串（不降级）——避免把外部类常量
+# 误判。与现有 setClassName/setComponent 字面量判定共用同一统计语义正则，零偏移。
+_CONSUMER_CLASS_LITERAL_RE = re.compile(
+    r"setClassName\s*\([^,]+,\s*\"([^\"]+)\"",
+)
+_CONSUMER_COMPONENT_LITERAL_RE = re.compile(
+    r"setComponent\s*\(\s*new\s+ComponentName\s*\(\s*\"([^\"]+)\"\s*,\s*\"([^\"]+)\"\s*\)",
+)
+_CONSUMER_CLASS_CONSTANT_RE = re.compile(
+    r"setClassName\s*\([^,]+,\s*([A-Z][A-Z0-9_]*)\b",
+)
+_CONSUMER_COMPONENT_CONSTANT_RE = re.compile(
+    r"setComponent\s*\(\s*new\s+ComponentName\s*\(\s*\"[^\"]+\"\s*,\s*([A-Z][A-Z0-9_]*)\b",
+)
+
+
+def _resolve_consumer_name(content: str, file_content: str) -> str:
+    """解析显式启动目标的消费方类名（简单名），供 bulk 消费方语义分级。
+
+    优先级：setClassName 字面量 > setComponent 双字面量 > 常量引用（同文件解析）。
+    常量引用的目标类名定义须在同文件 content 中可查（`常量名 = "..."`），
+    查不到（跨文件常量/外部 SDK 常量）返回空串——保守不降级。
+    """
+
+    class_literal = _CONSUMER_CLASS_LITERAL_RE.search(content)
+    if class_literal:
+        return class_literal.group(1).rsplit(".", 1)[-1]
+    component_literal = _CONSUMER_COMPONENT_LITERAL_RE.search(content)
+    if component_literal:
+        return component_literal.group(2).rsplit(".", 1)[-1]
+    for constant_re in (_CONSUMER_CLASS_CONSTANT_RE, _CONSUMER_COMPONENT_CONSTANT_RE):
+        const_match = constant_re.search(content)
+        if const_match:
+            const_name = const_match.group(1)
+            definition = re.search(
+                rf"\b{re.escape(const_name)}\s*=\s*\"([^\"]+)\"",
+                file_content,
+            )
+            if definition:
+                return definition.group(1).rsplit(".", 1)[-1]
+    return ""
+
+
 # 显式启动目标类提取（P0①，2026-08-15）：从 sink 方法内容中识别启动目标的
 # 类字面量形态——new Intent(this, X.class) / setClass(this, X.class) /
 # setComponent(new ComponentName("pkg","cls"))。仅匹配**类字面量**（X.class）
@@ -706,19 +753,9 @@ def _route_injection_candidates(
         # 避免新误判方向）。
         consumer_semantics: str | None = None
         if injection == "bulk_extras_forwarding" and registered is not False:
-            class_name_match = re.search(
-                r"setClassName\s*\([^,]+,\s*\"([^\"]+)\"", content,
+            consumer_name = _resolve_consumer_name(
+                content, str(file.get("content") or ""),
             )
-            component_match = re.search(
-                r"setComponent\s*\(\s*new\s+ComponentName\s*\(\s*\"([^\"]+)\"\s*,\s*\"([^\"]+)\"\s*\)",
-                content,
-            )
-            if class_name_match:
-                consumer_name = class_name_match.group(1).rsplit(".", 1)[-1]
-            elif component_match:
-                consumer_name = component_match.group(2).rsplit(".", 1)[-1]
-            else:
-                consumer_name = ""
             if re.search(
                 r"(?:^|\.)(?:Stat|Report|Trace|Track|Log|Umeng|Flurry|Firebase|Bugly)"
                 r"(?:Service|Helper|Trigger|Manager|Util)?(?:\d*)$",

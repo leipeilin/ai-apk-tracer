@@ -1712,3 +1712,98 @@ class RouterActivity extends Activity {
     )
     from app.analysis.candidate_funnel import unproven_flow_demotion_reason
     assert unproven_flow_demotion_reason(candidate) is None
+
+
+def test_consumer_semantics_resolves_constant_class_reference(tmp_path: Path) -> None:
+    """P1③ 补强：setClassName 类名参数为常量引用时，同文件解析常量定义判定统计语义。
+
+    v04 实证 StatService2 4 条候选全部是 `setClassName(ShopApp.instance,
+    SERVICE_CLASS_NAME)`——SERVICE_CLASS_NAME 是常量引用，字面量正则不命中，
+    修订前 consumer_semantics=None（漏判统计消费方降级）。本用例验证：
+    常量引用 + 同文件 `SERVICE_CLASS_NAME = "...StatisticsService"` → statistics。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ private static final String SERVICE_CLASS_NAME = "com.example.StatService2";
+ void onCreate(Bundle b) {
+  Intent i = new Intent();
+  i.setClassName(ShopApp.instance, SERVICE_CLASS_NAME);
+  i.putExtras(getIntent().getExtras());
+  startService(i);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["route_injection_kind"] == "bulk_extras_forwarding"
+    assert candidate["consumer_semantics"] == "statistics", (
+        "常量引用目标 StatService2 必须解析并判 statistics（修订前 None 漏判）"
+    )
+    from app.analysis.candidate_funnel import CandidateFunnel
+    enabled = CandidateFunnel({"demote_unproven_flow": True}).process([dict(candidate)])
+    assert enabled.candidates[0]["flow_evidence_tier"] == "signal", (
+        "常量引用统计消费方开启降级开关时必须降 signal"
+    )
+
+
+def test_consumer_semantics_constant_non_statistics_not_demoted(tmp_path: Path) -> None:
+    """P1③ 补强负例①：常量引用但目标非统计（WebActivity）→ 不标 statistics。
+
+    防止补强后把常量引用的非统计消费方误降级——WebActivity 消费外部 URL 是
+    真实攻击面，不得因常量引用形态被 statistics 分级吞掉。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ private static final String WEB_CLASS = "com.example.WebActivity";
+ void onCreate(Bundle b) {
+  Intent i = new Intent();
+  i.setClassName("com.example", WEB_CLASS);
+  i.putExtras(getIntent().getExtras());
+  startActivity(i);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.get("consumer_semantics") is None, (
+        "常量引用目标 WebActivity 非统计语义，不得误标 statistics"
+    )
+    from app.analysis.candidate_funnel import unproven_flow_demotion_reason
+    assert unproven_flow_demotion_reason(candidate) is None
+
+
+def test_consumer_semantics_cross_file_constant_not_resolved(tmp_path: Path) -> None:
+    """P1③ 补强负例②：常量定义不在同文件（跨文件/外部 SDK 常量）→ 保守不降级。
+
+    常量引用解析只查同文件定义；查不到时返回空串不标 statistics——避免把
+    外部类常量目标误判为统计语义（保守方向：宁可漏判不可误降级）。
+    """
+
+    source = """package com.example;
+class RouterActivity extends Activity {
+ void onCreate(Bundle b) {
+  Intent i = new Intent();
+  i.setClassName(ShopApp.instance, Constants.SERVICE_CLASS);
+  i.putExtras(getIntent().getExtras());
+  startService(i);
+ }
+}
+"""
+    candidates = execute(
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION", _activity_payload(tmp_path, source)
+    )["candidates"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.get("consumer_semantics") is None, (
+        "跨文件常量（Constants.SERVICE_CLASS）查不到定义，必须保守不降级"
+    )
+    from app.analysis.candidate_funnel import unproven_flow_demotion_reason
+    assert unproven_flow_demotion_reason(candidate) is None
