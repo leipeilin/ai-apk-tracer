@@ -27,6 +27,28 @@ APK → basic_check → decompiling + index → rule_prescan → candidate_funne
 | 外部工具 | JADX 反编译、Android SDK platform-tools、OpenAI-compatible AI provider |
 | 规范 | 19 个 JSON Schema、版本化 Prompt registry（`prompts/`）、SQLite 代码索引 |
 
+## 目录导航
+
+| 目录 | 作用 | 说明 |
+|---|---|---|
+| [`backend/`](backend/) | 后端实现 | FastAPI 应用（`app/`）、pytest 测试（`tests/`）、依赖锁定（`requirements.txt` / `pyproject.toml`） |
+| [`frontend/`](frontend/) | 前端实现 | React 19 + Vite 7 + Tailwind 4 控制台 |
+| [`rules/`](rules/) | 规则包 | 29 条内置确定性规则：Activity / Service / ContentProvider / BroadcastReceiver + WebView / 密码学 / Manifest（`shared/` 为共享检测逻辑） |
+| [`prompts/`](prompts/) | AI 提示词 | 版本化 prompt registry：preflight / l1-triage / l2-review / repair / finalization |
+| [`schemas/`](schemas/) | JSON Schema | AI 输入输出与产物结构规范（19 个） |
+| [`config/`](config/) | 配置 | 默认配置 `default.yaml`（funnel / AI / 上下文预算 / 清理） |
+| [`scripts/`](scripts/) | 脚本 | 开发与统一校验入口（如 `check-all.sh`、`dev-backend.sh`） |
+| [`tools/`](tools/) | 工具 | POC 与验证工具（commonbase-activity-poc、sportxms-poc） |
+| [`evaluation/`](evaluation/) | 评估 | golden 集与指标（`golden/`） |
+| [`tests/`](tests/) | 测试 | 根级测试 |
+| [`doc/`](doc/) | 系统记录文档 | 过程性工作记录：AI 基线、JADX 诊断、人工复核进度、漏洞分析等 |
+| [`docs/`](docs/) | 系统说明文档 | 编号体系：项目概述、架构、分析流程、规则体系、API 参考、使用/开发指南、风险等级、漏洞判定标准 |
+| [`docs/analysis/`](docs/analysis/) | 分析方案 | 问题分析报告与实现方案（如 receiver 282 候选、informational 治理） |
+| [`docs/updates/`](docs/updates/) | 系统变更记录 | 每次代码/配置/提示词/规则更新的独立 MD 文档（按日期命名） |
+| [`apk/`](apk/) | APK 样本 | 本地内容，不随仓库分发 |
+| [`manual-verification-report/`](manual-verification-report/) | 人工验证报告 | 本地内容，不随仓库分发 |
+| [`.ai-apk-tracer/`](.ai-apk-tracer/) | run 产物与缓存 | 任务隔离目录 `<workspace>/.ai-apk-tracer/runs/<run_id>/`，已 gitignore |
+
 ## 文档
 
 完整文档见 [`docs/`](docs/README.md)：项目概述、架构设计、分析流程、规则体系、API 参考、使用/开发指南、风险等级定义、漏洞判定标准。
