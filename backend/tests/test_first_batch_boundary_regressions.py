@@ -228,6 +228,7 @@ class DeviceProvider extends ContentProvider {
   MatrixCursor cursor = new MatrixCursor(DEFAULT_DEVICE_PROJECTION);
   cursor.newRow().add(\"device_name\", getName());
   cursor.newRow().add(DeviceContractKt.COLUMN_DEVICE_BATTERY, getBattery());
+  DeviceManagerExtKt.getInstance(DeviceManager.INSTANCE).getCurrentDeviceModel();
   return cursor;
  }
 }
@@ -251,6 +252,16 @@ class DeviceContractKt {
         reader.close()
     assert verified["invalid_sinks"] == [], verified["invalid_sinks"]
     assert any(item.get("kind") == "sensitive_query_result" for item in verified["sinks"])
+    # S8：factory 调用的符号歧义不得阻塞确定性闭合。
+    assert candidate["deterministic_chain_verified"] is True
+    assert not any(
+        gap.get("code") in {"SYMBOL_TARGET_AMBIGUOUS", "CALL_TARGET_UNRESOLVED"}
+        for gap in candidate.get("blocking_gaps", [])
+    )
+    assert not any(
+        gap.get("code") in {"SYMBOL_TARGET_AMBIGUOUS", "CALL_TARGET_UNRESOLVED"}
+        for gap in candidate.get("coverage_gaps", [])
+    )
 
 
 def test_provider_query_helper_delegation_respects_permission(tmp_path: Path) -> None:

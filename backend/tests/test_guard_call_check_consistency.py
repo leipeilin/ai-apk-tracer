@@ -89,3 +89,67 @@ def test_pattern_tokens_stay_within_guard_semantics() -> None:
     }
     unknown = tokens - allowed
     assert not unknown, f"GUARD_PATTERN 含未知 token: {sorted(unknown)}"
+
+
+def test_unresolved_business_calls_do_not_block_guard_closure() -> None:
+    """S8：未解析的业务调用（DI 工厂/getter）不是 caller check wrapper，
+    不得产生 GUARD_CALL_TARGET_UNRESOLVED 阻塞确定性闭合（SportXms 实证）。"""
+
+    from shared.dataflow import DataFlowAnalyzer
+
+    method = {
+        "id": "com.example.SportXmsApiImpl.finishSport",
+        "name": "finishSport",
+        "qualified_class": "com.example.SportXmsApiImpl",
+        "path": "SportXmsApiImpl.java",
+        "start_line": 1,
+        "end_line": 20,
+        "content": "",
+        "flow_ir": [],
+        "call_sites": [
+            {"ordinal": 1, "method_name": "getSportType", "receiver_type": "com.example.SportXmsFinishData",
+             "resolve_status": "ambiguous", "start_line": 3, "end_line": 3, "arguments": []},
+            {"ordinal": 2, "method_name": "getInstance", "receiver_type": "com.example.SportManagerExtKt",
+             "resolve_status": "ambiguous", "start_line": 4, "end_line": 4, "arguments": []},
+            {"ordinal": 3, "method_name": "getInstance", "receiver_type": "com.example.DeviceManagerExtKt",
+             "resolve_status": "ambiguous", "start_line": 5, "end_line": 5, "arguments": []},
+        ],
+    }
+    analyzer = DataFlowAnalyzer([{"path": "SportXmsApiImpl.java", "methods": [method]}])
+    outcome = analyzer.guard_segment("com.example.SportXmsApiImpl.finishSport", boundary_ordinal=99)
+    assert outcome["status"] == "absent"
+    assert all(gap.get("code") != "GUARD_CALL_TARGET_UNRESOLVED" for gap in outcome["blocking_gaps"])
+
+
+def test_unresolved_caller_identity_wrapper_still_conservative() -> None:
+    """S8：真正的调用者身份 wrapper（Context receiver / checkCaller 命名）未解析时
+    仍保留 GUARD_CALL_TARGET_UNRESOLVED 保守 gap。"""
+
+    from shared.dataflow import DataFlowAnalyzer
+
+    def outcome_for(call_sites):
+        method = {
+            "id": "com.example.Demo.run",
+            "name": "run",
+            "qualified_class": "com.example.Demo",
+            "path": "Demo.java",
+            "start_line": 1,
+            "end_line": 20,
+            "content": "",
+            "flow_ir": [],
+            "call_sites": call_sites,
+        }
+        analyzer = DataFlowAnalyzer([{"path": "Demo.java", "methods": [method]}])
+        return analyzer.guard_segment("com.example.Demo.run", boundary_ordinal=99)
+
+    context_wrapper = outcome_for([{
+        "ordinal": 1, "method_name": "verifyCaller", "receiver_type": "android.content.Context",
+        "resolve_status": "unresolved", "start_line": 2, "end_line": 2, "arguments": [],
+    }])
+    assert any(gap.get("code") == "GUARD_CALL_TARGET_UNRESOLVED" for gap in context_wrapper["blocking_gaps"])
+
+    named_wrapper = outcome_for([{
+        "ordinal": 1, "method_name": "checkCaller", "receiver_type": "com.example.Demo",
+        "resolve_status": "ambiguous", "start_line": 2, "end_line": 2, "arguments": [],
+    }])
+    assert any(gap.get("code") == "GUARD_CALL_TARGET_UNRESOLVED" for gap in named_wrapper["blocking_gaps"])

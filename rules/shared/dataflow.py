@@ -49,7 +49,36 @@ GUARD_METHODS = {
 IDENTITY_SOURCE_METHODS = {"getCallingUid", "getCallingPid"}
 ENFORCE_GUARD_METHODS = {name for name in GUARD_METHODS if name.startswith("enforce")}
 CHECK_GUARD_METHODS = GUARD_METHODS - ENFORCE_GUARD_METHODS
+# v2026-08-16（S8）：未解析调用只有在"可能是调用者身份校验 wrapper"时才产生
+# 保守 GUARD_CALL_TARGET_UNRESOLVED gap。业务调用（DI 工厂 getInstance、getter、
+# 回调、log 等）即使解析失败也不是 caller check 候选，不得阻塞确定性闭合——
+# health 重跑实证：SportXmsApiImpl.finishSport 的 4 个 gap 全部来自
+# getSportType/getInstance/call 等业务调用。
+_GUARD_WRAPPER_RECEIVER_LEAVES = frozenset({
+    "Context", "ContextWrapper", "Binder", "PackageManager", "ActivityManager",
+    "ServiceManager", "AppOpsManager", "PermissionChecker", "AppOps",
+})
+_GUARD_WRAPPER_NAME_RE = re.compile(
+    r"(?i)(?:calling|caller|permission|signature|getuid|getcalling|getpackageinfo|checkaccess|enforcecall)"
+)
 GUARD_STATUSES = {"absent", "present_effective", "present_bypassable", "present_partial", "unknown"}
+
+
+def _is_guard_wrapper_candidate(call: dict[str, Any]) -> bool:
+    """未解析/歧义调用是否可能是调用者身份校验 wrapper（S8，v2026-08-16）。
+
+    仅当 receiver 是 Context/Binder/PackageManager 等具备调用者身份校验能力的
+    类型，或方法名含调用者身份语义（calling/caller/permission/signature/uid 等）
+    时，才把它当作潜在 guard wrapper 保留保守 gap。业务调用（DI 工厂、getter、
+    回调、日志）即使解析失败也不是 caller check 候选。
+    """
+
+    receiver_type = str(call.get("receiver_type") or "")
+    receiver_leaf = receiver_type.rsplit(".", 1)[-1].rsplit("$", 1)[-1]
+    if receiver_leaf in _GUARD_WRAPPER_RECEIVER_LEAVES:
+        return True
+    method_name = str(call.get("method_name") or "")
+    return bool(_GUARD_WRAPPER_NAME_RE.search(method_name))
 OPERATION_TAXONOMY = {
     "data_disclosure",
     "persistent_state_write",
@@ -2307,7 +2336,10 @@ class DataFlowAnalyzer:
                     identities.extend(wrapped["identity_sources"])
                     gaps.extend(wrapped["blocking_gaps"])
                     statuses.append(wrapped["status"])
-            elif call.get("resolve_status") in {"ambiguous", "unresolved"}:
+            elif (
+                call.get("resolve_status") in {"ambiguous", "unresolved"}
+                and _is_guard_wrapper_candidate(call)
+            ):
                 gaps.append({
                     "code": "GUARD_CALL_TARGET_UNRESOLVED", "critical": True,
                     "method": method["id"], "ordinal": ordinal,

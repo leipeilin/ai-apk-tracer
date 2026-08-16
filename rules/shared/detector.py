@@ -1542,6 +1542,10 @@ def _provider_rule_candidates(
                             "blocking_gaps": [],
                             "dataflow_status": "intraprocedural",
                             "flow_kind": "return_disclosure",
+                            # S8（2026-08-16）：fallback 的 sink 由列名词表确定性判定，
+                            # 不依赖 getInstance 等工厂调用解析；flow 的符号歧义 gap
+                            # 不阻塞闭合（DeviceProvider 实证）。
+                            "symbol_gap_exempt": True,
                         })
         else:
             chains = [
@@ -1573,9 +1577,18 @@ def _provider_rule_candidates(
             guard = analyzer.guard_coverage(chain, entry_method_id=entry_id, sink=sink)
             if guard["status"] == "present_effective":
                 continue
+            coverage_gap_items = flow.get("coverage_gaps", [])
+            if chain.get("symbol_gap_exempt"):
+                coverage_gap_items = [
+                    item for item in coverage_gap_items
+                    if not (
+                        isinstance(item, dict)
+                        and item.get("code") in {"SYMBOL_TARGET_AMBIGUOUS", "CALL_TARGET_UNRESOLVED"}
+                    )
+                ]
             gaps = [
                 *chain.get("blocking_gaps", []),
-                *flow.get("coverage_gaps", []),
+                *coverage_gap_items,
                 *guard.get("blocking_gaps", []),
                 *authorization.get("blocking_gaps", []),
             ]
@@ -1604,7 +1617,7 @@ def _provider_rule_candidates(
                 "authorization_operation": operation,
                 "operation_mode": mode,
                 "blocking_gaps": gaps,
-                "coverage_gaps": flow.get("coverage_gaps", []),
+                "coverage_gaps": coverage_gap_items,
             })
             if rule_id == "PROVIDER_URI_TO_FILE":
                 boundary_status = _canonical_boundary_status(files)
