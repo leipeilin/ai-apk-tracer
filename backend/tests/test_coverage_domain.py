@@ -138,3 +138,39 @@ def test_rule_runner_retains_narrow_domains_on_failures_and_component_diagnostic
         {"rule_id": "RULE_A", "component_name": "com.example.Other"},
         diagnostic["coverage_domain"],
     )
+
+
+def test_skipped_exported_component_is_surfaced_in_coverage_gaps() -> None:
+    """S7：索引跳过的导出组件必须出现在 run 汇总与组件级 coverage gap。"""
+
+    from app.analysis.coverage import finalize_run_coverage
+
+    gaps = finalize_run_coverage(
+        candidates=[],
+        jadx_gaps=[],
+        rule_failures=[],
+        code_index={
+            "stats": {"skipped_file_count": 1},
+            "skipped_files": [{
+                "path": "com/example/export/SecretActivity.java",
+                "reason": "FILE_SIZE_LIMIT",
+            }],
+        },
+        manifest_components=[
+            {"kind": "activity", "name": "com.example.export.SecretActivity", "exported": "true"},
+            {"kind": "activity", "name": "com.example.export.InternalActivity", "exported": "false"},
+            {"kind": "service", "name": "com.other.UnrelatedService", "exported": "true"},
+        ],
+    )
+    codes = {gap.get("code") for gap in gaps}
+    assert "JADX_SKIPPED_EXPORTED_COMPONENTS" in codes
+    assert "RULE_COMPONENT_PARTIAL" in codes
+
+    run_gap = next(gap for gap in gaps if gap["code"] == "JADX_SKIPPED_EXPORTED_COMPONENTS")
+    assert run_gap["skipped_exported_component_count"] == 1
+    assert run_gap["components"][0]["component_name"] == "com.example.export.SecretActivity"
+    assert run_gap["affects_positive_proof"] is True
+
+    component_gap = next(gap for gap in gaps if gap["code"] == "RULE_COMPONENT_PARTIAL")
+    assert component_gap["domain"]["component"] == "com.example.export.SecretActivity"
+    assert component_gap["skipped_paths"] == ["com/example/export/SecretActivity.java"]

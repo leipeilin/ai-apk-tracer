@@ -96,12 +96,43 @@ def normalize_coverage_gap(
     return result  # type: ignore[return-value]
 
 
+def _skipped_exported_components(
+    skipped_files: list[dict[str, Any]],
+    manifest_components: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """S7：映射索引跳过文件 → 导出 manifest 组件（按源码路径前缀）。"""
+
+    skipped_paths = {
+        str(item.get("path") or "")
+        for item in skipped_files
+        if str(item.get("path") or "")
+    }
+    if not skipped_paths:
+        return []
+    result: list[dict[str, Any]] = []
+    for component in manifest_components:
+        if component.get("exported") != "true":
+            continue
+        name = str(component.get("name") or "")
+        source_key = name.split("$", 1)[0].replace(".", "/")
+        if not source_key:
+            continue
+        matched = sorted(
+            path for path in skipped_paths
+            if path.startswith(f"{source_key}/") or path == f"{source_key}.java"
+        )
+        if matched:
+            result.append({"component_name": name, "skipped_paths": matched})
+    return result
+
+
 def finalize_run_coverage(
     candidates: list[dict[str, Any]],
     jadx_gaps: list[Any],
     rule_failures: list[Any],
     code_index: dict[str, Any],
     rule_component_gaps: list[dict[str, Any]] | None = None,
+    manifest_components: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build run gaps and propagate only gaps whose domain maps to a candidate.
 
@@ -132,6 +163,18 @@ def finalize_run_coverage(
             "claim_impact": "both",
         }, scope="run")
         artifact_gaps.append(skipped_gap)
+    # S7（2026-08-16）：把"因 JADX 失败/索引跳过未被完整分析的导出组件"显式
+    # 暴露到 run 汇总与组件级 coverage gap，杜绝静默漏检（无法区分"无漏洞"与
+    # "没看到"）。
+    skipped_exported = _skipped_exported_components(skipped_files, manifest_components or [])
+    if skipped_exported:
+        artifact_gaps.append(normalize_coverage_gap({
+            "code": "JADX_SKIPPED_EXPORTED_COMPONENTS",
+            "skipped_exported_component_count": len(skipped_exported),
+            "components": skipped_exported,
+            "message": f"{len(skipped_exported)} 个导出组件因 JADX 失败/索引跳过未被完整分析",
+            "claim_impact": "both",
+        }, scope="run"))
 
     rule_gaps = [
         normalize_coverage_gap({
@@ -150,6 +193,16 @@ def finalize_run_coverage(
         normalize_coverage_gap(gap, scope="component", default_impact="both")
         for gap in (rule_component_gaps or [])
     ]
+    component_gaps.extend(
+        normalize_coverage_gap({
+            "code": "RULE_COMPONENT_PARTIAL",
+            "component_name": item["component_name"],
+            "skipped_paths": item["skipped_paths"],
+            "message": f"导出组件 {item['component_name']} 因 JADX 失败/索引跳过未被完整分析",
+            "claim_impact": "both",
+        }, scope="component", default_impact="both")
+        for item in skipped_exported
+    )
 
     statuses = [
         candidate.get("analysis_status") for candidate in candidates

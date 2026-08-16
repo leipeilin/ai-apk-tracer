@@ -260,6 +260,7 @@ class ScanOrchestrator:
             failures,
             code_index,
             rule_component_gaps,
+            manifest.get("components", []),
         )
         self._stage(run_id, "evidence_integrity_validation")
         evidence_reader = SQLiteCodeIndexReader(code_index) if source_enabled else None
@@ -1136,6 +1137,7 @@ def _finalize_run_coverage(
     rule_failures: list[Any],
     code_index: dict[str, Any],
     rule_component_gaps: list[dict[str, Any]] | None = None,
+    manifest_components: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Compatibility wrapper around the structured coverage-domain module."""
 
@@ -1145,6 +1147,7 @@ def _finalize_run_coverage(
         rule_failures,
         code_index,
         rule_component_gaps,
+        manifest_components,
     )
 
 
