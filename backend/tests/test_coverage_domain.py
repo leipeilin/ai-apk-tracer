@@ -174,3 +174,36 @@ def test_skipped_exported_component_is_surfaced_in_coverage_gaps() -> None:
     component_gap = next(gap for gap in gaps if gap["code"] == "RULE_COMPONENT_PARTIAL")
     assert component_gap["domain"]["component"] == "com.example.export.SecretActivity"
     assert component_gap["skipped_paths"] == ["com/example/export/SecretActivity.java"]
+
+
+def test_missing_exported_component_class_is_surfaced_in_coverage_gaps() -> None:
+    """S7：JADX 静默未产出的导出组件类（非跳过）必须出现在 coverage gap。"""
+
+    from app.analysis.coverage import _missing_exported_components, finalize_run_coverage
+
+    components = [
+        {"kind": "service", "name": "com.example.SportXmsService", "exported": "true"},
+        {"kind": "activity", "name": "com.example.InternalActivity", "exported": "false"},
+        {"kind": "provider", "name": "com.example.DeviceProvider", "exported": "true"},
+        {"kind": "receiver", "name": "dynamic:com/example/DynamicRec.java", "exported": "true"},
+    ]
+    indexed = {"com.example.InternalActivity"}
+    missing = _missing_exported_components(components, indexed)
+    assert {item["component_name"] for item in missing} == {
+        "com.example.SportXmsService", "com.example.DeviceProvider",
+    }
+
+    gaps = finalize_run_coverage(
+        candidates=[],
+        jadx_gaps=[],
+        rule_failures=[],
+        code_index={"database_path": "/nonexistent/index.sqlite3"},
+        manifest_components=components,
+    )
+    run_gap = next(gap for gap in gaps if gap["code"] == "COMPONENT_CLASS_NOT_INDEXED" and gap.get("scope") == "run")
+    assert run_gap["missing_exported_component_count"] == 2
+    assert run_gap["affects_positive_proof"] is True
+    component_gaps = [gap for gap in gaps if gap["code"] == "COMPONENT_CLASS_NOT_INDEXED" and gap.get("scope") == "component"]
+    assert {gap["domain"]["component"] for gap in component_gaps} == {
+        "com.example.SportXmsService", "com.example.DeviceProvider",
+    }

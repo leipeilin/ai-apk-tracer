@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any, Literal, Mapping, TypedDict
 
@@ -126,6 +127,41 @@ def _skipped_exported_components(
     return result
 
 
+def _indexed_class_names(code_index: dict[str, Any]) -> set[str]:
+    """从索引库读取全部类全名（S7：识别 JADX 静默未产出的组件类）。"""
+
+    db_path = str((code_index or {}).get("database_path") or "")
+    if not db_path:
+        return set()
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            return {str(row[0]) for row in con.execute("SELECT qualified_name FROM classes")}
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return set()
+
+
+def _missing_exported_components(
+    manifest_components: list[dict[str, Any]],
+    indexed_class_names: set[str],
+) -> list[dict[str, Any]]:
+    """S7：manifest 导出组件类不在代码索引中 = JADX 静默未产出（非跳过）。"""
+
+    result: list[dict[str, Any]] = []
+    for component in manifest_components or []:
+        name = str(component.get("name") or "")
+        if not name or name.startswith("dynamic:"):
+            continue
+        if component.get("exported") == "true" and name not in indexed_class_names:
+            result.append({
+                "component_name": name,
+                "kind": str(component.get("kind") or ""),
+            })
+    return result
+
+
 def finalize_run_coverage(
     candidates: list[dict[str, Any]],
     jadx_gaps: list[Any],
@@ -175,6 +211,20 @@ def finalize_run_coverage(
             "message": f"{len(skipped_exported)} 个导出组件因 JADX 失败/索引跳过未被完整分析",
             "claim_impact": "both",
         }, scope="run"))
+    # S7（2026-08-16）：JADX 静默未产出的组件类（非跳过文件，而是整类缺失）——
+    # 20260816T150800Z health 重跑实证：JADX 退出码 -9 导致 54 个导出组件类缺失
+    # （SportXmsService/DeviceProvider/NfcBYD 等），仅靠 JADX_PARTIAL 无法归因。
+    missing_exported = _missing_exported_components(
+        manifest_components or [], _indexed_class_names(code_index)
+    )
+    if missing_exported:
+        artifact_gaps.append(normalize_coverage_gap({
+            "code": "COMPONENT_CLASS_NOT_INDEXED",
+            "missing_exported_component_count": len(missing_exported),
+            "components": missing_exported,
+            "message": f"{len(missing_exported)} 个导出组件类未在代码索引中（JADX 未产出/静默丢失）",
+            "claim_impact": "both",
+        }, scope="run"))
 
     rule_gaps = [
         normalize_coverage_gap({
@@ -202,6 +252,15 @@ def finalize_run_coverage(
             "claim_impact": "both",
         }, scope="component", default_impact="both")
         for item in skipped_exported
+    )
+    component_gaps.extend(
+        normalize_coverage_gap({
+            "code": "COMPONENT_CLASS_NOT_INDEXED",
+            "component_name": item["component_name"],
+            "message": f"导出组件 {item['component_name']} 类未在代码索引中（JADX 静默丢失）",
+            "claim_impact": "both",
+        }, scope="component", default_impact="both")
+        for item in missing_exported
     )
 
     statuses = [
