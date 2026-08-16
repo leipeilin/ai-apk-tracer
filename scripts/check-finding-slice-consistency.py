@@ -25,7 +25,10 @@ BACKEND_ROOT = WORKSPACE_ROOT / "backend"
 RUNS_ROOT = WORKSPACE_ROOT / ".ai-apk-tracer" / "runs"
 sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.analysis.context_builder import finding_slice_sink_mismatch  # noqa: E402
+from app.analysis.context_builder import (  # noqa: E402
+    finding_slice_sink_mismatch,
+    slice_unavailable_is_defect,
+)
 
 MISMATCH_CODE = "FINDING_SLICE_SINK_MISMATCH"
 
@@ -61,9 +64,9 @@ def scan_run(run_dir: Path) -> dict[str, Any]:
             # 对 L1 且 ai_eligible≠True 返回 False），这是设计预期不是异常。
             # 只有"本该进 AI/slice 的 finding"（L2 且 analysis_status != rule_only）
             # 缺 slice 才算 slice_missing。
-            evidence_level = finding.get("evidence_level")
-            analysis_status = finding.get("analysis_status")
-            if not (evidence_level == "L2" and analysis_status != "rule_only"):
+            # S5（2026-08-16）：L2 组员（is_ai_representative=False 且
+            # representative_candidate_id 非空）由代表项携带 slice，同样不算缺陷。
+            if not slice_unavailable_is_defect(finding):
                 stats["consistent"] += 1  # 无 slice 属正常，视为一致
                 continue
             stats["slice_missing"] += 1

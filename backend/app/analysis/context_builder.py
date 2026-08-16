@@ -132,11 +132,17 @@ class ContextBuilder:
     def build_initial(self, candidate: dict[str, Any]) -> dict[str, Any]:
         """从候选锚点和组件入口方法构建首轮最小切片。"""
 
+        summary = _candidate_summary(candidate)
+        # S6（2026-08-16）：把 AI 输入用的确定性事实写回候选，供决策层
+        # _cross_validated_refutation_basis 交叉验证——此前只存在于 slice 摘要，
+        # candidate.deterministic_facts 从未写入，导致 AI refutes 全部无背书被否决
+        # （health run 4/4 实证）。
+        candidate["deterministic_facts"] = summary.get("deterministic_facts") or {}
         slice_document = {
             "schema_version": "1.0.0",
             "builder_version": self.version,
             "slice_id": self._slice_id(candidate),
-            "candidate": _candidate_summary(candidate),
+            "candidate": summary,
             "contexts": [],
             "edges": [],
             "guards": [],
@@ -906,6 +912,24 @@ def finding_slice_sink_mismatch(
     }]
 
 
+def slice_unavailable_is_defect(finding: Mapping[str, Any]) -> bool:
+    """``SLICE_UNAVAILABLE`` 是否构成真实缺陷（S5，v2026-08-16）。
+
+    - L1 / rule_only finding 天然无 slice（``l1_skip_ai``，设计预期）→ 非缺陷；
+    - L2 组内成员由代表项携带 slice 与 AI 结果（``_should_build_slice`` 只对漏斗
+      代表项建 slice）→ 非缺陷；
+    - 仅"L2 且非 rule_only 且为 AI 代表项"缺 slice 才算缺陷（此类本应建 slice）。
+    """
+
+    if finding.get("evidence_level") != "L2":
+        return False
+    if finding.get("analysis_status") == "rule_only":
+        return False
+    if finding.get("is_ai_representative") is False and finding.get("representative_candidate_id"):
+        return False
+    return True
+
+
 def _candidate_anchors(candidate: dict[str, Any]) -> list[dict[str, Any]]:
     anchors = []
     for field, reason in (("locations", "rule_location"), ("sources", "taint_source"), ("sinks", "sensitive_sink")):
@@ -993,6 +1017,9 @@ def _deterministic_facts(candidate: dict[str, Any]) -> dict[str, Any]:
         # P0①（2026-08-15）：目标注册事实——False 表示未注册（崩溃 DoS），
         # None 表示无显式目标可查（不参与 fixed_local_target 采信前置）。
         "resolved_target_registered": candidate.get("resolved_target_registered"),
+        # S6（2026-08-16）：目标固定事实——与 registered 配套供
+        # fixed_local_target 反证交叉验证。
+        "resolved_target_fixed": candidate.get("resolved_target_fixed"),
         # R-1（2026-08-15）：动态 receiver flag 分级（DYNAMIC_RECEIVER 规则产出；
         # 其他规则候选无此字段为 None 时不输出）。
         "receiver_flag_tier": candidate.get("receiver_flag_tier"),

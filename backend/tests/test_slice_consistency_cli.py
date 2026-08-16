@@ -89,6 +89,48 @@ def test_l2_rule_only_without_slice_is_consistent(tmp_path: Path) -> None:
     assert result["consistent"] == 1
 
 
+def test_l2_group_member_without_slice_is_consistent(tmp_path: Path) -> None:
+    """S5：L2 组员由代表项携带 slice 与 AI 结果，缺 slice 不算缺陷。"""
+    run_dir = tmp_path / "run4"
+    _write_finding(run_dir, "f4", {
+        "rule_id": "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+        "component_name": "com.example.Act",
+        "evidence_level": "L2",
+        "analysis_status": "ai_completed",
+        "is_ai_representative": False,
+        "representative_candidate_id": "candidate_rep",
+        "sinks": [{"path": "com/example/Sink.java", "line": 100, "kind": "sensitive_sink"}],
+    }, {"context_slice": None})
+
+    result = scan_run(run_dir)
+    assert result["findings"] == 1
+    assert result["slice_missing"] == 0
+    assert result["consistent"] == 1
+
+
+def test_slice_unavailable_defect_classification() -> None:
+    """S5：slice_unavailable_is_defect 口径——仅 L2 非 rule_only 非组员算缺陷。"""
+    from app.analysis.context_builder import slice_unavailable_is_defect
+
+    base = {
+        "evidence_level": "L2",
+        "analysis_status": "ai_completed",
+    }
+    assert slice_unavailable_is_defect(dict(base)) is True
+    assert slice_unavailable_is_defect({**base, "evidence_level": "L1"}) is False
+    assert slice_unavailable_is_defect({**base, "analysis_status": "rule_only"}) is False
+    assert slice_unavailable_is_defect({
+        **base,
+        "is_ai_representative": False,
+        "representative_candidate_id": "candidate_rep",
+    }) is False
+    assert slice_unavailable_is_defect({
+        **base,
+        "is_ai_representative": True,
+        "representative_candidate_id": None,
+    }) is True
+
+
 def test_sink_mismatch_still_reported(tmp_path: Path) -> None:
     """v2026-08-14：sinks 不一致仍报 mismatch（修正不影响主异常检测）。"""
     run_dir = tmp_path / "run4"

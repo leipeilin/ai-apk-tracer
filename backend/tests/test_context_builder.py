@@ -826,6 +826,12 @@ def test_slice_carries_deterministic_facts_to_ai(tmp_path: Path) -> None:
     document = builder.build_initial(payload)
     summary = document["candidate"]
 
+    # S6（2026-08-16）：确定性事实必须写回候选，供决策层
+    # _cross_validated_refutation_basis 交叉验证（此前只存在于 slice 摘要）。
+    assert payload["deterministic_facts"] is summary["deterministic_facts"]
+    assert payload["deterministic_facts"]["value_flow_reaches_sink_argument"] is False
+    assert "resolved_target_fixed" in payload["deterministic_facts"]
+
     for field in (
         "flow_kind", "dataflow_status", "deterministic_chain_verified",
         "operation_taxonomy", "impact_status",

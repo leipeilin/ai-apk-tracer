@@ -435,6 +435,11 @@ class CandidateFunnel:
         self.l1_skip_ai = bool(
             _pipeline_setting(settings, "l1_skip_ai", True)
         )
+        # S4（2026-08-16）：L2 AI 预算按可判定性路由——纯运行期目标/符号歧义且
+        # 无 AI 可补证据的候选不进 AI。默认关闭：需先完成 unresolved 路由表校准。
+        self.l2_ai_undecidable_route = bool(
+            _pipeline_setting(settings, "l2_ai_undecidable_route", False)
+        )
 
     def process(self, candidates: list[dict[str, Any]]) -> FunnelResult:
         """原地标注候选、按三重身份分组，并只为代表项分配 AI 路由。
@@ -480,6 +485,13 @@ class CandidateFunnel:
             else:
                 candidate["flow_evidence_tier"] = "candidate"
                 candidate["ai_required"] = _pipeline_requires_ai(candidate)
+                if (
+                    self.l2_ai_undecidable_route
+                    and candidate["ai_required"]
+                    and _pipeline_l2_ai_undecidable(candidate)
+                ):
+                    candidate["ai_required"] = False
+                    candidate["ai_routing"] = "undecidable_gap"
             candidate["ai_eligible"] = False
             candidate["ai_budget_deferred"] = False
             groups.setdefault(
@@ -963,6 +975,53 @@ def deterministic_refutation_basis(candidate: Mapping[str, Any]) -> list[str]:
 # 广播的包装类误判为进程内分发（假阴性落地为 ai_false_positive，直接隐藏漏洞）。
 # 该常量是 decision.py 的 LOCAL_BROADCAST_RECEIVER_RE 的单一来源（v2026-08-09 复审）。
 LOCAL_BROADCAST_RECEIVER_RE = re.compile(r"\bLocalBroadcastManager\b|\bEventBus\b")
+
+# S4（2026-08-16）：AI 不可判定的运行期目标/符号歧义 gap 集合——这些 gap 表示
+# 证据依赖运行期目标枚举或符号解析，AI 基于切片也无法补全。
+_AI_UNDECIDABLE_GAP_CODES = frozenset({
+    "ROUTE_TARGET_RESOLUTION_UNVERIFIED",
+    "SYMBOL_TARGET_AMBIGUOUS",
+    "BINDER_RETURN_TYPE_AMBIGUOUS",
+    "BINDER_RETURN_TYPE_UNRESOLVED",
+    "BINDER_IMPLEMENTATION_AMBIGUOUS",
+    "BINDER_IMPLEMENTATION_UNRESOLVED",
+    "BINDER_DISPATCH_TARGET_UNRESOLVED",
+})
+
+
+def _pipeline_l2_ai_undecidable(candidate: Mapping[str, Any]) -> bool:
+    """S4：L2 候选是否属于"AI 无可补证据"的运行期目标/符号歧义类。
+
+    保守前提：所有 critical gap 都在 ``_AI_UNDECIDABLE_GAP_CODES`` 集合内，**且**
+    候选没有任何 source/sink/传播路径/值流事实可供 AI 复核。有可补证据的候选
+    （WebView URL 来源、af9745 路由链等）即使带 ``ROUTE_TARGET_RESOLUTION_UNVERIFIED``
+    仍送 AI——避免把"切片不足"误判为"不可判定"（方案 §S4 v2 修正）。
+    """
+
+    if candidate.get("deterministic_chain_verified") is True:
+        return False
+    gap_codes = {
+        str(gap.get("code"))
+        for gap in candidate.get("blocking_gaps") or []
+        if isinstance(gap, Mapping) and gap.get("critical", True) is True
+    }
+    if not gap_codes or not gap_codes <= _AI_UNDECIDABLE_GAP_CODES:
+        return False
+    if (
+        candidate.get("sources")
+        or candidate.get("sinks")
+        or candidate.get("propagation_paths")
+    ):
+        return False
+    if any(
+        candidate.get(field) is not None
+        for field in (
+            "call_site_exists", "sink_argument_constant",
+            "sender_reachable", "value_flow_reaches_sink_argument",
+        )
+    ):
+        return False
+    return True
 
 
 def _sink_is_local_broadcast(candidate: Mapping[str, Any]) -> bool:

@@ -86,7 +86,8 @@
       "required": ["max_l1_candidates_per_run", "min_l1_risk_score"],
       "properties": {
         "max_l1_candidates_per_run": {"type": "integer", "minimum": 0, "default": 20, "description": "单次任务最多进入 AI 的 L1 代表候选数。"},
-        "min_l1_risk_score": {"type": "integer", "minimum": 0, "maximum": 100, "default": 80, "description": "L1 候选进入 AI 分诊的最低风险分。"}
+        "min_l1_risk_score": {"type": "integer", "minimum": 0, "maximum": 100, "default": 80, "description": "L1 候选进入 AI 分诊的最低风险分。"},
+        "l2_ai_undecidable_route": {"type": "boolean", "default": false, "description": "S4：L2 AI 预算按可判定性路由（纯运行期目标/符号歧义且无 AI 可补证据的候选不进 AI）。默认关闭，需先完成 unresolved 路由表校准。"}
       },
       "additionalProperties": false
     },

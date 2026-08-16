@@ -17,7 +17,11 @@ from app.analysis.ai_scheduler import IndexedJob, JobStatus, TaskCircuit, run_in
 from app.analysis.ai_trace import AITraceStore, candidate_input_key
 from app.analysis.candidate_funnel import CandidateFunnel, propagate_representative_analysis
 from app.analysis.context_budget import ContextBudgeter
-from app.analysis.context_builder import ContextBuilder, finding_slice_sink_mismatch
+from app.analysis.context_builder import (
+    ContextBuilder,
+    finding_slice_sink_mismatch,
+    slice_unavailable_is_defect,
+)
 from app.analysis.coverage import finalize_run_coverage
 from app.analysis.decompiler import JadxAdapter
 from app.analysis.guard_verifier import apply_guard_verification
@@ -294,6 +298,14 @@ class ScanOrchestrator:
             # 标记 + 计数已足够暴露。context_slice 在下一行 evidence 落盘时获取。
             context_slice = self._latest_slice(run_dir, finding.get("slice_id"))
             slice_issues = finding_slice_sink_mismatch(finding, context_slice)
+            # S5（2026-08-16）：SLICE_UNAVAILABLE 对 L1/rule_only/组员 finding 属
+            # 设计形态（l1_skip_ai、代表项携带 slice），不计入 mismatch。
+            if (
+                slice_issues
+                and slice_issues[0]["code"] == "SLICE_UNAVAILABLE"
+                and not slice_unavailable_is_defect(finding)
+            ):
+                slice_issues = []
             if slice_issues:
                 finding_slice_mismatches += 1
                 existing_codes = {gap.get("code") for gap in finding.get("blocking_gaps", [])}

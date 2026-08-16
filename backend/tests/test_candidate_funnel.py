@@ -347,6 +347,60 @@ def test_binder_surface_candidates_aggregate_by_service() -> None:
     assert findings[0]["rule_ids"] == ["ACTIVITY_INTENT_TO_SENSITIVE_SINK"]
 
 
+def test_l2_ai_undecidable_predicate() -> None:
+    """S4：纯运行期目标/符号歧义且无 AI 可补证据的 L2 候选判定为不可路由。"""
+
+    from app.analysis.candidate_funnel import _pipeline_l2_ai_undecidable
+
+    base = _candidate(
+        evidence_level="L2",
+        deterministic_chain_verified=False,
+        sources=[],
+        sinks=[],
+        propagation_paths=[],
+        blocking_gaps=[{"code": "ROUTE_TARGET_RESOLUTION_UNVERIFIED", "critical": True}],
+    )
+    assert _pipeline_l2_ai_undecidable(base) is True
+
+    # 有 source/sink 可补证据（af9745 型、WebView 型）→ 仍送 AI。
+    with_evidence = dict(base)
+    with_evidence["sources"] = [{"path": "a.java", "line": 1, "kind": "intent_extra"}]
+    assert _pipeline_l2_ai_undecidable(with_evidence) is False
+
+    # 有值流事实可交叉验证 → 不判定为不可路由。
+    with_facts = dict(base)
+    with_facts["call_site_exists"] = True
+    assert _pipeline_l2_ai_undecidable(with_facts) is False
+
+    # 非不可判定 gap → 不判定。
+    other_gap = dict(base)
+    other_gap["blocking_gaps"] = [{"code": "DATAFLOW_NOT_PROVEN", "critical": True}]
+    assert _pipeline_l2_ai_undecidable(other_gap) is False
+
+
+def test_l2_ai_undecidable_route_gated_by_setting() -> None:
+    """S4：路由开关默认关闭；开启后也不误路由带证据候选（v2 修正安全边界）。"""
+
+    from app.analysis.candidate_funnel import CandidateFunnel
+
+    # 带 ROUTE_TARGET_RESOLUTION_UNVERIFIED 但有 source/sink 证据（af9745 型）：
+    # 即使开关开启仍必须送 AI，避免把"切片不足"误判为"不可判定"。
+    candidate = _candidate(
+        evidence_level="L2",
+        deterministic_chain_verified=False,
+        blocking_gaps=[{"code": "ROUTE_TARGET_RESOLUTION_UNVERIFIED", "critical": True}],
+    )
+
+    default = CandidateFunnel().process([dict(candidate)]).candidates[0]
+    assert default["ai_required"] is True
+    assert default.get("ai_routing") is None
+
+    routed = CandidateFunnel({"l2_ai_undecidable_route": True}).process([dict(candidate)]).candidates[0]
+    assert routed["ai_required"] is True, (
+        "带证据候选不得因运行期目标 gap 被路由掉（v2 修正：WebView/af9745 型仍送 AI）"
+    )
+
+
 def _flow_candidate(chain_id: str, *, sink_line: int = 219, gap_line: int = 100,
                     trace_size: int = 1) -> dict:
     """构造两条语义等价、仅表层细节不同的数据流候选。"""

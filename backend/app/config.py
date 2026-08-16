@@ -144,6 +144,15 @@ class FunnelSettings(BaseModel):
             "false 完全回退旧行为。"
         ),
     )
+    l2_ai_undecidable_route: bool = Field(
+        default=False,
+        description=(
+            "S4（2026-08-16）：L2 AI 预算按可判定性路由——纯运行期目标/符号歧义且无任何"
+            "AI 可补证据的候选不进 AI（白烧预算）。默认关闭：需先对历史 run 的 unresolved "
+            "逐条归类形成路由表并校准阈值（方案 §S4 v2 前置）后开启；开启后 WebView URL "
+            "来源等'切片可补证据'候选仍送 AI，不受影响。"
+        ),
+    )
 
 
 class ContextBudgetSettings(BaseModel):
