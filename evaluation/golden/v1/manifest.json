@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "dataset_version": "v2",
-  "description": "阶段0离线静态分析黄金集（v2：并入两轮动态终审正负样本）；仅包含合成语义与测试引用，不包含APK代码。label=positive/negative分别表示已知候选/已知非候选，conditional/unknown不进入二元指标；must_not_report仅按完整字符串精确匹配；provenance只用于审计引用，不作为评分证据。v2 依据 manual-verification-report 动态终审新增：provider-query-helper-delegation / sport-binder-unguarded-effect（positive），ble-broadcast-sdk-dead-code / nfc-service-no-sensitive-capability / connect-new-phone-protected-broadcast / widget-provider-authority-conflict / sp-control-flow-cooccurrence-refuted / ownsystem-unselected-implementation（negative）。",
+  "description": "阶段0离线静态分析黄金集（v2：并入两轮动态终审正负样本）；仅包含合成语义与测试引用，不包含APK代码。label=positive/negative分别表示已知候选/已知非候选，conditional/unknown不进入二元指标；must_not_report仅按完整字符串精确匹配；provenance只用于审计引用，不作为评分证据。v2 依据 manual-verification-report 动态终审新增：provider-query-helper-delegation / sport-binder-unguarded-effect（positive），ble-broadcast-sdk-dead-code / nfc-service-no-sensitive-capability / connect-new-phone-protected-broadcast / widget-provider-authority-conflict / sp-control-flow-cooccurrence-refuted / ownsystem-unselected-implementation（negative）；extra-splashinfo-plugin-injection / extra-close-url-unregistered-dos / account-broadcast-external-sender / keepalive-proxy-data-status-injection（shop V-01/V-02 与 P-01/P-05，conditional 或 positive）。V-02 RouterActivity 由 router-validation-overwritten 覆盖、P-08 由 fragment-external-class-name 覆盖（同规则同模式，已核查）。",
   "cases": [
     {
       "id": "import-is-not-source",
@@ -102,6 +102,22 @@
     {
       "id": "ownsystem-unselected-implementation",
       "file": "cases/ownsystem-unselected-implementation.json"
+    },
+    {
+      "id": "extra-splashinfo-plugin-injection",
+      "file": "cases/extra-splashinfo-plugin-injection.json"
+    },
+    {
+      "id": "extra-close-url-unregistered-dos",
+      "file": "cases/extra-close-url-unregistered-dos.json"
+    },
+    {
+      "id": "account-broadcast-external-sender",
+      "file": "cases/account-broadcast-external-sender.json"
+    },
+    {
+      "id": "keepalive-proxy-data-status-injection",
+      "file": "cases/keepalive-proxy-data-status-injection.json"
     }
   ],
   "ai_responses": [

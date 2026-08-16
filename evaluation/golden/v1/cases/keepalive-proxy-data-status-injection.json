@@ -1,0 +1,17 @@
+{
+  "id": "keepalive-proxy-data-status-injection",
+  "category": "service",
+  "label": "conditional",
+  "rule": "SERVICE_IPC_INPUT_TO_SINK",
+  "component": "service",
+  "entry": "onStartCommand",
+  "operation": "KeepAliveService restores ProxyData from untrusted extra (low status injection)",
+  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "state_injection", "verdict": "review"},
+  "must_not_report": ["ProxyData restore as high severity"],
+  "sources": [{"path": "synthetic/KeepAliveService.java", "symbol": "hasExtra(device)", "kind": "ipc_input"}],
+  "sinks": [{"path": "synthetic/KeepAliveService.java", "symbol": "restoreProxyData", "kind": "persistent_state_write"}],
+  "tags": ["conditional", "status-injection", "low", "p-05-health"],
+  "provenance": [
+    {"kind": "dynamic", "reference": "manual-verification-report/com.mi.health/2026-08-15/vuln-verification-status.md P-05"}
+  ]
+}

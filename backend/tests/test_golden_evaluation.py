@@ -23,7 +23,7 @@ MANIFEST = GOLDEN_ROOT / "manifest.json"
 
 def test_golden_dataset_schema_and_required_regression_patterns() -> None:
     dataset = load_golden_dataset(MANIFEST)
-    assert len(dataset.cases) == 25
+    assert len(dataset.cases) == 29
     assert len(dataset.by_id()) == len(dataset.cases)
     assert {case.label for case in dataset.cases} >= {
         CaseLabel.POSITIVE,
@@ -56,6 +56,10 @@ def test_golden_dataset_schema_and_required_regression_patterns() -> None:
         "widget-provider-authority-conflict",
         "sp-control-flow-cooccurrence-refuted",
         "ownsystem-unselected-implementation",
+        "extra-splashinfo-plugin-injection",
+        "extra-close-url-unregistered-dos",
+        "account-broadcast-external-sender",
+        "keepalive-proxy-data-status-injection",
     }
     assert set(dataset.by_id()) == required_ids
     assert all(case.provenance for case in dataset.cases)
@@ -266,7 +270,7 @@ def test_cli_prints_json_without_writing_output(tmp_path: Path) -> None:
     output = json.loads(completed.stdout)
     assert output["dataset_version"] == "v2"
     assert output["submitted_result_count"] == 1
-    assert output["missing_actual_count"] == 24
+    assert output["missing_actual_count"] == 28
     assert output["missing_actual_ids"] == output["metrics"]["missing_actual_ids"]
     assert "remote-aidl-unguarded" not in output["missing_actual_ids"]
     assert output["metrics"]["candidate"]["tp"] == 1
