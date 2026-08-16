@@ -6,6 +6,8 @@ from pathlib import Path
 
 from app.analysis.candidate_funnel import CandidateFunnel, build_candidate_identity, exact_candidate_key
 from app.analysis.indexer import build_code_index, parse_structured_parameters
+from app.analysis.index_store import SQLiteCodeIndexReader
+from app.findings.evidence import verify_candidate
 from app.findings.aggregate import aggregate_candidates
 
 RULES_ROOT = Path(__file__).resolve().parents[2] / "rules"
@@ -241,6 +243,14 @@ class DeviceContractKt {
     assert candidate["deterministic_chain_verified"] is True
     assert candidate["sinks"][0]["sensitive_data_evidence"] in {"device_name", "device_battery"}
     assert candidate["sinks"][0]["effect_verified"] is True
+    # S5：sink 的 method_id 必须与 line 所在方法一致，证据回查不得剥离 sink。
+    reader = SQLiteCodeIndexReader(payload["index"])
+    try:
+        verified = verify_candidate(candidate, {"files": []}, reader)
+    finally:
+        reader.close()
+    assert verified["invalid_sinks"] == [], verified["invalid_sinks"]
+    assert any(item.get("kind") == "sensitive_query_result" for item in verified["sinks"])
 
 
 def test_provider_query_helper_delegation_respects_permission(tmp_path: Path) -> None:

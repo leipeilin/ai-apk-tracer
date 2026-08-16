@@ -1532,8 +1532,11 @@ def _provider_rule_candidates(
                                 **query_effect,
                                 "sensitive_result": True,
                                 "sensitive_data_evidence": query_effect["sensitive_data_evidence"],
-                                "method_id": entry_id,
-                                "method_name": entry_name,
+                                # S5（2026-08-16）：method_id 必须与 line 所在方法一致
+                                # （query→helper 场景 line 在 helper 内），否则证据回查
+                                # METHOD_LOCATION_MISMATCH 会剥离 sink（DeviceProvider 实证）。
+                                "method_id": query_effect.get("method_id") or entry_id,
+                                "method_name": query_effect.get("method_name") or entry_name,
                             },
                             "path": [],
                             "blocking_gaps": [],
@@ -2292,6 +2295,7 @@ def _provider_query_effect(files: list[dict]) -> dict | None:
                         "text": statement.strip()[:200],
                         "kind": "sensitive_query_result",
                         "method_name": "query",
+                        "method_id": method.get("id"),
                         "taxonomy": "data_disclosure",
                         "sensitive_data_evidence": sensitive.group(0),
                         "effect_verified": True,
@@ -2308,6 +2312,7 @@ def _provider_query_effect(files: list[dict]) -> dict | None:
                         "text": statement.strip()[:200],
                         "kind": "sensitive_query_result",
                         "method_name": "query",
+                        "method_id": method.get("id"),
                         "taxonomy": "data_disclosure",
                         "sensitive_data_evidence": column,
                         "effect_verified": True,
@@ -2342,6 +2347,7 @@ def _provider_query_effect(files: list[dict]) -> dict | None:
                         "text": helper_text.strip()[:200],
                         "kind": "sensitive_query_result",
                         "method_name": "query",
+                        "method_id": helper.get("id"),
                         "taxonomy": "data_disclosure",
                         "sensitive_data_evidence": column,
                         "effect_verified": True,
