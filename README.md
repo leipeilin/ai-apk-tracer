@@ -49,6 +49,49 @@ APK → basic_check → decompiling + index → rule_prescan → candidate_funne
 | [`manual-verification-report/`](manual-verification-report/) | 人工验证报告 | 本地内容，不随仓库分发 |
 | [`.ai-apk-tracer/`](.ai-apk-tracer/) | run 产物与缓存 | 任务隔离目录 `<workspace>/.ai-apk-tracer/runs/<run_id>/`，已 gitignore |
 
+## 后端代码导航
+
+`backend/` 为 FastAPI 后端，核心源码在 `backend/app/`：
+
+| 路径 | 作用 |
+|---|---|
+| `app/main.py` | 服务入口：启动 FastAPI、挂载路由、静态托管 `frontend/dist` |
+| `app/config.py` | Pydantic 配置模型（funnel / AI / 上下文预算 / 清理） |
+| `app/api/` | HTTP 层：`routes.py` 路由、`models.py` 请求/响应模型 |
+| `app/analysis/` | **核心分析流水线** |
+| ├─ `orchestrator.py` | 任务编排：run 生命周期、阶段调度、产物落盘 |
+| ├─ `candidate_funnel.py` | 候选漏斗：确定性路由、chain identity 去重、AI 预算与分级排序 |
+| ├─ `context_builder.py` / `context_budget.py` | 方法级切片生成与上下文预算 |
+| ├─ `ai.py` + `ai_*` | AI 调用族：runtime、cache、models、recovery、scheduler、trace、transport |
+| ├─ `decompiler.py` / `indexer.py` / `index_store.py` | JADX 反编译与 SQLite 代码索引 |
+| ├─ `manifest.py` / `manifest_extractor.py` | Manifest 解析与提取 |
+| ├─ `rule_runner.py` | 规则子进程执行（JSON 协议、墙钟/CPU/内存限制） |
+| ├─ `guard_verifier.py` | Guard 有效性校验 |
+| ├─ `prompt_registry.py` | 提示词版本注册与解析 |
+| └─ `coverage.py` / `coverage_domain.py` | 覆盖缺口传播（规则失败/AI 跳过统一成 gap） |
+| `app/findings/` | **发现层**：`aggregate.py`（候选聚合）、`decision.py`（确定性裁决）、`evidence.py`（证据回查）、`severity.py`（定级唯一入口）、`review_state.py`（复核状态）、`report.py`（报告渲染） |
+| `app/runs/` | run 存储（`storage.py`）与清理（`cleanup.py`） |
+| `app/shared/` | 通用：错误、日志、SQLite repository |
+| `app/evaluation/` | 评估：golden 集、指标、runner |
+| `tests/` | 后端 pytest 测试 |
+
+## 前端代码导航
+
+`frontend/` 为 React 控制台，源码在 `frontend/src/`：
+
+| 路径 | 作用 |
+|---|---|
+| `main.tsx` | 应用入口 |
+| `app/App.tsx` | 根组件（路由/布局） |
+| `features/` | **功能模块** |
+| ├─ `runs/` | 任务：列表、创建、详情、阶段时间线（`RunListPage` / `RunDetailPage` / `CreateRunForm` / `StageTimeline`） |
+| ├─ `findings/` | 发现：列表（含动态 Receiver 按模块分组）、证据抽屉、复核操作（`FindingsPanel` / `FindingDrawer`） |
+| ├─ `reports/` | 漏洞报告面板（`ReportPanel`） |
+| └─ `cleanup/` | 产物清理面板（`CleanupPanel`） |
+| `lib/` | 通用库：`api.ts`（HTTP 请求）、`types.ts`（类型）、`format.ts`（格式化）、`usePolling.ts`（任务轮询） |
+| `ui/` | 通用组件：`Badge` / `Button` / `Drawer` / `StateView` / `AppShell` / `ThemeToggle` |
+| `styles.css` | 全局样式：Tailwind 4 + CSS 变量主题（浅色/深色） |
+
 ## 文档
 
 完整文档见 [`docs/`](docs/README.md)：项目概述、架构设计、分析流程、规则体系、API 参考、使用/开发指南、风险等级定义、漏洞判定标准。
