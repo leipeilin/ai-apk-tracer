@@ -627,7 +627,10 @@ def test_l1_skip_ai_l2_untouched() -> None:
     cand = {
         "candidate_id": "c-l2",
         "rule_id": "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
-        "flow_kind": "control_to_sink",
+        # S10（2026-08-16）：control_to_sink（作用域可解析）已确定性反证为
+        # in_process_terminus，不再送 AI；此处用 inferred_source_to_sink 验证
+        # "L2 不受 l1_skip_ai 影响"。
+        "flow_kind": "inferred_source_to_sink",
         "component": "activity",
         "component_name": "com/example/WbShareResultActivity.java",
         "entry_method_id": "com/example/WbShareResultActivity.java#onCreate:42",

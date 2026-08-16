@@ -159,6 +159,43 @@ class RuleIndexReader:
         ).fetchone()[0]
         return callers, bool(unresolved)
 
+    def callers_of(self, method_id: str) -> list[str]:
+        """返回解析成功调用边的直接调用者方法 id（S2 反向可达性基础）。"""
+
+        rows = self.db.execute(
+            "SELECT DISTINCT method_id FROM call_sites WHERE resolved_target_id = ?",
+            (method_id,),
+        ).fetchall()
+        return [str(row["method_id"]) for row in rows]
+
+    def reaches_entry_method(
+        self, method_id: str, entry_method_ids: set[str], max_depth: int = 8
+    ) -> bool:
+        """从发送方/触发方法沿已解析调用边反向搜索，是否任一入口方法可达。
+
+        S2（2026-08-16）：区分"运行时实例化的真实路径"与"SDK 死代码"——入口集合
+        为 manifest 组件生命周期方法（onCreate/onReceive/onBind/onStartCommand/
+        onNewIntent/main）；反向闭包撞到入口即可达。深度有界，避免超长链成本。
+        """
+
+        if not entry_method_ids:
+            return False
+        seen: set[str] = set()
+        frontier = [str(method_id)]
+        for _ in range(max_depth):
+            if not frontier:
+                break
+            next_frontier: list[str] = []
+            for current in frontier:
+                if current in seen:
+                    continue
+                seen.add(current)
+                if current in entry_method_ids:
+                    return True
+                next_frontier.extend(self.callers_of(current))
+            frontier = next_frontier
+        return False
+
     def component_files(self, component_name: str) -> list[dict[str, Any]]:
         """按 FQCN 或精确源码路径查询组件，简单名仅在全局唯一时回退。"""
 
@@ -688,6 +725,21 @@ class RuleIndexReader:
                         seeds,
                     )
                 ]
+            transaction_gaps: list[dict[str, Any]] = []
+            for transaction in transactions:
+                for gap in transaction.get("gaps", []):
+                    if (
+                        transaction.get("implementation_method_id")
+                        and gap.get("code") in {
+                            "BINDER_DISPATCH_TARGET_AMBIGUOUS",
+                            "BINDER_DISPATCH_TARGET_UNRESOLVED",
+                        }
+                    ):
+                        # v2026-08-16（S1）：实现已唯一绑定时，dispatch 歧义不再是
+                        # 一票否决的 critical gap——降级为证据不足类，AI 可基于已绑定
+                        # 的实现方法切片自行判定。
+                        gap = {**gap, "critical": False, "downgraded_by_implementation_binding": True}
+                    transaction_gaps.append(gap)
             result[service_name] = {
                 "files": selected_files,
                 "flow_files": self._load_flow_methods(flow_method_ids),
@@ -698,7 +750,7 @@ class RuleIndexReader:
                 "transactions": transactions,
                 "gaps": [
                     *item["gaps"], *binding_gaps,
-                    *(gap for transaction in transactions for gap in transaction.get("gaps", [])),
+                    *transaction_gaps,
                 ],
             }
         return result
@@ -1076,13 +1128,22 @@ def _binder_transactions(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     call for call in case_calls
                     if str(call.get("method_name") or "") not in ignored
                     and not str(call.get("method_name") or "").startswith(("read", "write"))
+                    and not _is_parcel_decode_helper_call(call, owner)
                 ]
-                if symbolic_name:
-                    named = [call for call in dispatch_candidates if call.get("method_name") == symbolic_name]
-                    dispatch = named[0] if len(named) == 1 else (dispatch_candidates[0] if len(dispatch_candidates) == 1 else None)
-                else:
-                    dispatch = dispatch_candidates[0] if len(dispatch_candidates) == 1 else None
                 interface_method = symbolic_name or constants_by_code.get(code) if code is not None else symbolic_name
+                dispatch = None
+                if dispatch_candidates:
+                    if interface_method:
+                        named = [
+                            call for call in dispatch_candidates
+                            if str(call.get("method_name") or "") == interface_method
+                        ]
+                        if len(named) == 1:
+                            dispatch = named[0]
+                        elif len(dispatch_candidates) == 1:
+                            dispatch = dispatch_candidates[0]
+                    else:
+                        dispatch = dispatch_candidates[0] if len(dispatch_candidates) == 1 else None
                 if not interface_method and dispatch:
                     interface_method = str(dispatch.get("method_name") or "") or None
                 ordinal_values = [int(call.get("ordinal", 0)) for call in case_calls]
@@ -1152,6 +1213,43 @@ def _binder_transaction_code(value: str, constants: dict[str, int]) -> int | Non
         offset = int(match.group(2), 0)
         return 1 + offset if match.group(1) == "+" else 1 - offset
     return None
+
+
+_PARCEL_VAR_ARG_RE = re.compile(r"^[A-Za-z_$][\w$]*$")
+_PARCEL_VAR_NAMES = frozenset({"parcel", "data", "reply", "p", "in", "parcel2"})
+_PARCEL_CREATOR_ARG_RE = re.compile(r"\.(?:INSTANCE|CREATOR)$")
+
+
+def _is_parcel_decode_helper_call(call: dict[str, Any], owner_class: str) -> bool:
+    """识别 JADX 内联进 AIDL Stub ``onTransact`` 的 Parcel 解码/构造辅助静态调用。
+
+    AIDL 接口方法永远不会接收裸 Parcel 变量或 ``*.INSTANCE`` / ``*.CREATOR``
+    常量作为参数（Stub 先反序列化再分发），因此同时满足以下条件的调用可确定性
+    排除在 dispatch 候选之外：
+
+    - 以类名形式静态访问：receiver 文本非空，且 receiver 类型不是 ``onTransact``
+      所在类（JADX 内联的辅助调用如 ``C21475b.m96377c(parcel, X.INSTANCE)``）；
+    - 且参数含裸 Parcel 变量或 ``*.INSTANCE`` / ``*.CREATOR`` 常量。
+
+    真实 dispatch（裸调用/``this.method``/``mImpl.method``）不满足上述参数形态，
+    不会被误排除。
+    """
+
+    receiver_text = str(call.get("receiver_text") or "").strip()
+    receiver_type = str(call.get("receiver_type") or "")
+    if not receiver_text or not receiver_type:
+        return False
+    owner_leaf = str(owner_class or "").rsplit(".", 1)[-1]
+    receiver_leaf = receiver_type.rsplit(".", 1)[-1]
+    if receiver_leaf == owner_leaf:
+        return False
+    arguments = [str(value) for value in call.get("arguments", [])]
+    if not arguments:
+        return False
+    return any(
+        _PARCEL_VAR_ARG_RE.fullmatch(argument) and argument.lower() in _PARCEL_VAR_NAMES
+        for argument in arguments
+    ) or any(_PARCEL_CREATOR_ARG_RE.search(argument) for argument in arguments)
 
 
 def _provider_override_descriptor_valid(name: str, descriptor: str) -> bool:

@@ -115,6 +115,207 @@ class SportStub extends ISportApi.Stub {
     assert execute("SERVICE_BINDER_CALLER_CHECK_MISSING", local_payload)["candidates"] == []
 
 
+def test_binder_inlined_parcel_helper_does_not_ambiguate_dispatch(tmp_path: Path) -> None:
+    """S1：JADX 内联的 Parcel 解码辅助调用不得计入 dispatch 候选（v5e 型）。"""
+
+    service = _component("service", "com.example.RemoteService")
+    descriptor, payload = _indexed_payload(tmp_path, {
+        "com/example/RemoteService.java": '''package com.example;
+class RemoteService {
+ Object onBind(Intent i) { return new SportImpl(); }
+}
+class SportImpl extends ISportApi.Stub {
+ void finishSport(String did, FinishData data) { }
+}
+class ISportApi {
+ static class Stub extends Binder {
+  static final int TRANSACTION_finishSport = 4;
+  boolean onTransact(int code, Parcel parcel, Parcel parcel2, int flags) {
+   switch (code) {
+    case 4:
+     finishSport(parcel.readString(), (FinishData) ParcelHelper.m96377c(parcel, FinishData.INSTANCE));
+     parcel2.writeNoException();
+     return true;
+   }
+   return false;
+  }
+ }
+}
+class ParcelHelper {
+ static FinishData m96377c(Parcel parcel, FinishData instance) { return null; }
+}
+''',
+    }, [service])
+    reader = RuleIndexReader(payload["index"])
+    try:
+        facts = reader.binder_components([service["name"]])[service["name"]]
+    finally:
+        reader.close()
+    transaction = next(item for item in facts["transactions"] if item["code"] == 4)
+    assert transaction["interface_method"] == "finishSport"
+    assert transaction["dispatch_call_site"]["method_name"] == "finishSport"
+    assert transaction["gaps"] == []
+    assert "m96377c" not in transaction["implementation_calls"]
+    assert "SportImpl.finishSport" in transaction["implementation_method_id"]
+
+
+def test_binder_implementation_bound_sport_effect_closes_candidate(tmp_path: Path) -> None:
+    """S1：SportXms 型——dispatch 解析 + 实现绑定 + 运动控制 effect 识别后候选可机器闭合。"""
+
+    service = _component("service", "com.example.RemoteService")
+    descriptor, payload = _indexed_payload(tmp_path, {
+        "com/example/RemoteService.java": '''package com.example;
+import com.xiaomi.fitness.sport_manager_export.launch.ISportRemoteState;
+class RemoteService {
+ Object onBind(Intent i) { return new SportImpl(); }
+}
+class SportImpl extends ISportApi.Stub {
+ ISportRemoteState sportManager;
+ void finishSport(String did, FinishData data) {
+  sportManager.finishSport(did, data, null);
+ }
+}
+class ISportApi {
+ static class Stub extends Binder {
+  static final int TRANSACTION_finishSport = 4;
+  boolean onTransact(int code, Parcel parcel, Parcel parcel2, int flags) {
+   switch (code) {
+    case 4:
+     finishSport(parcel.readString(), (FinishData) ParcelHelper.m96377c(parcel, FinishData.INSTANCE));
+     parcel2.writeNoException();
+     return true;
+   }
+   return false;
+  }
+ }
+}
+class ParcelHelper {
+ static FinishData m96377c(Parcel parcel, FinishData instance) { return null; }
+}
+''',
+    }, [service])
+    result = execute("SERVICE_BINDER_CALLER_CHECK_MISSING", payload)
+    assert len(result["candidates"]) == 1
+    candidate = result["candidates"][0]
+    transaction = candidate["binder_transaction"]
+    implementation_id = transaction["implementation_method_id"]
+    assert implementation_id and "SportImpl.finishSport" in implementation_id
+    assert candidate["entry_method_id"] == implementation_id
+    assert candidate["flow_kind"] == "capability_effect"
+    assert candidate["dataflow_status"] == "interprocedural"
+    assert candidate["deterministic_chain_verified"] is True
+    assert candidate["sinks"][0]["taxonomy"] == "connection_session_control"
+    assert candidate["guard_status"] == "absent"
+    assert not any(
+        gap.get("code") in {"BINDER_DISPATCH_TARGET_AMBIGUOUS", "BINDER_DISPATCH_TARGET_UNRESOLVED"}
+        for gap in candidate["blocking_gaps"]
+    )
+
+
+def test_service_exported_sensitive_binder_upgrades_to_l2(tmp_path: Path) -> None:
+    """S3：无事务解析的敏感 AIDL 导出 Service 确定性升级 L2（安全网，不重复出 Binder 候选）。"""
+
+    service = _component("service", "com.example.SportXmsService")
+    descriptor, payload = _indexed_payload(tmp_path, {
+        "com/example/SportXmsService.java": '''package com.example;
+class SportXmsService {
+ SportXmsApiImpl onBind(Intent intent) { return new SportXmsApiImpl(); }
+}
+class SportXmsApiImpl extends ISportApi.Stub {
+ void finishSport(String did, FinishData data) { }
+}
+class ISportApi {
+ static class Stub extends Binder { }
+}
+''',
+    }, [service])
+    result = execute("SERVICE_BINDER_CALLER_CHECK_MISSING", payload)
+    assert len(result["candidates"]) == 1
+    candidate = result["candidates"][0]
+    assert candidate["evidence_level"] == "L2"
+    assert candidate["rule_id"] == "SERVICE_BINDER_CALLER_CHECK_MISSING"
+    assert any(gap["code"] == "SERVICE_SENSITIVE_BINDER_UPGRADE" for gap in candidate["blocking_gaps"])
+
+
+def test_service_exported_sensitive_binder_with_caller_check_stays_l1(tmp_path: Path) -> None:
+    """S3：含调用者校验的敏感 AIDL 导出 Service 不升级（保持 L1）。"""
+
+    service = _component("service", "com.example.SportXmsService")
+    descriptor, payload = _indexed_payload(tmp_path, {
+        "com/example/SportXmsService.java": '''package com.example;
+class SportXmsService {
+ SportXmsApiImpl onBind(Intent intent) {
+  if (Binder.getCallingUid() != 1000) { return null; }
+  return new SportXmsApiImpl();
+ }
+}
+class SportXmsApiImpl extends ISportApi.Stub {
+ void finishSport(String did, FinishData data) { }
+}
+class ISportApi {
+ static class Stub extends Binder { }
+}
+''',
+    }, [service])
+    result = execute("SERVICE_BINDER_CALLER_CHECK_MISSING", payload)
+    assert result["candidates"] == []
+
+
+def test_broadcast_sender_reachable_from_manifest_entry(tmp_path: Path) -> None:
+    """S2：发送方方法被 manifest 组件入口（onCreate）反向可达 → sender_reachable=True。"""
+
+    activity = _component("activity", "com.example.MainActivity")
+    descriptor, payload = _indexed_payload(tmp_path, {
+        "com/example/MainActivity.java": '''package com.example;
+class MainActivity {
+ void onCreate(Bundle b) { sendSync(); }
+ void sendSync() {
+  Intent intent = new Intent("com.example.X");
+  intent.putExtra("account", "plain");
+  context.sendBroadcast(intent);
+ }
+}
+''',
+    }, [activity])
+    result = execute("IMPLICIT_BROADCAST_SENSITIVE_DATA", payload)
+    assert len(result["candidates"]) == 1
+    assert result["candidates"][0]["sender_reachable"] is True
+
+
+def test_broadcast_sender_sdk_dead_code_refuted(tmp_path: Path) -> None:
+    """S2：SDK 包发送方无 manifest 入口可达 → sender_reachable=False + sdk_dead_code，funnel 反证。"""
+
+    from app.analysis.candidate_funnel import CandidateFunnel, deterministic_precheck
+
+    activity = _component("activity", "com.example.MainActivity")
+    descriptor, payload = _indexed_payload(tmp_path, {
+        "com/example/MainActivity.java": '''package com.example;
+class MainActivity {
+ void onCreate(Bundle b) { }
+}
+''',
+        "com/xiaomi/smarthome/library/bluetooth/BleWorker.java": '''package com.xiaomi.smarthome.library.bluetooth;
+class BleWorker {
+ void broadcastChanged() {
+  Intent intent = new Intent("com.example.BLE");
+  intent.putExtra("device_mac", "aa:bb");
+  context.sendBroadcast(intent);
+ }
+}
+''',
+    }, [activity])
+    result = execute("IMPLICIT_BROADCAST_SENSITIVE_DATA", payload)
+    assert len(result["candidates"]) == 1
+    candidate = result["candidates"][0]
+    assert candidate["sender_reachable"] is False
+    assert candidate["sdk_dead_code"] is True
+
+    funnel = CandidateFunnel()
+    processed = funnel.process([candidate])
+    assert processed.candidates[0]["funnel_disposition"] == "deterministically_refuted"
+    assert processed.candidates[0]["ai_required"] is False
+
+
 def test_binder_nested_stub_owner_disambiguates_same_named_inner_classes(tmp_path: Path) -> None:
     service = _component("service", "com.example.RemoteService")
     descriptor, payload = _indexed_payload(tmp_path, {

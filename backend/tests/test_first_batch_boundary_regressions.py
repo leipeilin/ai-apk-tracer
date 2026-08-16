@@ -210,6 +210,61 @@ class DataProvider { SQLiteDatabase db;
     assert any(gap["code"] == "PROVIDER_QUERY_SENSITIVITY_UNPROVEN" for gap in candidate["blocking_gaps"])
 
 
+def test_provider_query_helper_delegation_with_column_vocabulary(tmp_path: Path) -> None:
+    """S3：query→私有 helper 委托 + 常量投影列名词表（DeviceProvider V-03 型）。"""
+
+    provider = _component("provider", "com.example.DeviceProvider")
+    payload = _payload(tmp_path, {
+        "com/example/DeviceProvider.java": """package com.example;
+class DeviceProvider extends ContentProvider {
+ private static final String[] DEFAULT_DEVICE_PROJECTION = {"device_name", "device_type", "device_icon"};
+ Cursor query(Uri uri, String[] projection, String selection, String[] args, String order) {
+  if (matcher.match(uri) == 0) { return queryDeviceStatus(); }
+  return null;
+ }
+ private Cursor queryDeviceStatus() {
+  MatrixCursor cursor = new MatrixCursor(DEFAULT_DEVICE_PROJECTION);
+  cursor.newRow().add(\"device_name\", getName());
+  cursor.newRow().add(DeviceContractKt.COLUMN_DEVICE_BATTERY, getBattery());
+  return cursor;
+ }
+}
+class DeviceContractKt {
+ static final String COLUMN_DEVICE_BATTERY = \"device_battery\";
+}
+""",
+    }, [provider])
+    result = execute("PROVIDER_UNAUTHORIZED_QUERY", payload)
+    assert len(result["candidates"]) == 1
+    candidate = result["candidates"][0]
+    assert candidate["evidence_level"] == "L2"
+    assert candidate["deterministic_chain_verified"] is True
+    assert candidate["sinks"][0]["sensitive_data_evidence"] in {"device_name", "device_battery"}
+    assert candidate["sinks"][0]["effect_verified"] is True
+
+
+def test_provider_query_helper_delegation_respects_permission(tmp_path: Path) -> None:
+    """S3：受权限保护的 Provider（CarIconProvider 型）不得因列名词表误升级。"""
+
+    provider = _component("provider", "com.example.CarIconProvider")
+    provider.update({
+        "permission": "miui.permission.USE_INTERNAL_GENERAL_API",
+        "permission_protection": "signature",
+    })
+    payload = _payload(tmp_path, {
+        "com/example/CarIconProvider.java": """package com.example;
+class CarIconProvider extends ContentProvider {
+ Cursor query(Uri uri, String[] projection, String selection, String[] args, String order) {
+  MatrixCursor cursor = new MatrixCursor(new String[]{\"device_name\", \"device_battery\"});
+  cursor.newRow().add(\"device_name\", getName());
+  return cursor;
+ }
+}
+""",
+    }, [provider])
+    assert execute("PROVIDER_UNAUTHORIZED_QUERY", payload)["candidates"] == []
+
+
 def test_kotlin_default_comparison_does_not_consume_following_parameter() -> None:
     parameters = parse_structured_parameters(
         "x: Int = if (a < b) 1 else 0, y: String",

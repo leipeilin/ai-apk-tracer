@@ -945,6 +945,9 @@ def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         # 反证依赖 sink_argument_constant，no_real_call_site 反证依赖 call_site_exists
         # （红线 13 死代码）。缺这两个字段时 AI 无从输出对应 basis，交叉验证永不触发。
         "call_site_exists", "sink_argument_constant",
+        # S2（2026-08-16）：发送方可达性——False = 发送方方法无 manifest 入口
+        # 反向可达（SDK 死代码），支撑 sender_unreachable 反证。
+        "sender_reachable", "sdk_dead_code",
     }
     summary = {key: deepcopy(value) for key, value in candidate.items() if key in allowed}
     summary["deterministic_facts"] = _deterministic_facts(candidate)
@@ -999,6 +1002,9 @@ def _deterministic_facts(candidate: dict[str, Any]) -> dict[str, Any]:
         # 随切片下发供 AI 输出 basis。
         "call_site_exists": candidate.get("call_site_exists"),
         "sink_argument_constant": candidate.get("sink_argument_constant"),
+        # S2（2026-08-16）：发送方可达性事实（规则层 _attach_sink_argument_facts 产出）。
+        "sender_reachable": candidate.get("sender_reachable"),
+        "sdk_dead_code": candidate.get("sdk_dead_code"),
     }
 
 

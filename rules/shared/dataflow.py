@@ -2902,15 +2902,21 @@ def classify_operation_taxonomy(
     sport_leaves = frozenset({
         "SportManager", "WorkoutManager", "FitnessManager", "SportService",
         "SportApiStub", "WorkoutApiStub", "FitnessApiStub",
+        # v2026-08-16（S1/S3）：小米运动导出接口（SportXms 等）的运动控制/数据面。
+        "ISportRemoteState", "ISportRemoteData", "SportRemoteState", "SportRemoteData",
     })
-    sport_family = family(leaves=sport_leaves) or same_package_leaf(sport_leaves)
+    sport_family = (
+        family(leaves=sport_leaves)
+        or same_package_leaf(sport_leaves)
+        or family(prefixes=("com.xiaomi.fitness.sport_manager_export.",))
+    )
     if sport_family:
-        result = checked({"startSport": frozenset({0, 1, 2})}, "location_sensor_collection", "sport_state")
+        result = checked({"startSport": frozenset({0, 1, 2, 3})}, "location_sensor_collection", "sport_state")
         if result:
             return result
         result = checked({
-            "pauseSport": frozenset({0, 1}), "resumeSport": frozenset({0, 1}),
-            "finishSport": frozenset({0, 1}),
+            "pauseSport": frozenset({0, 1, 2}), "resumeSport": frozenset({0, 1, 2}),
+            "finishSport": frozenset({0, 1, 2, 3}),
         }, "connection_session_control", "sport_state")
         if result:
             return result

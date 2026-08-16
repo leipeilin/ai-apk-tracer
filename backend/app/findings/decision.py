@@ -488,6 +488,9 @@ def _refutation_basis_confirmed(
     if basis == "in_process_terminus":
         # 值流未到达 Sink 实参 = 攻击者数据没有流出去，与"进程内终点"语义一致。
         return facts.get("value_flow_reaches_sink_argument") is False
+    if basis == "sender_unreachable":
+        # S2：发送方方法无 manifest 入口反向可达（SDK 死代码，V-04 BLE 实证）。
+        return facts.get("sender_reachable") is False
     if basis == "guard_fail_closed":
         return (
             facts.get("guard_status") == "present_effective"

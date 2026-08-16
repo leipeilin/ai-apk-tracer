@@ -277,6 +277,76 @@ def test_deterministic_refutation_basis_local_broadcast_sink() -> None:
     assert "local_broadcast_intra_process" not in deterministic_refutation_basis(candidate)
 
 
+def test_control_to_sink_scope_resolved_refutes_in_process_terminus() -> None:
+    """S10：control_to_sink（值流未达 sink 实参）在作用域可解析时确定性反证。"""
+
+    from app.analysis.candidate_funnel import (
+        deterministic_precheck,
+        deterministic_refutation_basis,
+    )
+
+    candidate = _candidate(
+        evidence_level="L2",
+        flow_kind="control_to_sink",
+        deterministic_chain_verified=False,
+        blocking_gaps=[],
+    )
+    basis = deterministic_refutation_basis(candidate)
+    assert "in_process_terminus" in basis
+    assert deterministic_precheck(candidate) == "deterministically_refuted"
+
+    # 作用域未知的 control_to_sink 不直接反证（维持 scope_unresolved 降级路径）。
+    candidate["blocking_gaps"] = [{"code": "CONTROL_SCOPE_UNRESOLVED", "critical": True}]
+    assert "in_process_terminus" not in deterministic_refutation_basis(candidate)
+
+    # source_to_sink（值流已证明）不得反证。
+    candidate["blocking_gaps"] = []
+    candidate["flow_kind"] = "source_to_sink"
+    assert "in_process_terminus" not in deterministic_refutation_basis(candidate)
+
+
+def test_binder_surface_candidates_aggregate_by_service() -> None:
+    """S11：同一导出 Service 的多 Binder transaction 候选按服务级攻击面聚合。"""
+
+    from app.analysis.candidate_funnel import CandidateFunnel, build_candidate_identity
+    from app.findings.aggregate import aggregate_candidates
+
+    def binder_candidate(method_id: str, transaction_code: int, taxonomy: str) -> dict:
+        return _candidate(
+            evidence_level="L2",
+            component="service",
+            component_name="com.example.SportXmsService",
+            entry_method_id=method_id,
+            flow_kind="binder_dispatch",
+            binder_remote_interface=True,
+            binder_transaction={"code": transaction_code},
+            operation_taxonomy=taxonomy,
+            guard_status="absent",
+            authorization_status="unprotected",
+            deterministic_chain_verified=False,
+        )
+
+    finish = binder_candidate("SportXmsApiImpl.java#finishSport:1", 4, "sport_state")
+    device = binder_candidate("SportXmsApiImpl.java#getDeviceInfo:2", 9, "data_disclosure")
+    identity_finish = build_candidate_identity(finish)
+    identity_device = build_candidate_identity(device)
+    assert (identity_finish.scope_key, identity_finish.chain_key, identity_finish.deterministic_fact_hash) == (
+        identity_device.scope_key, identity_device.chain_key, identity_device.deterministic_fact_hash,
+    )
+
+    funnel = CandidateFunnel()
+    result = funnel.process([finish, device])
+    assert result.summary["identity_group_count"] == 1
+    assert result.summary["deduplicated_count"] == 1
+
+    findings = aggregate_candidates([
+        {**finish, **identity_finish.as_dict()},
+        {**device, **identity_device.as_dict()},
+    ])
+    assert len(findings) == 1
+    assert findings[0]["rule_ids"] == ["ACTIVITY_INTENT_TO_SENSITIVE_SINK"]
+
+
 def _flow_candidate(chain_id: str, *, sink_line: int = 219, gap_line: int = 100,
                     trace_size: int = 1) -> dict:
     """构造两条语义等价、仅表层细节不同的数据流候选。"""

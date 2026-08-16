@@ -636,6 +636,11 @@ def build_candidate_identity(candidate: Mapping[str, Any]) -> CandidateIdentity:
     # 若按注册点文件做 scope 身份则永不合组——投影为 owner（包前缀），
     # 与 chain 的 receiver_semantics（tier+owner+action）配合聚合。
     _is_receiver_exposure = candidate.get("flow_kind") == "receiver_exposure"
+    # S11（2026-08-16）：Binder 攻击面按服务级聚合——SERVICE_BINDER_CALLER_CHECK_MISSING
+    # 同一导出 Service 的多 transaction 候选（SportXms 13 条、WearableXms 17 条）
+    # 同根因（无鉴权 AIDL 面），按 (component, guard_status, authorization) 聚合为
+    # 一条 finding，代表项保留最显著 transaction，成员保留各自明细。
+    _is_binder_surface = candidate.get("binder_remote_interface") is True
     scope = {
         "component": {
             "kind": candidate.get("component") or candidate.get("component_kind"),
@@ -686,10 +691,28 @@ def build_candidate_identity(candidate: Mapping[str, Any]) -> CandidateIdentity:
         chain["sources"] = _pipeline_receiver_source_projection(
             candidate.get("sources") or []
         )
+    if _is_binder_surface:
+        scope["entry_points"] = [str(candidate.get("component_name") or "")]
+        scope["entry_method_id"] = str(candidate.get("component_name") or "")
+        chain["entry_method_id"] = str(candidate.get("component_name") or "")
+        chain["flow_kind"] = "binder_dispatch"
+        chain["sources"] = [{"kind": "binder_transaction"}]
+        chain["sinks"] = [{"kind": "binder_impl_effect"}]
+        chain["taxonomy"] = "binder_surface"
+        chain["propagation_path_shape"] = []
+    excluded = _PIPELINE_IDENTITY_EXCLUDED_FIELDS
+    if _is_binder_surface:
+        excluded = excluded | {
+            "entry_points", "impact_status", "deterministic_chain_verified",
+            "dataflow_status", "operation_taxonomy", "binder_transaction",
+            "binder_transactions", "binder_return_types", "binder_inheritance_chain",
+            "binder_remote_interface", "implementation_method_id", "implementation_class",
+            "entry_descriptor", "guard_coverage", "guard_summary",
+        }
     facts = {
         _pipeline_fact_key(key): _pipeline_fact_projection(key, value)
         for key, value in candidate.items()
-        if key not in _PIPELINE_IDENTITY_EXCLUDED_FIELDS
+        if key not in excluded
         and key not in _PIPELINE_IDENTITY_TRACE_FIELDS
         and key not in {"sources", "sinks", "propagation_paths"}
         and not key.startswith("ai_")
@@ -893,6 +916,24 @@ def deterministic_refutation_basis(candidate: Mapping[str, Any]) -> list[str]:
         "not_reachable", "unreachable", "internal_only", "not_exported",
     }:
         basis.append("not_reachable")
+    if candidate.get("sender_reachable") is False:
+        # S2（2026-08-16）：发送方方法无任何 manifest 入口反向可达 = 运行时
+        # 不会实例化（SDK 死代码，V-04 BLE 广播动态终审实证）。
+        basis.append("sender_unreachable")
+    if (
+        candidate.get("flow_kind") == "control_to_sink"
+        and "CONTROL_SCOPE_UNRESOLVED"
+        not in {
+            str(gap.get("code"))
+            for gap in candidate.get("blocking_gaps") or []
+            if isinstance(gap, Mapping)
+        }
+    ):
+        # S10（2026-08-16）：control_to_sink = taint 引擎确定性判定"无任何 untrusted
+        # 值到达 sink 实参"（shop 140 条 ACTIVITY_INTENT_TO_SENSITIVE_SINK 与 health
+        # 9 条 SharedPreferences 候选 v04 动态验证全部误报）。作用域可解析时直接
+        # 反证为 in_process_terminus；作用域未知者维持现有 scope_unresolved 降级。
+        basis.append("in_process_terminus")
     if any(candidate.get(field) is False for field in (
         "rule_predicate_satisfied", "rule_premise_valid", "rule_precondition_verified",
     )):
@@ -1175,4 +1216,3 @@ def _pipeline_hash(value: Any) -> str:
 
 def _pipeline_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-

@@ -498,7 +498,7 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if reader:
             # P1-5 打通（2026-08-15）：在 reader 关闭前为候选补齐
             # call_site_exists / sink_argument_constant 两项规则事实。
-            _attach_sink_argument_facts(candidates, reader)
+            _attach_sink_argument_facts(candidates, reader, manifest)
             reader.close()
     result = {
         "protocol_version": "1.0.0",
@@ -1197,21 +1197,43 @@ def _binder_rule_candidates(
                 "flow_kind": "return_disclosure",
             })
         if not chains and transaction_gaps:
+            has_critical = any(gap.get("critical") is True for gap in transaction_gaps)
+            if implementation:
+                # v2026-08-16（S1）：实现已唯一绑定但没有可识别 effect 链时，
+                # 以实现方法为 sink 出链（而非"dispatch 目标未解析"），候选保留
+                # 实现上下文供 AI/Guard 判定；无 critical gap 时不再走 critical_gap
+                # 形态，Guard 分析可作用到实现方法。
+                sink = {
+                    "path": transaction.get("implementation_path") or implementation.get("path"),
+                    "line": int(implementation.get("start_line", transaction.get("case_line", 1))),
+                    "text": f"implementation {implementation.get('name')} effect",
+                    "kind": "binder_impl_effect",
+                    "taxonomy": "unknown_effect",
+                    "effect_verified": False,
+                    "method_id": implementation_id,
+                    "method_name": implementation.get("name"),
+                }
+                chain_entry = implementation_id
+                chain_kind = "binder_dispatch" if not has_critical else "critical_gap"
+            else:
+                sink = {
+                    "path": transaction.get("path"), "line": transaction.get("case_line"),
+                    "text": "Binder dispatch target unresolved", "kind": "binder_unknown_effect",
+                    "taxonomy": "unknown_effect", "effect_verified": False,
+                }
+                chain_entry = transaction.get("on_transact_method_id")
+                chain_kind = "critical_gap"
             chains = [{
                 "chain_id": f"binder-gap-{transaction.get('path')}:{transaction.get('line')}",
-                "entry_method_id": implementation_id or transaction.get("on_transact_method_id"),
+                "entry_method_id": chain_entry,
                 "source": {
                     "path": transaction.get("path"), "line": transaction.get("case_line"),
                     "text": f"transaction {transaction.get('case_token')}", "kind": "binder_transaction",
                     "status": "fact",
                 },
-                "sink": {
-                    "path": transaction.get("path"), "line": transaction.get("case_line"),
-                    "text": "Binder dispatch target unresolved", "kind": "binder_unknown_effect",
-                    "taxonomy": "unknown_effect", "effect_verified": False,
-                },
+                "sink": sink,
                 "path": [], "blocking_gaps": transaction_gaps,
-                "dataflow_status": "not_proven", "flow_kind": "critical_gap",
+                "dataflow_status": "not_proven", "flow_kind": chain_kind,
             }]
         for chain in chains:
             sink = chain.get("sink") or {}
@@ -1324,7 +1346,7 @@ def _binder_rule_candidates(
             # 的 case 作用域内**才有效（文件其它 case 的 enforceCallingPermission
             # 不保护本链）——因此只扫描 transaction.path 文件中
             # [case_line, case_end_line] 行号范围内的校验证据。
-            if chain.get("flow_kind") == "critical_gap":
+            if chain.get("flow_kind") == "critical_gap" or (implementation_id and transaction_gaps):
                 _tx_path = str(transaction.get("path") or "")
                 _case_start = int(transaction.get("case_line") or transaction.get("line") or 0)
                 _case_end = int(transaction.get("case_end_line") or _case_start)
@@ -1385,6 +1407,48 @@ def _binder_rule_candidates(
             "blocking_gaps": global_gaps,
         })
         candidates.append(result)
+    elif not binder_facts.get("transactions"):
+        # v2026-08-16（S3）：事务完全未解析但组件文件显示敏感 AIDL 能力 +
+        # 无 caller check 的导出 Service，确定性升级 L2（安全网）。
+        upgrade = _service_sensitive_binder_upgrade(files)
+        if upgrade:
+            source = {
+                "path": files[0]["path"],
+                "line": 1,
+                "text": "onBind sensitive AIDL Stub capability",
+                "kind": "binder_transaction",
+                "status": "fact",
+            }
+            result = chain_to_candidate(
+                _base(
+                    "SERVICE_BINDER_CALLER_CHECK_MISSING", component, "L2", files, manifest,
+                    "导出 Service 暴露敏感 AIDL 能力且未发现调用者身份校验（Binder 事务未解析）",
+                ),
+                {
+                    "entry_method_id": (binder_facts.get("on_bind") or {}).get("id"),
+                    "entry_method_name": "onBind",
+                    "source": source,
+                    "sink": {**source, "kind": "binder_unknown_effect", "status": "inferred"},
+                    "path": [],
+                    "flow_kind": "binder_dispatch",
+                    "path_model": "binder_dispatch_v1",
+                    "chain_scope": {"component": component.get("name")},
+                },
+            )
+            result.update({
+                "binder_remote_interface": True,
+                "binder_transactions": [],
+                "dataflow_status": "not_proven",
+                "deterministic_chain_verified": False,
+                "impact_status": "potential",
+                "guard_status": "unknown",
+                "blocking_gaps": [{
+                    "code": "SERVICE_SENSITIVE_BINDER_UPGRADE",
+                    "critical": False,
+                    "sensitive_terms": upgrade["sensitive_terms"],
+                }],
+            })
+            candidates.append(result)
     return sorted(candidates, key=_candidate_sort_key)
 
 
@@ -1451,6 +1515,31 @@ def _provider_rule_candidates(
                             ],
                         }
                     chains.append({**chain, "sink": sink})
+                # v2026-08-16（S3）：query→helper 委托 / 常量投影列名场景
+                # （DeviceProvider V-03 型）DataFlow 追踪不到 return_disclosure 链，
+                # 回退到确定性列名/语句判定，直接以 query effect 出链。
+                if not chains:
+                    query_effect = _provider_query_effect(scope.get("files", []))
+                    if query_effect:
+                        chains.append({
+                            "entry_method_id": entry_id,
+                            "entry_method_name": entry_name,
+                            "source": _provider_entry_source(
+                                analyzer, entry_id,
+                                _synthetic(scope.get("files", []), "外部 query/selection/projection") or {},
+                            ),
+                            "sink": {
+                                **query_effect,
+                                "sensitive_result": True,
+                                "sensitive_data_evidence": query_effect["sensitive_data_evidence"],
+                                "method_id": entry_id,
+                                "method_name": entry_name,
+                            },
+                            "path": [],
+                            "blocking_gaps": [],
+                            "dataflow_status": "intraprocedural",
+                            "flow_kind": "return_disclosure",
+                        })
         else:
             chains = [
                 chain for chain in value_chains
@@ -2128,8 +2217,57 @@ def _authorization_status(
     return _authorization(component, rule_id, manifest)["status"]
 
 
+# v2026-08-16（S3）：Provider query 返回列敏感性词表（按 V-03 实际返回列校准；
+# MAC 仅 log 未进 Cursor，不作为返回列）。
+_PROVIDER_SENSITIVE_COLUMN_RE = re.compile(
+    r"(?i)(?:mac|battery|device_name|devicename|device_model|is_connected|isconnect|"
+    r"connect_state|connected|account|token|phone|iccid|imei|serial|user_id|userId)"
+)
+
+
+def _provider_cursor_columns(scope_text: str, files: list[dict]) -> list[str]:
+    """收集 Cursor 构造/填充涉及的列名（覆盖 V-03 型三种形态）。"""
+
+    columns: list[str] = []
+    for match in re.finditer(r"\bnew\s+MatrixCursor\s*\(([^)]*)\)", scope_text):
+        argument = match.group(1).strip()
+        if not argument or argument == "null":
+            continue
+        if "\"" in argument:
+            columns.extend(re.findall(r"\"([^\"]+)\"", argument))
+        else:
+            constant_name = argument.split(".")[-1].strip()
+            for file in files:
+                content = str(file.get("content") or "")
+                array_match = re.search(
+                    r"\b(?:String\[\]|String\s*\[\])\s*" + re.escape(constant_name) + r"\s*=\s*\{(.*?)\}",
+                    content, re.S,
+                )
+                if array_match:
+                    columns.extend(re.findall(r"\"([^\"]+)\"", array_match.group(1)))
+    for match in re.finditer(r"\.add\s*\(\s*([\"']?[A-Za-z_$][\w$.]*[\"']?)\s*,", scope_text):
+        identifier = match.group(1).strip("\"'")
+        if "\"" in match.group(1) or "'" in match.group(1):
+            columns.append(identifier)
+            continue
+        leaf = identifier.split(".")[-1]
+        for file in files:
+            content = str(file.get("content") or "")
+            constant_match = re.search(
+                r"\b" + re.escape(leaf) + r"\s*=\s*[\"']([^\"']+)[\"']", content
+            )
+            if constant_match:
+                columns.append(constant_match.group(1))
+    return columns
+
+
 def _provider_query_effect(files: list[dict]) -> dict | None:
-    """确认 query 方法实际构造或返回 Cursor，且数据包含潜在敏感字段。"""
+    """确认 query 方法实际构造或返回 Cursor，且数据包含潜在敏感字段。
+
+    v2026-08-16（S3）：支持 query→私有 helper 委托（DeviceProvider.query →
+    queryDeviceStatus 型），敏感性判定从"构造语句局部共现"扩为跨语句列名词表
+    （DEFAULT_*_PROJECTION 常量 + RowBuilder.add 列名）。
+    """
 
     for file in files:
         for method in file.get("methods", []):
@@ -2139,27 +2277,124 @@ def _provider_query_effect(files: list[dict]) -> dict | None:
             sanitized = _sanitize_executable(original)
             if re.search(r"throw\s+new\s+UnsupportedOperationException", sanitized):
                 continue
-            match = re.search(r"\b(?:MatrixCursor|rawQuery|\.\s*query\s*\()", sanitized)
-            if not match:
+            query_match = re.search(r"\b(?:MatrixCursor|rawQuery|\.\s*query\s*\()", sanitized)
+            if query_match:
+                # 保留原"构造语句局部关联"路径（rawQuery/直接构造）。
+                statement_start = max(original.rfind("\n", 0, query_match.start()), original.rfind(";", 0, query_match.start())) + 1
+                statement_end = original.find(";", query_match.end())
+                statement_end = statement_end if statement_end >= 0 else min(len(original), query_match.end() + 400)
+                statement = original[statement_start:statement_end]
+                sensitive = SENSITIVE_DATA_RE.search(statement)
+                if sensitive:
+                    return {
+                        "path": file["path"],
+                        "line": int(method.get("start_line", 1)) + sanitized.count("\n", 0, query_match.start()),
+                        "text": statement.strip()[:200],
+                        "kind": "sensitive_query_result",
+                        "method_name": "query",
+                        "sensitive_data_evidence": sensitive.group(0),
+                        "effect_verified": True,
+                    }
+                column = next(
+                    (value for value in _provider_cursor_columns(statement, files)
+                     if _PROVIDER_SENSITIVE_COLUMN_RE.search(value)),
+                    None,
+                )
+                if column:
+                    return {
+                        "path": file["path"],
+                        "line": int(method.get("start_line", 1)) + sanitized.count("\n", 0, query_match.start()),
+                        "text": statement.strip()[:200],
+                        "kind": "sensitive_query_result",
+                        "method_name": "query",
+                        "sensitive_data_evidence": column,
+                        "effect_verified": True,
+                    }
                 continue
-            # 敏感数据证据必须与 Cursor 构造/查询语句局部关联，不能使用整个文件的关键词共现。
-            statement_start = max(original.rfind("\n", 0, match.start()), original.rfind(";", 0, match.start())) + 1
-            statement_end = original.find(";", match.end())
-            statement_end = statement_end if statement_end >= 0 else min(len(original), match.end() + 400)
-            statement = original[statement_start:statement_end]
-            sensitive = SENSITIVE_DATA_RE.search(statement)
-            if not sensitive:
-                continue
-            return {
-                "path": file["path"],
-                "line": int(method.get("start_line", 1)) + sanitized.count("\n", 0, match.start()),
-                "text": statement.strip()[:200],
-                "kind": "sensitive_query_result",
-                "method_name": "query",
-                "sensitive_data_evidence": sensitive.group(0),
-                "effect_verified": True,
-            }
+            # query→helper 委托（DeviceProvider.query → queryDeviceStatus 型）。
+            helper_names = set(re.findall(r"\breturn\s+([A-Za-z_$][\w$]*)\s*\(", original))
+            helper_names.update(
+                str(call.get("method_name") or "")
+                for call in method.get("call_sites", [])
+                if str(call.get("method_name") or "") not in {"query", "match", "equals"}
+            )
+            for helper_file in files:
+                for helper in helper_file.get("methods", []):
+                    if helper.get("name") not in helper_names or helper.get("id") == method.get("id"):
+                        continue
+                    helper_text = _method_body_text(helper)
+                    helper_sanitized = _sanitize_executable(helper_text)
+                    helper_match = re.search(r"\b(?:MatrixCursor|rawQuery|\.\s*query\s*\()", helper_sanitized)
+                    if not helper_match:
+                        continue
+                    columns = _provider_cursor_columns(helper_text, files)
+                    column = next(
+                        (value for value in columns if _PROVIDER_SENSITIVE_COLUMN_RE.search(value)),
+                        None,
+                    )
+                    if not column:
+                        continue
+                    return {
+                        "path": helper_file["path"],
+                        "line": int(helper.get("start_line", 1)) + helper_sanitized.count("\n", 0, helper_match.start()),
+                        "text": helper_text.strip()[:200],
+                        "kind": "sensitive_query_result",
+                        "method_name": "query",
+                        "sensitive_data_evidence": column,
+                        "effect_verified": True,
+                    }
     return None
+
+
+_SERVICE_SENSITIVE_BINDER_PATTERNS = (
+    re.compile(r"\b(?:startSport|pauseSport|resumeSport|finishSport|restartSport|abnormalChangeSportStateTo(?:Finish|Pause))\b"),
+    re.compile(r"\b(?:getDeviceInfo|getDeviceBattery|getCurrentDeviceModel|getDeviceName|getMac|getDid|getBattery)\b"),
+    re.compile(r"\b(?:set\w*Listener|add\w*Listener|register\w*(?:Callback|Listener))\b"),
+    re.compile(r"\b(?:issueStart|issueEnd|updateFindDeviceStatus|transceive|writeCharacteristic|writeDescriptor)\b"),
+)
+
+
+def _service_sensitive_binder_upgrade(files: list[dict]) -> dict | None:
+    """S3：导出 Service 敏感 AIDL 能力升级信号（L1→L2 安全网）。
+
+    条件：组件文件内存在 ``extends ...Stub`` 的类、敏感接口词表命中、无 caller
+    check，且没有可解析的 ``onTransact`` 事务——事务可解析时由
+    ``SERVICE_BINDER_CALLER_CHECK_MISSING`` 出 L2 候选，此处只兜底避免重复。
+    """
+
+    code = "\n".join(str(item.get("content") or "") for item in files)
+    if not code:
+        return None
+    extends_stub = (
+        any(
+            "Stub" in str(cls.get("extends_name") or "")
+            for file in files
+            for cls in file.get("classes", [])
+        )
+        or bool(re.search(r"\bextends\s+[\w.$]*\bStub\b", code))
+    )
+    if not extends_stub:
+        return None
+    matched = [pattern.pattern for pattern in _SERVICE_SENSITIVE_BINDER_PATTERNS if pattern.search(code)]
+    if not matched:
+        return None
+    has_transactions = any(
+        str(method.get("name") or "") == "onTransact"
+        and "case" in str(method.get("content") or "")
+        for file in files
+        for method in file.get("methods", [])
+    )
+    if has_transactions:
+        return None
+    has_caller_check = bool(re.search(
+        r"(?:getCallingUid|getCallingPid|getNameForUid|checkCallingPermission|"
+        r"enforceCallingPermission|checkCallingOrSelfPermission|enforceCallingOrSelfPermission|"
+        r"checkSignatures|checkUidSignatures)",
+        code,
+    ))
+    if has_caller_check:
+        return None
+    return {"sensitive_terms": matched}
 
 
 def _provider_mutation_effect(files: list[dict]) -> dict | None:
@@ -2729,6 +2964,11 @@ _COMPONENT_LIFECYCLE_ENTRIES = frozenset({
     "onUnbind", "query", "insert", "update", "delete", "openFile", "call",
     "onTransact", "handleMessage",
 })
+# S2（2026-08-16）：发送方可达性判定的 manifest 组件入口集合（窄于
+# _COMPONENT_LIFECYCLE_ENTRIES——query/insert 等 Provider 入口不适用于广播发送方）。
+_SENDER_REACHABILITY_ENTRY_METHODS = frozenset({
+    "onCreate", "onNewIntent", "onReceive", "onStartCommand", "onBind", "onRebind", "main",
+})
 _STRING_LITERAL_RE = re.compile(r"[\"'][^\"']*[\"']")
 # 编译期常量引用（JADX 伪代码实参形态）：以全大写段结尾的点分路径
 # （AccountConstants.PREF_C_UID / PREF_MODE_LASTTIME）或单段全大写标识符。
@@ -2737,8 +2977,54 @@ _STRING_LITERAL_RE = re.compile(r"[\"'][^\"']*[\"']")
 _CONSTANT_REF_RE = re.compile(r"(?:[A-Z][A-Za-z0-9_]*\.)*[A-Z][A-Z0-9_]+")
 
 
+def _derive_app_package(manifest: dict[str, Any]) -> str:
+    """从 manifest 组件名推导应用主包（出现最多的前两段前缀，如 com.mi.health）。"""
+
+    counts: dict[str, int] = {}
+    for component in manifest.get("components") or []:
+        name = str(component.get("name") or "")
+        if name.startswith("dynamic:"):
+            name = name.split(":", 1)[1]
+        segments = [segment for segment in name.split(".") if segment]
+        if len(segments) >= 2:
+            prefix = ".".join(segments[:2])
+            counts[prefix] = counts.get(prefix, 0) + 1
+    return max(counts, key=counts.get) if counts else ""
+
+
+def _sender_reachability_entry_ids(
+    reader: "RuleIndexReader", manifest: dict[str, Any]
+) -> set[str]:
+    """收集应用主包内 manifest 组件入口方法 id（S2 反向可达目标）。"""
+
+    app_package = _derive_app_package(manifest)
+    if not app_package:
+        return set()
+    placeholders = ",".join("?" for _ in _SENDER_REACHABILITY_ENTRY_METHODS)
+    rows = reader.db.execute(
+        f"SELECT id FROM methods "
+        f"WHERE name IN ({placeholders}) AND qualified_class LIKE ?",
+        [*sorted(_SENDER_REACHABILITY_ENTRY_METHODS), f"{app_package}.%"],
+    ).fetchall()
+    return {str(row["id"]) for row in rows}
+
+
+def _find_method_id(reader: "RuleIndexReader", path: str, method_name: str) -> str | None:
+    """按文件路径 + 方法名定位方法 id（发送方方法定位，S2）。"""
+
+    if not path or not method_name:
+        return None
+    row = reader.db.execute(
+        "SELECT m.id FROM methods m JOIN files f ON f.id=m.file_id "
+        "WHERE f.path = ? AND m.name = ? ORDER BY m.id LIMIT 1",
+        (path, method_name),
+    ).fetchone()
+    return str(row["id"]) if row else None
+
+
 def _attach_sink_argument_facts(
-    candidates: list[dict[str, Any]], reader: "RuleIndexReader | None"
+    candidates: list[dict[str, Any]], reader: "RuleIndexReader | None",
+    manifest: dict[str, Any] | None = None,
 ) -> None:
     """为候选补齐 `call_site_exists` / `sink_argument_constant` 两项规则事实。
 
@@ -2761,7 +3047,29 @@ def _attach_sink_argument_facts(
 
     if reader is None:
         return
+    entry_ids = _sender_reachability_entry_ids(reader, manifest or {})
+    app_package = _derive_app_package(manifest or {})
     for candidate in candidates:
+        # S2（2026-08-16）：发送方可达性——隐式广播候选的发送方方法若无任何
+        # manifest 入口反向可达，则区分 SDK 死代码与真实路径（V-04 BLE 实证）。
+        if candidate.get("rule_id") == "IMPLICIT_BROADCAST_SENSITIVE_DATA":
+            broadcast_sink = next((
+                item for item in candidate.get("sinks") or []
+                if isinstance(item, dict) and item.get("kind") == "implicit_broadcast"
+            ), None)
+            if broadcast_sink:
+                sender_id = _find_method_id(
+                    reader,
+                    str(broadcast_sink.get("path") or ""),
+                    str(broadcast_sink.get("method_name") or ""),
+                )
+                if sender_id:
+                    reachable = reader.reaches_entry_method(sender_id, entry_ids)
+                    candidate["sender_reachable"] = reachable
+                    if not reachable and app_package:
+                        path = str(broadcast_sink.get("path") or "")
+                        if not path.startswith(app_package.replace(".", "/")):
+                            candidate["sdk_dead_code"] = True
         sink = next((
             item for item in candidate.get("sinks") or []
             if isinstance(item, dict) and item.get("method_id")
