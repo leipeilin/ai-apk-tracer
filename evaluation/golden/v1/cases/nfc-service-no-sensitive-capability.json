@@ -1,0 +1,17 @@
+{
+  "id": "nfc-service-no-sensitive-capability",
+  "category": "binder",
+  "label": "negative",
+  "rule": "SERVICE_BINDER_CALLER_CHECK_MISSING",
+  "component": "service",
+  "entry": "onBind",
+  "operation": "exported service without sensitive AIDL capability",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["exported service without sensitive binder capability as caller-check missing"],
+  "sources": [{"path": "synthetic/NfcService.java", "symbol": "onBind", "kind": "service_entry"}],
+  "sinks": [],
+  "tags": ["false-positive", "service", "dead-code", "v-05"],
+  "provenance": [
+    {"kind": "dynamic", "reference": "manual-verification-report/com.mi.health/2026-08-15/vuln-verification-status.md V-05"}
+  ]
+}

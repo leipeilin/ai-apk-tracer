@@ -2292,6 +2292,7 @@ def _provider_query_effect(files: list[dict]) -> dict | None:
                         "text": statement.strip()[:200],
                         "kind": "sensitive_query_result",
                         "method_name": "query",
+                        "taxonomy": "data_disclosure",
                         "sensitive_data_evidence": sensitive.group(0),
                         "effect_verified": True,
                     }
@@ -2307,6 +2308,7 @@ def _provider_query_effect(files: list[dict]) -> dict | None:
                         "text": statement.strip()[:200],
                         "kind": "sensitive_query_result",
                         "method_name": "query",
+                        "taxonomy": "data_disclosure",
                         "sensitive_data_evidence": column,
                         "effect_verified": True,
                     }
@@ -2340,6 +2342,7 @@ def _provider_query_effect(files: list[dict]) -> dict | None:
                         "text": helper_text.strip()[:200],
                         "kind": "sensitive_query_result",
                         "method_name": "query",
+                        "taxonomy": "data_disclosure",
                         "sensitive_data_evidence": column,
                         "effect_verified": True,
                     }

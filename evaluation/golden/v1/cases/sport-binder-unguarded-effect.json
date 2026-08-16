@@ -1,0 +1,18 @@
+{
+  "id": "sport-binder-unguarded-effect",
+  "category": "binder",
+  "label": "positive",
+  "rule": "SERVICE_BINDER_CALLER_CHECK_MISSING",
+  "component": "service",
+  "entry": "onBind|onTransact",
+  "operation": "exported AIDL sport control without caller check",
+  "expected": {"candidate": true, "dataflow": "interprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "connection_session_control", "verdict": "report"},
+  "must_not_report": ["local-only Binder finding"],
+  "sources": [{"path": "synthetic/SportXmsService.java", "symbol": "onBind", "kind": "service_entry"}, {"path": "synthetic/SportStub.java", "symbol": "onTransact parcel input", "kind": "binder_transaction"}],
+  "sinks": [{"path": "synthetic/SportXmsApiImpl.java", "symbol": "finishSport", "kind": "sport_state_control"}],
+  "tags": ["true-positive", "binder", "aidl", "sport", "v-01"],
+  "provenance": [
+    {"kind": "test", "reference": "backend/tests/test_p0_closure.py::test_binder_implementation_bound_sport_effect_closes_candidate"},
+    {"kind": "dynamic", "reference": "manual-verification-report/com.mi.health/2026-08-15/vuln-verification-status.md V-01"}
+  ]
+}

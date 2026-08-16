@@ -23,7 +23,7 @@ MANIFEST = GOLDEN_ROOT / "manifest.json"
 
 def test_golden_dataset_schema_and_required_regression_patterns() -> None:
     dataset = load_golden_dataset(MANIFEST)
-    assert len(dataset.cases) == 17
+    assert len(dataset.cases) == 25
     assert len(dataset.by_id()) == len(dataset.cases)
     assert {case.label for case in dataset.cases} >= {
         CaseLabel.POSITIVE,
@@ -47,6 +47,15 @@ def test_golden_dataset_schema_and_required_regression_patterns() -> None:
         "map-put-not-persistent-write",
         "unregistered-activity",
         "debuggable-default-false",
+        # S9（2026-08-16）：动态终审正负样本（manual-verification-report）。
+        "provider-query-helper-delegation",
+        "sport-binder-unguarded-effect",
+        "ble-broadcast-sdk-dead-code",
+        "nfc-service-no-sensitive-capability",
+        "connect-new-phone-protected-broadcast",
+        "widget-provider-authority-conflict",
+        "sp-control-flow-cooccurrence-refuted",
+        "ownsystem-unselected-implementation",
     }
     assert set(dataset.by_id()) == required_ids
     assert all(case.provenance for case in dataset.cases)
@@ -255,9 +264,9 @@ def test_cli_prints_json_without_writing_output(tmp_path: Path) -> None:
     )
     assert completed.returncode == 0, completed.stderr
     output = json.loads(completed.stdout)
-    assert output["dataset_version"] == "v1"
+    assert output["dataset_version"] == "v2"
     assert output["submitted_result_count"] == 1
-    assert output["missing_actual_count"] == 16
+    assert output["missing_actual_count"] == 24
     assert output["missing_actual_ids"] == output["metrics"]["missing_actual_ids"]
     assert "remote-aidl-unguarded" not in output["missing_actual_ids"]
     assert output["metrics"]["candidate"]["tp"] == 1

@@ -1,0 +1,18 @@
+{
+  "id": "provider-query-helper-delegation",
+  "category": "provider",
+  "label": "positive",
+  "rule": "PROVIDER_UNAUTHORIZED_QUERY",
+  "component": "provider",
+  "entry": "query",
+  "operation": "query delegates to helper returning device-column MatrixCursor",
+  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "data_disclosure", "verdict": "report"},
+  "must_not_report": ["helper MatrixCursor with sensitive device columns ignored"],
+  "sources": [{"path": "synthetic/DeviceProvider.java", "symbol": "query(Uri, ...)", "kind": "provider_uri"}],
+  "sinks": [{"path": "synthetic/DeviceProvider.java", "symbol": "queryDeviceStatus MatrixCursor device_name/battery", "kind": "sensitive_query_result"}],
+  "tags": ["true-positive", "provider", "query", "helper-delegation", "v-03"],
+  "provenance": [
+    {"kind": "test", "reference": "backend/tests/test_first_batch_boundary_regressions.py::test_provider_query_helper_delegation_with_column_vocabulary"},
+    {"kind": "dynamic", "reference": "manual-verification-report/com.mi.health/2026-08-15/vuln-verification-status.md V-03"}
+  ]
+}

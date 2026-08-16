@@ -1,0 +1,18 @@
+{
+  "id": "sp-control-flow-cooccurrence-refuted",
+  "category": "dataflow",
+  "label": "negative",
+  "rule": "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+  "component": "activity",
+  "entry": "onCreate",
+  "operation": "control flow co-occurrence without value flow to sink argument",
+  "expected": {"candidate": false, "dataflow": "not_proven", "auth": "unprotected", "guard": "absent", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["control-flow co-occurrence as sensitive sink"],
+  "sources": [{"path": "synthetic/MainActivity.java", "symbol": "intent extra", "kind": "intent_extra"}],
+  "sinks": [{"path": "synthetic/MainActivity.java", "symbol": "PreferenceUtil.apply", "kind": "persistent_state_write"}],
+  "tags": ["false-positive", "control-to-sink", "in-process-terminus", "s10", "shop-140"],
+  "provenance": [
+    {"kind": "test", "reference": "backend/tests/test_candidate_funnel.py::test_control_to_sink_scope_resolved_refutes_in_process_terminus"},
+    {"kind": "dynamic", "reference": "manual-verification-report/com.xiaomi.shop/2026-08-15/attack-surface-inventory.md"}
+  ]
+}

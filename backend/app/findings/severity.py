@@ -72,10 +72,41 @@ def determine_severity(candidate: dict) -> tuple[str, list[str]]:
         # 方法内候选尚未证明真实副作用时，最多保留中危建议。
         hint = "medium" if dataflow_status in {"intraprocedural", "interprocedural"} else "pending"
 
+    calibrated = _calibrated_severity(candidate, hint)
+    if calibrated is not None:
+        return calibrated, ["确定性闭合候选按人工复核 impact ceiling 校准定级（S8）"]
+
     reasons = candidate.get("severity_reason") or [
         "严重性由已证明的数据流、授权边界和静态副作用共同确定，仍需人工复核"
     ]
     return hint, reasons
+
+
+def _calibrated_severity(candidate: dict, hint: str) -> str | None:
+    """S8（2026-08-16）：确定性闭合候选按人工复核 impact ceiling 校准定级。
+
+    仅作用于已通过前置门禁（L2、无 critical gap、数据流已证明、授权 unprotected、
+    guard 非 effective）的候选，且要求 ``deterministic_chain_verified=True``：
+    - 导出 Binder/Provider 无调用者校验 → high（V-01 校准）；
+    - 导出 Provider 敏感信息查询 → medium（V-03 校准）；
+    - 未注册显式目标 DoS（``resolved_target_registered=False``）→ low（shop V-02 校准）；
+    - 其余保持 hint（不强行 pending，避免破坏既有 WebView/密码学族定级）。
+    """
+
+    if candidate.get("deterministic_chain_verified") is not True:
+        return None
+    rule_id = str(candidate.get("rule_id") or "")
+    if rule_id in {"SERVICE_BINDER_CALLER_CHECK_MISSING", "PROVIDER_CALLER_CHECK_MISSING"}:
+        return "high"
+    if rule_id == "PROVIDER_UNAUTHORIZED_QUERY":
+        return "medium"
+    if candidate.get("resolved_target_registered") is False and rule_id in {
+        "ACTIVITY_EXTERNAL_ROUTE_INJECTION",
+        "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+        "SERVICE_IPC_INPUT_TO_SINK",
+    }:
+        return "low"
+    return None
 
 
 def _has_critical_gap(gaps: list) -> bool:

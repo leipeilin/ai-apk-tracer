@@ -1,0 +1,17 @@
+{
+  "id": "widget-provider-authority-conflict",
+  "category": "provider",
+  "label": "negative",
+  "rule": "PROVIDER_URI_TO_FILE",
+  "component": "provider",
+  "entry": "openFile",
+  "operation": "provider authority captured by permission-protected sibling",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["authority-conflicted provider as file mutation"],
+  "sources": [{"path": "synthetic/WidgetControlFileProvider.java", "symbol": "uri", "kind": "provider_uri"}],
+  "sinks": [{"path": "synthetic/WidgetControlFileProvider.java", "symbol": "openFile", "kind": "file_mutation"}],
+  "tags": ["false-positive", "provider", "authority-conflict", "p-01"],
+  "provenance": [
+    {"kind": "dynamic", "reference": "manual-verification-report/com.mi.health/2026-08-15/vuln-verification-status.md P-01"}
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "ownsystem-unselected-implementation",
+  "category": "broadcast",
+  "label": "negative",
+  "rule": "IMPLICIT_BROADCAST_SENSITIVE_DATA",
+  "component": "receiver",
+  "entry": "sendAccountUpdateBroadcast",
+  "operation": "unselected OwnSystem account implementation broadcast",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["unselected implementation's broadcast as vulnerability"],
+  "sources": [{"path": "synthetic/OwnSystemXiaomiAccountManager.java", "symbol": "Account object", "kind": "sensitive_data"}],
+  "sinks": [{"path": "synthetic/OwnSystemXiaomiAccountManager.java", "symbol": "sendAccountUpdateBroadcast", "kind": "implicit_broadcast"}],
+  "tags": ["false-positive", "implementation-selection", "shop-p-01"],
+  "provenance": [
+    {"kind": "dynamic", "reference": "manual-verification-report/com.xiaomi.shop/2026-08-15/attack-surface-inventory.md P-01"}
+  ]
+}

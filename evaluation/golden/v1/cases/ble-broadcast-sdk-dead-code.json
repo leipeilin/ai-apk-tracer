@@ -1,0 +1,18 @@
+{
+  "id": "ble-broadcast-sdk-dead-code",
+  "category": "broadcast",
+  "label": "negative",
+  "rule": "IMPLICIT_BROADCAST_SENSITIVE_DATA",
+  "component": "receiver",
+  "entry": "sendBroadcast",
+  "operation": "SDK worker broadcast with no manifest entry reachability",
+  "expected": {"candidate": false, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["SDK dead-code implicit broadcast as vulnerability"],
+  "sources": [{"path": "synthetic/BleWorker.java", "symbol": "putExtra device_mac", "kind": "sensitive_data"}],
+  "sinks": [{"path": "synthetic/BleWorker.java", "symbol": "sendBroadcast", "kind": "implicit_broadcast"}],
+  "tags": ["false-positive", "dead-code", "sdk", "sender-reachability", "v-04"],
+  "provenance": [
+    {"kind": "test", "reference": "backend/tests/test_p0_closure.py::test_broadcast_sender_sdk_dead_code_refuted"},
+    {"kind": "dynamic", "reference": "manual-verification-report/com.mi.health/2026-08-15/vuln-verification-status.md V-04"}
+  ]
+}

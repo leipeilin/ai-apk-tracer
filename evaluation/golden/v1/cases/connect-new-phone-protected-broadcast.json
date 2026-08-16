@@ -1,0 +1,17 @@
+{
+  "id": "connect-new-phone-protected-broadcast",
+  "category": "receiver",
+  "label": "negative",
+  "rule": "RECEIVER_EXPORTED_NO_PERMISSION",
+  "component": "receiver",
+  "entry": "onReceive",
+  "operation": "MIUI protected broadcast action receiver",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": ["MIUI protected broadcast receiver as externally triggerable"],
+  "sources": [{"path": "synthetic/ConnectNewPhoneReceiver.java", "symbol": "onReceive action com.miui.huanji.action.health", "kind": "receiver_input"}],
+  "sinks": [],
+  "tags": ["false-positive", "protected-broadcast", "platform-limit", "v-06"],
+  "provenance": [
+    {"kind": "dynamic", "reference": "manual-verification-report/com.mi.health/2026-08-15/vuln-verification-status.md V-06"}
+  ]
+}

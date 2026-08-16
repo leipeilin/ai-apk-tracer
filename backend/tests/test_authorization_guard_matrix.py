@@ -307,3 +307,40 @@ def test_severity_and_l3_require_known_authorization_and_gradeable_guard() -> No
 
     effective = {**base, "authorization_status": "unprotected", "guard_status": "present_effective"}
     assert determine_severity(effective)[0] == "informational"
+
+
+def test_s8_calibrated_severity_for_deterministically_closed_candidates() -> None:
+    """S8：确定性闭合候选按人工 impact ceiling 校准定级（V-01/V-03/shop V-02）。"""
+
+    from app.findings.severity import determine_severity
+
+    closed = {
+        "evidence_level": "L2",
+        "analysis_status": "ai_completed",
+        "deterministic_chain_verified": True,
+        "dataflow_status": "interprocedural",
+        "authorization_status": "unprotected",
+        "guard_status": "absent",
+        "impact_status": "statically_confirmed",
+        "blocking_gaps": [],
+        "coverage_gaps": [],
+        "ai_blocking_gaps": [],
+    }
+
+    binder = {**closed, "rule_id": "SERVICE_BINDER_CALLER_CHECK_MISSING", "severity_hint": "high"}
+    assert determine_severity(binder)[0] == "high"
+
+    provider = {**closed, "rule_id": "PROVIDER_UNAUTHORIZED_QUERY", "severity_hint": "medium"}
+    assert determine_severity(provider)[0] == "medium"
+
+    dos = {
+        **closed,
+        "rule_id": "ACTIVITY_EXTERNAL_ROUTE_INJECTION",
+        "severity_hint": "medium",
+        "resolved_target_registered": False,
+    }
+    assert determine_severity(dos)[0] == "low"
+
+    # 非确定性闭合候选不触发校准（保持 hint 或既有门禁结果）。
+    open_route = {**dos, "deterministic_chain_verified": False}
+    assert determine_severity(open_route)[0] != "low"
