@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ai-apk-tracer.local/schemas/config.schema.json",
   "title": "AI-APK-Tracer config",
+  "description": "描述 config/default.yaml 完整形态的文档 schema，非运行时校验器；运行时缺段由 Pydantic 默认值兜底（backend/app/config.py），两者 required 语义不同（M0 审查 §4.4）。",
   "type": "object",
   "required": ["analysis_platform_api", "source_analysis", "rule_runtime", "storage", "ai", "funnel", "context_budget", "explorer", "verify", "api_surface", "assets", "batch", "report"],
   "properties": {

@@ -42,7 +42,7 @@ M2 内部依赖：T2.1（规则产物） → T2.2（api_surface）；T2.2/T2.3/T
 |---|---|---|---|---|---|
 | T0.1 | `ExplorerObservation` Schema：`chain_proposals[].hops`（from/to method_id、call_site_line、arg_positions、resolved_via）、`hypothesis`、`impact_proposal`、`read_requests[]`、`component_summary`、`loop:{done}` | `schemas/explorer_observation.schema.json` | 新增 | - | §4.1/§4.2/§4.3 |
 | T0.2 | `ExplorerCandidate` Schema（含 `validation` 三档结果占位） | `schemas/explorer_candidate.schema.json` | 新增 | T0.1 | §4.1/§4.2 |
-| T0.3 | `explorer_deep_dive` 协议 Schema + prompt 骨架（输入：partial 候选 + 缺失事实清单；输出：可回查证据；禁止改写链） | `schemas/explorer_deep_dive_observation.schema.json`、`prompts/explorer-deep-dive/1.0.0/{system,user}.md`、`prompts/registry.yaml` | 新增 | T0.2 | §4.4（决断 1） |
+| T0.3 | `explorer_deep_dive` 协议 Schema + prompt 骨架（输入：partial 候选 + 缺失事实清单；输出：可回查证据；禁止改写链） | `schemas/ai_explorer_deep_dive_{input,output}.schema.json`（M0 审查 §4.3 同步实际命名）、`prompts/explorer-deep-dive/1.0.0/{system,user}.md`、`prompts/registry.yaml` | 新增 | T0.2 | §4.4（决断 1） |
 | T0.4 | 规则产物 Schema：binder / receiver / webview 三类绑定结果的结构定义（含 `BINDER_IMPLEMENTATION_AMBIGUOUS/UNRESOLVED` gap 透传） | `schemas/binder_bindings.schema.json`、`schemas/receiver_registrations.schema.json`、`schemas/webview_js_bridges.schema.json` | 新增 | - | §4.11（决断 2） |
 | T0.5 | `api_entry_table` / `attack_surface` Schema（来源字段按产物传递标注） | `schemas/api_entry_table.schema.json`、`schemas/attack_surface.schema.json` | 新增 | T0.4 | 方案 §2.1/§2.3 |
 | T0.6 | 归一化映射表：ExplorerCandidate → Candidate，覆盖 required 全部 10 项（字段级，方案 §2.5 已定义映射规则，此处固化为文档 + 单测用例） | `docs/analysis/`（映射表文档）+ `backend/tests/` | 新增 | T0.2 | §4.6 |
@@ -50,7 +50,7 @@ M2 内部依赖：T2.1（规则产物） → T2.2（api_surface）；T2.2/T2.3/T
 | T0.8 | `Asset` / `BatchScan` 数据模型与迁移脚本设计（版本号、升级路径） | `backend/app/shared/repository.py`（设计稿） | 设计 | - | §4.13 |
 | T0.9 | 核验 agent（`verify`）协议 Schema + prompt 骨架（方案 §2.7）：命题清单输入结构、盲验输入构造规则（剥离假设层）、逐命题判定输出、轮数与降级配置项 | `schemas/ai_verify_{input,output}.schema.json`、`prompts/verify/1.0.0/{system,user}.md`、`prompts/registry.yaml` | 新增 | - | 2026-08-21 决断 3 |
 
-**M0 交付物**：10 个新 Schema（含 verify 输入/输出）+ 1 个映射表 + 配置模型 + 迁移设计稿。
+**M0 交付物**：11 个新 Schema（explorer_observation / explorer_candidate / deep_dive input+output / 三规则产物 / api_entry_table / attack_surface / verify input+output；M0 审查 §4.3 修正计数）+ 1 个映射表 + 配置模型 + 迁移设计稿。
 
 ### 3.2 M1：资产批量扫描层
 
@@ -78,7 +78,7 @@ M2 内部依赖：T2.1（规则产物） → T2.2（api_surface）；T2.2/T2.3/T
 | T2.9 | custom sink 升级闭环工具：人工确认 → sink taxonomy 版本化扩展 → 候选重校验脚本 → golden 用例生成 | 脚本 + taxonomy 版本化文件 | 新增 | T2.6 | §4.5 |
 | T2.10 | 探索产物注册与审计视图：`explorer/candidates.json`、call_tree 可选落盘注册进 `run_manifest.artifacts`；前端人工队列展示 unverified/partial（按置信度排序） | `orchestrator.py`、`frontend/src/features/findings/` | 修改 | T2.6 | §4.5/方案 §5.3 |
 | T2.11 | 核验 agent（L2 agent 化演进，方案 §2.7）：prompt `verify/1.0.0/` + 命题清单生成器（确定性代码从候选 sources/sinks/Guard 事实与探索 hops 生成待证命题）+ 盲验输入构造（剥离 hypothesis/impact_proposal/confidence，仅保留可回查事实）+ 受控取证循环（终止条件=命题全部判定，非模型自声明；轮数预算内逐命题判定）；输出沿用 verdict/flaw_holds/exploitability/evidence_refs，DecisionEngine 消费方式不变 | `prompts/verify/1.0.0/`、`schemas/ai_verify_{input,output}.schema.json`、`backend/app/analysis/verify_agent.py` | 新增 | T2.7 | 2026-08-21 决断 3 |
-| T2.12 | 核验分流与降级：探索 `validated` 候选必进核验 agent；规则 L2 候选以核验 agent 替代单轮 L2 review；agent 失败/预算耗尽自动回退现有单轮 L2（主链永不阻塞，候选标记 fallback 来源）；核验预算独立记账（第三本账，batch 帽覆盖） | `backend/app/analysis/verify_agent.py`、`backend/app/analysis/candidate_funnel.py`（路由）、`backend/app/config.py` | 新增+修改 | T2.11 | 2026-08-21 决断 3 |
+| T2.12 | 核验分流与降级：探索 `validated` 候选必进核验 agent；规则 L2 候选以核验 agent 替代单轮 L2 review；agent 失败/预算耗尽自动回退现有单轮 L2（主链永不阻塞，候选标记 fallback 来源）；核验预算独立记账（第三本账，batch 帽覆盖）；**适配层（M0 审查 §4.2）**：verify 输出补齐 L2 其余字段（harm/reachability_class/impact_vector/reverse_exclusion 以确定性默认值）并做 `evidence_refs` 类型转换（`ExplorerEvidenceRef` → `EvidenceReference`，context_id 从输入上下文映射回填），确保 DecisionEngine 证据校验可消费 | `backend/app/analysis/verify_agent.py`、`backend/app/analysis/candidate_funnel.py`（路由）、`backend/app/config.py` | 新增+修改 | T2.11 | 2026-08-21 决断 3 / M0 审查 §4.2 |
 
 ### 3.4 M3：报告、PoC 骨架与修复建议
 
@@ -143,6 +143,7 @@ M2 内部依赖：T2.1（规则产物） → T2.2（api_surface）；T2.2/T2.3/T
    - [ ] 命题清单：每候选输入含确定性生成的 claims，输出逐命题判定且与 verdict 一致；
    - [ ] 循环语义：终止条件为命题全部判定或预算耗尽（非模型自声明 done），每轮落盘可审计；
    - [ ] 降级：构造 agent 循环失败/预算耗尽场景，候选自动回退单轮 L2 并标记 fallback 来源，主链不阻塞；
+   - [ ] 证据引用适配：构造含 `ExplorerEvidenceRef` 的 verify 输出，断言适配层转换为 `EvidenceReference`（context_id 回填）后 DecisionEngine 证据校验通过（M0 审查 §4.2）；
    - [ ] `ai_likely_supported` 占比与现有单轮 L2 基线对比记录（预期下降但不归零：agent 化消除"上下文不足"型不完整，"静态不可判定"型诚实保留）。
 
 ### 4.4 M3 专项验收
