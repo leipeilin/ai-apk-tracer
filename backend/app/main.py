@@ -8,8 +8,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.analysis.ai_runtime import AIRuntime
 from app.api.routes import router
@@ -118,7 +117,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     frontend_dist = WORKSPACE_ROOT / "frontend" / "dist"
     if frontend_dist.is_dir():
-        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+        # SPA 静态托管 + 深链 fallback（T1.5 受控修复）：StaticFiles(html=True)
+        # 对 /assets、/runs/:id 等客户端路由深链返回 404——改为 catch-all：
+        # 真实静态文件直出（含路径穿越防护），其余未知路径回退 index.html
+        # （react-router 客户端接管）。
+        @app.get("/{full_path:path}", include_in_schema=False)
+        def spa_fallback(full_path: str) -> FileResponse:
+            candidate = (frontend_dist / full_path).resolve()
+            if full_path and candidate.is_file() and candidate.is_relative_to(frontend_dist.resolve()):
+                return FileResponse(candidate)
+            return FileResponse(frontend_dist / "index.html")
 
     return app
 

@@ -1,4 +1,4 @@
-import { Hexagon, ListDashes, Plus, Pulse } from '@phosphor-icons/react'
+import { Hexagon, ListDashes, Package, Plus, Pulse } from '@phosphor-icons/react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { NavLink, Outlet } from 'react-router-dom'
 import { ThemeToggle } from './ThemeToggle'
@@ -14,6 +14,7 @@ export function AppShell() {
         </NavLink>
         <nav aria-label="主导航">
           <NavLink to="/" end><ListDashes size={17} />任务</NavLink>
+          <NavLink to="/assets"><Package size={17} />资产批量</NavLink>
           <NavLink to="/?create=1"><Plus size={17} />新建分析</NavLink>
         </nav>
         <ThemeToggle />

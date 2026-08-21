@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
+import { AssetsPage } from '../features/assets/AssetsPage'
 import { RunDetailPage } from '../features/runs/RunDetailPage'
 import { RunListPage } from '../features/runs/RunListPage'
 import { AppShell } from '../ui/AppShell'
@@ -9,6 +10,7 @@ export function App() {
       <Route element={<AppShell />}>
         <Route index element={<RunListPage />} />
         <Route path="runs/:id" element={<RunDetailPage />} />
+        <Route path="assets" element={<AssetsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

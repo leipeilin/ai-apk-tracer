@@ -246,3 +246,42 @@ export interface CreateRunProgress {
   total: number
   percent: number
 }
+
+/** 资产注册表条目（GET /api/assets；apk_path 已由后端脱敏剔除）。 */
+export interface Asset {
+  id: string
+  package_name: string
+  apk_filename: string
+  apk_sha256: string
+  source: string
+  status: 'ready' | 'scanning' | 'error'
+  last_run_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** batches.assets 快照元素（创建时固化，资产删除后仍可审计）。 */
+export interface BatchAssetSnapshot {
+  asset_id: string
+  package_name: string
+  apk_sha256: string
+}
+
+/** 批量扫描记录与 runs 聚合汇总（GET /api/batches/{id}；assets_json 已剔除）。 */
+export interface BatchSummary {
+  id: string
+  status: 'pending' | 'running' | 'completed' | 'partial' | 'failed'
+  max_ai_calls: number | null
+  max_wall_seconds: number | null
+  ai_skipped_count: number
+  assets: BatchAssetSnapshot[]
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+  total_runs: number
+  completed_runs: number
+  failed_runs: number
+  ai_skipped: number
+  ai_skipped_by_budget: number
+  ai_skipped_by_wall_clock: number
+}

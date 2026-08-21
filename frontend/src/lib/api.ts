@@ -1,5 +1,7 @@
 import type {
   AnalysisRun,
+  Asset,
+  BatchSummary,
   CleanupMode,
   ContextSliceResponse,
   CreateRunInput,
@@ -68,6 +70,38 @@ function normalizeList<T>(payload: T[] | ListResponse<T> | { data?: T[]; results
   return []
 }
 
+/**
+ * XHR 上传 FormData 并暴露字节级进度（createRun/importAsset 共享）。
+ * 注意：responseType='json' 下不得访问 responseText（会抛 InvalidStateError），
+ * 解析失败时回退为状态码文案。
+ */
+function postFormData<T>(
+  path: string,
+  form: FormData,
+  fallbackTotal: number,
+  onProgress: (progress: CreateRunProgress) => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}${path}`)
+    xhr.responseType = 'json'
+    xhr.upload.addEventListener('progress', (event) => {
+      const total = event.lengthComputable ? event.total : fallbackTotal
+      onProgress({ loaded: event.loaded, total, percent: total ? Math.round((event.loaded / total) * 100) : 0 })
+    })
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.response as T)
+        return
+      }
+      const detail = xhr.response?.error?.message || xhr.response?.detail || `上传失败（${xhr.status}）`
+      reject(new ApiError(String(detail), xhr.status, xhr.response))
+    })
+    xhr.addEventListener('error', () => reject(new ApiError('网络连接失败，请检查 API 地址', 0)))
+    xhr.send(form)
+  })
+}
+
 /** 本地扫描服务的类型化客户端；上传使用 XHR 以暴露真实进度事件。 */
 export const api = {
   health: () => request<{ status?: string }>('/health'),
@@ -113,28 +147,30 @@ export const api = {
       body: JSON.stringify({ mode, confirm_delete: mode === 'delete_run' }),
     }),
   createRun(input: CreateRunInput, onProgress: (progress: CreateRunProgress) => void) {
-    return new Promise<AnalysisRun>((resolve, reject) => {
-      const form = new FormData()
-      form.append('file', input.file)
-      form.append('authorized', String(input.authorized))
-      form.append('source_analysis_enabled', String(input.sourceAnalysisEnabled))
-      const xhr = new XMLHttpRequest()
-      xhr.open('POST', `${API_BASE}/api/runs`)
-      xhr.responseType = 'json'
-      xhr.upload.addEventListener('progress', (event) => {
-        const total = event.lengthComputable ? event.total : input.file.size
-        onProgress({ loaded: event.loaded, total, percent: total ? Math.round((event.loaded / total) * 100) : 0 })
-      })
-      xhr.addEventListener('load', () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(xhr.response as AnalysisRun)
-          return
-        }
-        const detail = xhr.response?.error?.message || xhr.response?.detail || xhr.responseText || `上传失败（${xhr.status}）`
-        reject(new ApiError(String(detail), xhr.status, xhr.response))
-      })
-      xhr.addEventListener('error', () => reject(new ApiError('网络连接失败，请检查 API 地址', 0)))
-      xhr.send(form)
-    })
+    const form = new FormData()
+    form.append('file', input.file)
+    form.append('authorized', String(input.authorized))
+    form.append('source_analysis_enabled', String(input.sourceAnalysisEnabled))
+    return postFormData<AnalysisRun>('/api/runs', form, input.file.size, onProgress)
   },
+  async listAssets() {
+    const payload = await request<Asset[] | ListResponse<Asset> | { data?: Asset[] }>('/api/assets')
+    return normalizeList(payload)
+  },
+  importAsset(
+    input: { file: File; packageName: string; authorized: boolean },
+    onProgress: (progress: CreateRunProgress) => void,
+  ) {
+    const form = new FormData()
+    form.append('file', input.file)
+    form.append('package_name', input.packageName)
+    form.append('authorized', String(input.authorized))
+    return postFormData<Asset>('/api/assets/import', form, input.file.size, onProgress)
+  },
+  createBatch: (input: { authorized: boolean; assetIds: string[] }) =>
+    request<BatchSummary>('/api/batches', {
+      method: 'POST',
+      body: JSON.stringify({ authorized: input.authorized, asset_ids: input.assetIds }),
+    }),
+  getBatch: (id: string) => request<BatchSummary>(`/api/batches/${encodeURIComponent(id)}`),
 }
