@@ -1,0 +1,163 @@
+{
+  "$defs": {
+    "ExplorerEvidenceRef": {
+      "additionalProperties": false,
+      "description": "探索轨轻量证据引用（低信任）：仅指向可回查的源码位置。\n\n不复用 EvidenceReference（其 context_id/claim 必填，属确定性语义 bundle 的输入上下文\n引用）；探索轨证据由 T2.6 三档校验回查通过后归一化为正式证据。",
+      "properties": {
+        "claim": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "可选：该引用支撑的主张（供人工视图；校验后补全）",
+          "title": "Claim"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据结束行；缺省表示单行",
+          "title": "End Line"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据起始行",
+          "title": "Line"
+        },
+        "path": {
+          "description": "证据所在工作区相对路径（必填，可回查）",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ExplorerEvidenceRef",
+      "type": "object"
+    },
+    "ResolvedFact": {
+      "additionalProperties": false,
+      "description": "对缺失事实清单中一项的深挖结论。",
+      "properties": {
+        "claim_index": {
+          "description": "对应 missing_facts 的索引（从 0 起）",
+          "minimum": 0,
+          "title": "Claim Index",
+          "type": "integer"
+        },
+        "conclusion": {
+          "description": "该项事实的深挖结论",
+          "enum": [
+            "confirmed",
+            "refuted",
+            "still_unknown"
+          ],
+          "title": "Conclusion",
+          "type": "string"
+        },
+        "evidence": {
+          "description": "支撑该结论的可回查证据",
+          "items": {
+            "$ref": "#/$defs/ExplorerEvidenceRef"
+          },
+          "maxItems": 32,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "reasoning": {
+          "description": "结论依据",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reasoning",
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim_index",
+        "conclusion",
+        "reasoning"
+      ],
+      "title": "ResolvedFact",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "深挖阶段输出：只补充可回查证据与事实判定，不输出/改写链（与 L2 裁决职责分离）。",
+  "properties": {
+    "analysis_complete": {
+      "description": "深挖是否已完整结束；不得掩盖 remaining_gaps",
+      "title": "Analysis Complete",
+      "type": "boolean"
+    },
+    "evidence_refs": {
+      "description": "本轮新增的可回查证据引用",
+      "items": {
+        "$ref": "#/$defs/ExplorerEvidenceRef"
+      },
+      "maxItems": 64,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "remaining_gaps": {
+      "description": "仍未解决的缺口（T2.6 据此再决策）",
+      "items": {
+        "maxLength": 10000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 32,
+      "title": "Remaining Gaps",
+      "type": "array"
+    },
+    "resolved_facts": {
+      "description": "逐项事实判定",
+      "items": {
+        "$ref": "#/$defs/ResolvedFact"
+      },
+      "maxItems": 32,
+      "title": "Resolved Facts",
+      "type": "array"
+    },
+    "summary": {
+      "description": "本轮深挖摘要",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "summary",
+    "analysis_complete"
+  ],
+  "title": "DeepDiveOutput",
+  "type": "object"
+}

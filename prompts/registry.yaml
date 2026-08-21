@@ -354,3 +354,19 @@ prompts:
   schema_sha256:
     input: c1e205659d9c502671813572c7e6c39f4be02d8787b610e72931602301c88b5f
     output: 5f5e15e3037583022bd478ccc4f3bf9db6d5aacc4e67445d0e7b42cab5afc4ba
+- id: explorer-deep-dive
+  version: 1.0.0
+  system_file: explorer-deep-dive/1.0.0/system.md
+  user_file: explorer-deep-dive/1.0.0/user.md
+  allowed_placeholders:
+  - explorer_deep_dive_input_json
+  input_model: DeepDiveInput
+  output_model: DeepDiveOutput
+  input_schema_file: ai_explorer_deep_dive_input.schema.json
+  output_schema_file: ai_explorer_deep_dive_output.schema.json
+  template_sha256:
+    system: 1496fab6811e85c7c03aedc6da6a6eaed1ba207a6139334c5ad9d71772d2f1bd
+    user: 897c402cf08764d1c9bc0498140931fd1629f1e10a32e797952e9aad6092673a
+  schema_sha256:
+    input: 811645d3d17dd3cd875e61f44eb5eed283198c32c8eb0a5b3d1419934a9f2c73
+    output: f0a1469cbcb3159750a5e32e1fcf31416bd03ecc62c7eb46f8eec0ab99a652b4

@@ -1,0 +1,282 @@
+{
+  "$defs": {
+    "ChainProposal": {
+      "additionalProperties": false,
+      "description": "从攻击面入口到 sink 的候选链（低信任建议，非正式 sources/sinks）。",
+      "properties": {
+        "call_tree_refs": {
+          "description": "可选：支撑该链的 call_tree 产物相对路径",
+          "items": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Call Tree Refs",
+          "type": "array"
+        },
+        "confidence": {
+          "description": "模型对本链成立度的置信度",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "description": "支撑本链的轻量证据引用（T2.6 回查后归一化）",
+          "items": {
+            "$ref": "#/$defs/ExplorerEvidenceRef"
+          },
+          "maxItems": 64,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "hops": {
+          "description": "结构化逐跳路径；每跳须可对 call_sites 表回查",
+          "items": {
+            "$ref": "#/$defs/Hop"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Hops",
+          "type": "array"
+        },
+        "hypothesis": {
+          "description": "假设（非裁决）：是否倾向构成漏洞，评审 §4.1",
+          "enum": [
+            "likely",
+            "possible",
+            "unlikely"
+          ],
+          "title": "Hypothesis",
+          "type": "string"
+        },
+        "impact_proposal": {
+          "description": "影响面/攻击场景/漏洞类型描述（假设级，非结论）",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Impact Proposal",
+          "type": "string"
+        },
+        "needs_expansion": {
+          "default": false,
+          "description": "本链是否需进一步扩片取证",
+          "title": "Needs Expansion",
+          "type": "boolean"
+        },
+        "reasoning": {
+          "description": "构造本链的依据",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reasoning",
+          "type": "string"
+        },
+        "sink": {
+          "description": "候选 sink 方法/操作",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Sink",
+          "type": "string"
+        },
+        "source": {
+          "description": "候选 source 表达式/方法",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "sink",
+        "hops",
+        "confidence",
+        "hypothesis",
+        "impact_proposal",
+        "reasoning"
+      ],
+      "title": "ChainProposal",
+      "type": "object"
+    },
+    "ExplorerEvidenceRef": {
+      "additionalProperties": false,
+      "description": "探索轨轻量证据引用（低信任）：仅指向可回查的源码位置。\n\n不复用 EvidenceReference（其 context_id/claim 必填，属确定性语义 bundle 的输入上下文\n引用）；探索轨证据由 T2.6 三档校验回查通过后归一化为正式证据。",
+      "properties": {
+        "claim": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "可选：该引用支撑的主张（供人工视图；校验后补全）",
+          "title": "Claim"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据结束行；缺省表示单行",
+          "title": "End Line"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据起始行",
+          "title": "Line"
+        },
+        "path": {
+          "description": "证据所在工作区相对路径（必填，可回查）",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ExplorerEvidenceRef",
+      "type": "object"
+    },
+    "Hop": {
+      "additionalProperties": false,
+      "description": "数据流链上的一跳（结构化路径，评审 §4.2）。",
+      "properties": {
+        "arg_positions": {
+          "description": "攻击者可控参数位置（从 0 起，非负）",
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "title": "Arg Positions",
+          "type": "array"
+        },
+        "call_site_line": {
+          "description": "调用点源码行号",
+          "maximum": 10000000,
+          "minimum": 1,
+          "title": "Call Site Line",
+          "type": "integer"
+        },
+        "from_method_id": {
+          "description": "源方法 ID 建议（path#Class.method:line；可回查性由 T2.6 校验）",
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "From Method Id",
+          "type": "string"
+        },
+        "resolved_via": {
+          "description": "调用解析方式",
+          "enum": [
+            "direct_call",
+            "virtual_call",
+            "dynamic_invoke",
+            "binder_transaction",
+            "other"
+          ],
+          "title": "Resolved Via",
+          "type": "string"
+        },
+        "to_method_id": {
+          "description": "目标方法 ID 建议",
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "To Method Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_method_id",
+        "to_method_id",
+        "call_site_line",
+        "resolved_via"
+      ],
+      "title": "Hop",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "partial 候选深挖输入（评审 §7.1 决断：专用协议，职责=补齐事实，非裁决）。",
+  "properties": {
+    "candidate_id": {
+      "description": "被深挖候选的稳定 ID",
+      "maxLength": 160,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "chain_proposal": {
+      "$ref": "#/$defs/ChainProposal",
+      "description": "校验通过的原始链（只读；深挖不得改写链）"
+    },
+    "code_context": {
+      "anyOf": [
+        {
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "可选：已取回的相关代码片段文本",
+      "title": "Code Context"
+    },
+    "existing_evidence_refs": {
+      "description": "已确认可回查的既有证据",
+      "items": {
+        "$ref": "#/$defs/ExplorerEvidenceRef"
+      },
+      "maxItems": 64,
+      "title": "Existing Evidence Refs",
+      "type": "array"
+    },
+    "missing_facts": {
+      "description": "缺失事实/待证命题清单（确定性代码从三档校验缺口生成）",
+      "items": {
+        "maxLength": 10000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 32,
+      "title": "Missing Facts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "chain_proposal"
+  ],
+  "title": "DeepDiveInput",
+  "type": "object"
+}

@@ -403,6 +403,35 @@ class ExplorerCandidate(StrictAIModel):
     validation: ExplorerCandidateValidation | None = Field(default=None, description="三档校验结果；生成时为空占位")
 
 
+class DeepDiveInput(StrictAIModel):
+    """partial 候选深挖输入（评审 §7.1 决断：专用协议，职责=补齐事实，非裁决）。"""
+
+    candidate_id: Identifier = Field(description="被深挖候选的稳定 ID")
+    chain_proposal: ChainProposal = Field(description="校验通过的原始链（只读；深挖不得改写链）")
+    missing_facts: list[LongText] = Field(default_factory=list, max_length=32, description="缺失事实/待证命题清单（确定性代码从三档校验缺口生成）")
+    existing_evidence_refs: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=64, description="已确认可回查的既有证据")
+    code_context: LongText | None = Field(default=None, description="可选：已取回的相关代码片段文本")
+
+
+class ResolvedFact(StrictAIModel):
+    """对缺失事实清单中一项的深挖结论。"""
+
+    claim_index: int = Field(ge=0, description="对应 missing_facts 的索引（从 0 起）")
+    conclusion: Literal["confirmed", "refuted", "still_unknown"] = Field(description="该项事实的深挖结论")
+    evidence: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=32, description="支撑该结论的可回查证据")
+    reasoning: LongText = Field(description="结论依据")
+
+
+class DeepDiveOutput(StrictAIModel):
+    """深挖阶段输出：只补充可回查证据与事实判定，不输出/改写链（与 L2 裁决职责分离）。"""
+
+    summary: LongText = Field(description="本轮深挖摘要")
+    resolved_facts: list[ResolvedFact] = Field(default_factory=list, max_length=32, description="逐项事实判定")
+    evidence_refs: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=64, description="本轮新增的可回查证据引用")
+    remaining_gaps: list[LongText] = Field(default_factory=list, max_length=32, description="仍未解决的缺口（T2.6 据此再决策）")
+    analysis_complete: bool = Field(description="深挖是否已完整结束；不得掩盖 remaining_gaps")
+
+
 class RepairInput(StrictAIModel):
     """只携带无效输出与校验错误的格式修复输入。"""
 
@@ -519,6 +548,7 @@ AI_OUTPUT_MODEL_REGISTRY: dict[str, type[StrictAIModel]] = {
         L2ReviewOutput,
         RepairOutput,
         FinalizationOutput,
+        DeepDiveOutput,
     )
 }
 AI_OUTPUT_MODEL_VERSIONS: dict[str, str] = {
@@ -549,6 +579,8 @@ AI_MODEL_REGISTRY: dict[str, type[StrictAIModel]] = {
         FinalizationOutput,
         DeterministicSemanticBundle,
         AITraceEntry,
+        DeepDiveInput,
+        DeepDiveOutput,
     )
 }
 
@@ -561,6 +593,8 @@ AI_SCHEMA_MODELS: dict[str, type[StrictAIModel]] = {
     "ai_l2_review_output.schema.json": L2ReviewOutput,
     "ai_explorer_observation.schema.json": ExplorerObservation,
     "explorer_candidate.schema.json": ExplorerCandidate,
+    "ai_explorer_deep_dive_input.schema.json": DeepDiveInput,
+    "ai_explorer_deep_dive_output.schema.json": DeepDiveOutput,
     "ai_repair_input.schema.json": RepairInput,
     "ai_repair_output.schema.json": RepairOutput,
     "ai_finalization_input.schema.json": FinalizationInput,

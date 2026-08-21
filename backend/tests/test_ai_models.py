@@ -11,6 +11,8 @@ from pydantic import ValidationError
 from app.analysis.ai_models import (
     AI_SCHEMA_MODELS,
     AITraceEntry,
+    DeepDiveInput,
+    DeepDiveOutput,
     ExplorerCandidate,
     ExplorerObservation,
     L1TriageOutput,
@@ -512,3 +514,112 @@ def test_explorer_candidate_bounds() -> None:
     payload["validation"] = {"status": "pending", "blocked_by_guard": "yes"}
     with pytest.raises(ValidationError):
         ExplorerCandidate.model_validate(payload)
+
+
+# ---------------------------------------------------------------------------
+# explorer_deep_dive 协议（T0.3）：partial 候选深挖（补齐事实、禁止改写链）
+# ---------------------------------------------------------------------------
+
+def _deep_dive_input() -> dict:
+    return {
+        "candidate_id": "expl_" + "a" * 20,
+        "chain_proposal": _explorer_observation()["chain_proposals"][0],
+        "missing_facts": ["Guard 是否拦截了传播路径", "loadUrl 调用方是否可控"],
+        "existing_evidence_refs": [{"path": "sources/com/example/SplashActivity.java", "line": 42}],
+        "code_context": "public void loadUrl(String url) { /* 无 scheme 校验 */ }",
+    }
+
+
+def _deep_dive_output() -> dict:
+    return {
+        "summary": "补证完成",
+        "resolved_facts": [
+            {"claim_index": 0, "conclusion": "confirmed",
+             "evidence": [{"path": "sources/com/example/WebHelper.java", "line": 120}],
+             "reasoning": "Guard 校验存在但可绕过"},
+            {"claim_index": 1, "conclusion": "still_unknown", "evidence": [], "reasoning": "调用方信息不足"},
+        ],
+        "evidence_refs": [{"path": "sources/com/example/WebHelper.java", "line": 120}],
+        "remaining_gaps": ["loadUrl 上游数据流待查"],
+        "analysis_complete": True,
+    }
+
+
+def test_deep_dive_input_valid() -> None:
+    payload = _deep_dive_input()
+    inp = DeepDiveInput.model_validate(payload)
+    assert inp.chain_proposal.hops[0].to_method_id.endswith("loadUrl:120")
+    assert inp.missing_facts[0].startswith("Guard")
+
+
+def test_deep_dive_output_valid() -> None:
+    out = DeepDiveOutput.model_validate(_deep_dive_output())
+    assert out.resolved_facts[0].conclusion == "confirmed"
+    assert out.resolved_facts[0].claim_index == 0
+    assert out.analysis_complete is True
+
+
+@pytest.mark.parametrize("payload,field", [
+    (_deep_dive_input(), "chain_proposal"),
+    (_deep_dive_input(), "candidate_id"),
+])
+def test_deep_dive_input_required_missing(payload: dict, field: str) -> None:
+    payload.pop(field)
+    with pytest.raises(ValidationError) as error:
+        DeepDiveInput.model_validate(payload)
+    assert error.value.errors()[0]["type"] == "missing"
+
+
+def test_deep_dive_output_required_missing() -> None:
+    payload = _deep_dive_output()
+    payload.pop("summary")
+    with pytest.raises(ValidationError) as error:
+        DeepDiveOutput.model_validate(payload)
+    assert error.value.errors()[0]["type"] == "missing"
+    payload = _deep_dive_output()
+    payload["resolved_facts"][0].pop("reasoning")
+    with pytest.raises(ValidationError):
+        DeepDiveOutput.model_validate(payload)
+
+
+def test_deep_dive_rejects_wrong_conclusion() -> None:
+    payload = _deep_dive_output()
+    payload["resolved_facts"][0]["conclusion"] = "verified"
+    with pytest.raises(ValidationError):
+        DeepDiveOutput.model_validate(payload)
+
+
+def test_deep_dive_bounds() -> None:
+    # claim_index=-1 越界
+    payload = _deep_dive_output()
+    payload["resolved_facts"][0]["claim_index"] = -1
+    with pytest.raises(ValidationError):
+        DeepDiveOutput.model_validate(payload)
+    # missing_facts 33 项超 max_length=32
+    payload = _deep_dive_input()
+    payload["missing_facts"] = ["x"] * 33
+    with pytest.raises(ValidationError):
+        DeepDiveInput.model_validate(payload)
+    # resolved_facts 33 项
+    payload = _deep_dive_output()
+    payload["resolved_facts"] = payload["resolved_facts"] * 33
+    with pytest.raises(ValidationError):
+        DeepDiveOutput.model_validate(payload)
+    # evidence 路径穿越
+    payload = _deep_dive_output()
+    payload["evidence_refs"] = [{"path": "../../etc/passwd"}]
+    with pytest.raises(ValidationError):
+        DeepDiveOutput.model_validate(payload)
+    # code_context 超 LongText max 10_000
+    payload = _deep_dive_input()
+    payload["code_context"] = "x" * 10_001
+    with pytest.raises(ValidationError):
+        DeepDiveInput.model_validate(payload)
+
+
+def test_deep_dive_output_rejects_chain_field() -> None:
+    # 结构上禁止改链：输出模型无 chain 字段（评审 §7.1 职责分离）
+    payload = {**_deep_dive_output(), "chain_proposal": _explorer_observation()["chain_proposals"][0]}
+    with pytest.raises(ValidationError) as error:
+        DeepDiveOutput.model_validate(payload)
+    assert any(item["type"] == "extra_forbidden" for item in error.value.errors())
