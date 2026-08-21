@@ -353,6 +353,57 @@ class ExplorerObservation(StrictAIModel):
         return self
 
 
+class ExplorerCandidateComponent(StrictAIModel):
+    """探索候选的入口组件信息（大纲 §5.3 草案；entry_method 供归一化 locations）。"""
+
+    kind: Literal["activity", "service", "provider", "receiver", "other"] = Field(description="组件类型（与 candidate.component 枚举对齐，含 other 兜底）")
+    name: ShortText = Field(description="组件类名")
+    exported: bool = Field(description="是否导出（可从外部触发）")
+    entry_method: ShortText = Field(description="组件入口方法名（如 onCreate）")
+
+
+class ExplorerCandidateValidation(StrictAIModel):
+    """三档校验结果占位（T2.6 填充；生成时默认 None 即 pending）。
+
+    判定规则（评审 R-4）：validated=全部跳 call_sites 回查通过；
+    partially_validated=至少一跳可回查但链/证据不完整；unverified=引用不可回查或信息不足。
+    """
+
+    status: Literal["pending", "validated", "partially_validated", "unverified"] = Field(
+        description="三档校验状态；判定规则见类 docstring"
+    )
+    notes: LongText | None = Field(default=None, description="校验结论/缺口说明")
+    verified_hop_count: int | None = Field(default=None, ge=0, description="逐跳回查通过的跳数")
+    failed_hop_indices: list[Annotated[int, Field(ge=0)]] = Field(
+        default_factory=list, max_length=32, description="回查失败的跳索引（评审 R-2 明细载体，供审计）"
+    )
+    blocked_by_guard: bool = Field(default=False, description="是否被 Guard/授权确定性阻断")
+    custom_sink_proposal: bool = Field(default=False, description="sink 未命中现有 taxonomy，标记为 custom sink 提案（评审 §4.5）")
+
+
+class ExplorerCandidate(StrictAIModel):
+    """探索轨编排层候选（非 AI 协议产物）：由每轮 Observation.chain_proposals 转换生成。
+
+    - prompt_version / model 沿用产生该候选的 Observation 元数据透传（评审 R-3）；
+    - 转换侧（T2.5）不得注入 extra 字段（评审 R-8）；
+    - 归一化目标为 schemas/candidate.schema.json：顶层 sources/sinks/blocking_gaps 等
+      由 chain_proposal + validation 映射生成（T0.6，评审 R-5/R-6）；本模型只承载
+      探索轨原始候选事实，不直接写正式 sources/sinks。
+    """
+
+    schema_version: Literal["1.0.0"] = Field(description="ExplorerCandidate Schema 版本")
+    candidate_id: Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^expl_[0-9a-f]{20}$")] = Field(
+        description="候选稳定 ID（expl_ + 20 位 hex）"
+    )
+    source: Literal["explorer_agent"] = Field(description="候选来源（低信任探索轨）")
+    prompt_version: ShortText = Field(description="产生该候选的探索协议版本（如 explorer/1.0.0）")
+    model: ShortText = Field(description="产生该候选的模型标识")
+    component: ExplorerCandidateComponent = Field(description="入口组件信息")
+    api_entry_ref: Identifier = Field(description="关联的 API 入口表条目 ID（如 act_..._onCreate）")
+    chain_proposal: ChainProposal = Field(description="候选链（复用 T0.1 ChainProposal，低信任建议）")
+    validation: ExplorerCandidateValidation | None = Field(default=None, description="三档校验结果；生成时为空占位")
+
+
 class RepairInput(StrictAIModel):
     """只携带无效输出与校验错误的格式修复输入。"""
 
@@ -510,6 +561,7 @@ AI_SCHEMA_MODELS: dict[str, type[StrictAIModel]] = {
     "ai_l2_review_input.schema.json": L2ReviewInput,
     "ai_l2_review_output.schema.json": L2ReviewOutput,
     "ai_explorer_observation.schema.json": ExplorerObservation,
+    "explorer_candidate.schema.json": ExplorerCandidate,
     "ai_repair_input.schema.json": RepairInput,
     "ai_repair_output.schema.json": RepairOutput,
     "ai_finalization_input.schema.json": FinalizationInput,

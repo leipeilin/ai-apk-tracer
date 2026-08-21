@@ -1,0 +1,419 @@
+{
+  "$defs": {
+    "ChainProposal": {
+      "additionalProperties": false,
+      "description": "从攻击面入口到 sink 的候选链（低信任建议，非正式 sources/sinks）。",
+      "properties": {
+        "call_tree_refs": {
+          "description": "可选：支撑该链的 call_tree 产物相对路径",
+          "items": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Call Tree Refs",
+          "type": "array"
+        },
+        "confidence": {
+          "description": "模型对本链成立度的置信度",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "description": "支撑本链的轻量证据引用（T2.6 回查后归一化）",
+          "items": {
+            "$ref": "#/$defs/ExplorerEvidenceRef"
+          },
+          "maxItems": 64,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "hops": {
+          "description": "结构化逐跳路径；每跳须可对 call_sites 表回查",
+          "items": {
+            "$ref": "#/$defs/Hop"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Hops",
+          "type": "array"
+        },
+        "hypothesis": {
+          "description": "假设（非裁决）：是否倾向构成漏洞，评审 §4.1",
+          "enum": [
+            "likely",
+            "possible",
+            "unlikely"
+          ],
+          "title": "Hypothesis",
+          "type": "string"
+        },
+        "impact_proposal": {
+          "description": "影响面/攻击场景/漏洞类型描述（假设级，非结论）",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Impact Proposal",
+          "type": "string"
+        },
+        "needs_expansion": {
+          "default": false,
+          "description": "本链是否需进一步扩片取证",
+          "title": "Needs Expansion",
+          "type": "boolean"
+        },
+        "reasoning": {
+          "description": "构造本链的依据",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reasoning",
+          "type": "string"
+        },
+        "sink": {
+          "description": "候选 sink 方法/操作",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Sink",
+          "type": "string"
+        },
+        "source": {
+          "description": "候选 source 表达式/方法",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "sink",
+        "hops",
+        "confidence",
+        "hypothesis",
+        "impact_proposal",
+        "reasoning"
+      ],
+      "title": "ChainProposal",
+      "type": "object"
+    },
+    "ExplorerCandidateComponent": {
+      "additionalProperties": false,
+      "description": "探索候选的入口组件信息（大纲 §5.3 草案；entry_method 供归一化 locations）。",
+      "properties": {
+        "entry_method": {
+          "description": "组件入口方法名（如 onCreate）",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Entry Method",
+          "type": "string"
+        },
+        "exported": {
+          "description": "是否导出（可从外部触发）",
+          "title": "Exported",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "组件类型（与 candidate.component 枚举对齐，含 other 兜底）",
+          "enum": [
+            "activity",
+            "service",
+            "provider",
+            "receiver",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "description": "组件类名",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "exported",
+        "entry_method"
+      ],
+      "title": "ExplorerCandidateComponent",
+      "type": "object"
+    },
+    "ExplorerCandidateValidation": {
+      "additionalProperties": false,
+      "description": "三档校验结果占位（T2.6 填充；生成时默认 None 即 pending）。\n\n判定规则（评审 R-4）：validated=全部跳 call_sites 回查通过；\npartially_validated=至少一跳可回查但链/证据不完整；unverified=引用不可回查或信息不足。",
+      "properties": {
+        "blocked_by_guard": {
+          "default": false,
+          "description": "是否被 Guard/授权确定性阻断",
+          "title": "Blocked By Guard",
+          "type": "boolean"
+        },
+        "custom_sink_proposal": {
+          "default": false,
+          "description": "sink 未命中现有 taxonomy，标记为 custom sink 提案（评审 §4.5）",
+          "title": "Custom Sink Proposal",
+          "type": "boolean"
+        },
+        "failed_hop_indices": {
+          "description": "回查失败的跳索引（评审 R-2 明细载体，供审计）",
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "title": "Failed Hop Indices",
+          "type": "array"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "校验结论/缺口说明",
+          "title": "Notes"
+        },
+        "status": {
+          "description": "三档校验状态；判定规则见类 docstring",
+          "enum": [
+            "pending",
+            "validated",
+            "partially_validated",
+            "unverified"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "verified_hop_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "逐跳回查通过的跳数",
+          "title": "Verified Hop Count"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "ExplorerCandidateValidation",
+      "type": "object"
+    },
+    "ExplorerEvidenceRef": {
+      "additionalProperties": false,
+      "description": "探索轨轻量证据引用（低信任）：仅指向可回查的源码位置。\n\n不复用 EvidenceReference（其 context_id/claim 必填，属确定性语义 bundle 的输入上下文\n引用）；探索轨证据由 T2.6 三档校验回查通过后归一化为正式证据。",
+      "properties": {
+        "claim": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "可选：该引用支撑的主张（供人工视图；校验后补全）",
+          "title": "Claim"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据结束行；缺省表示单行",
+          "title": "End Line"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据起始行",
+          "title": "Line"
+        },
+        "path": {
+          "description": "证据所在工作区相对路径（必填，可回查）",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ExplorerEvidenceRef",
+      "type": "object"
+    },
+    "Hop": {
+      "additionalProperties": false,
+      "description": "数据流链上的一跳（结构化路径，评审 §4.2）。",
+      "properties": {
+        "arg_positions": {
+          "description": "攻击者可控参数位置（从 0 起，非负）",
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 32,
+          "title": "Arg Positions",
+          "type": "array"
+        },
+        "call_site_line": {
+          "description": "调用点源码行号",
+          "maximum": 10000000,
+          "minimum": 1,
+          "title": "Call Site Line",
+          "type": "integer"
+        },
+        "from_method_id": {
+          "description": "源方法 ID 建议（path#Class.method:line；可回查性由 T2.6 校验）",
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "From Method Id",
+          "type": "string"
+        },
+        "resolved_via": {
+          "description": "调用解析方式",
+          "enum": [
+            "direct_call",
+            "virtual_call",
+            "dynamic_invoke",
+            "binder_transaction",
+            "other"
+          ],
+          "title": "Resolved Via",
+          "type": "string"
+        },
+        "to_method_id": {
+          "description": "目标方法 ID 建议",
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "To Method Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_method_id",
+        "to_method_id",
+        "call_site_line",
+        "resolved_via"
+      ],
+      "title": "Hop",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "探索轨编排层候选（非 AI 协议产物）：由每轮 Observation.chain_proposals 转换生成。\n\n- prompt_version / model 沿用产生该候选的 Observation 元数据透传（评审 R-3）；\n- 转换侧（T2.5）不得注入 extra 字段（评审 R-8）；\n- 归一化目标为 schemas/candidate.schema.json：顶层 sources/sinks/blocking_gaps 等\n  由 chain_proposal + validation 映射生成（T0.6，评审 R-5/R-6）；本模型只承载\n  探索轨原始候选事实，不直接写正式 sources/sinks。",
+  "properties": {
+    "api_entry_ref": {
+      "description": "关联的 API 入口表条目 ID（如 act_..._onCreate）",
+      "maxLength": 160,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+      "title": "Api Entry Ref",
+      "type": "string"
+    },
+    "candidate_id": {
+      "description": "候选稳定 ID（expl_ + 20 位 hex）",
+      "pattern": "^expl_[0-9a-f]{20}$",
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "chain_proposal": {
+      "$ref": "#/$defs/ChainProposal",
+      "description": "候选链（复用 T0.1 ChainProposal，低信任建议）"
+    },
+    "component": {
+      "$ref": "#/$defs/ExplorerCandidateComponent",
+      "description": "入口组件信息"
+    },
+    "model": {
+      "description": "产生该候选的模型标识",
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "prompt_version": {
+      "description": "产生该候选的探索协议版本（如 explorer/1.0.0）",
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Prompt Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "description": "ExplorerCandidate Schema 版本",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "const": "explorer_agent",
+      "description": "候选来源（低信任探索轨）",
+      "title": "Source",
+      "type": "string"
+    },
+    "validation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExplorerCandidateValidation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "三档校验结果；生成时为空占位"
+    }
+  },
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "source",
+    "prompt_version",
+    "model",
+    "component",
+    "api_entry_ref",
+    "chain_proposal"
+  ],
+  "title": "ExplorerCandidate",
+  "type": "object"
+}

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from app.analysis.ai_models import (
     AI_SCHEMA_MODELS,
     AITraceEntry,
+    ExplorerCandidate,
     ExplorerObservation,
     L1TriageOutput,
     L2ReviewOutput,
@@ -361,3 +362,153 @@ def test_explorer_loop_state_requires_reason() -> None:
     with pytest.raises(ValidationError) as error:
         ExplorerObservation.model_validate(payload)
     assert error.value.errors()[0]["type"] == "missing"
+
+
+# ---------------------------------------------------------------------------
+# 探索轨编排层候选 ExplorerCandidate（T0.2）：归一化前的原始候选
+# ---------------------------------------------------------------------------
+
+def _explorer_candidate() -> dict:
+    return {
+        "schema_version": "1.0.0",
+        "candidate_id": "expl_" + "a" * 20,
+        "source": "explorer_agent",
+        "prompt_version": "explorer/1.0.0",
+        "model": "deepseek-v4-flash",
+        "component": {
+            "kind": "activity",
+            "name": "com.example.SplashActivity",
+            "exported": True,
+            "entry_method": "onCreate",
+        },
+        "api_entry_ref": "act_com_example_SplashActivity_onCreate",
+        "chain_proposal": _explorer_observation()["chain_proposals"][0],
+        "validation": None,
+    }
+
+
+def test_explorer_candidate_valid() -> None:
+    cand = ExplorerCandidate.model_validate(_explorer_candidate())
+    assert cand.candidate_id == "expl_" + "a" * 20
+    assert cand.validation is None  # 空占位即 pending 语义
+    assert cand.chain_proposal.hops[0].resolved_via == "direct_call"  # 复用 T0.1 模型嵌套
+
+
+def test_explorer_candidate_validation_populated() -> None:
+    payload = _explorer_candidate()
+    payload["validation"] = {
+        "status": "partially_validated",
+        "notes": "第 2 跳 call_sites 未命中",
+        "verified_hop_count": 1,
+        "failed_hop_indices": [1],
+        "blocked_by_guard": False,
+        "custom_sink_proposal": True,
+    }
+    cand = ExplorerCandidate.model_validate(payload)
+    assert cand.validation.failed_hop_indices == [1]
+    assert cand.validation.custom_sink_proposal is True
+
+
+@pytest.mark.parametrize("candidate_id", [
+    "expl_" + "a" * 19,          # 19 位
+    "expl_" + "g" * 20,          # 非 hex
+    "cand_" + "a" * 20,          # 前缀错
+    "expl_" + "A" * 20,          # 大写非 hex
+])
+def test_explorer_candidate_id_pattern(candidate_id: str) -> None:
+    payload = _explorer_candidate()
+    payload["candidate_id"] = candidate_id
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+
+
+@pytest.mark.parametrize("field", ["chain_proposal", "component", "source", "candidate_id"])
+def test_explorer_candidate_required_missing(field: str) -> None:
+    payload = _explorer_candidate()
+    payload.pop(field)
+    with pytest.raises(ValidationError) as error:
+        ExplorerCandidate.model_validate(payload)
+    assert error.value.errors()[0]["type"] == "missing"
+
+
+def test_explorer_candidate_extra_forbidden() -> None:
+    payload = {**_explorer_candidate(), "invented_field": "x"}
+    with pytest.raises(ValidationError) as error:
+        ExplorerCandidate.model_validate(payload)
+    assert any(item["type"] == "extra_forbidden" for item in error.value.errors())
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source", "rule"),
+    ("schema_version", "2.0.0"),
+])
+def test_explorer_candidate_rejects_wrong_enums(field: str, value: str) -> None:
+    payload = _explorer_candidate()
+    payload[field] = value
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+
+
+def test_explorer_candidate_component_kind_rejected() -> None:
+    payload = _explorer_candidate()
+    payload["component"]["kind"] = "widget"
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+
+
+def test_explorer_candidate_validation_bounds() -> None:
+    payload = _explorer_candidate()
+    payload["validation"] = {"status": "confirmed", "notes": "x"}
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+    payload = _explorer_candidate()
+    payload["validation"] = {"status": "pending", "verified_hop_count": -1}
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+    payload = _explorer_candidate()
+    payload["validation"] = {"status": "pending", "failed_hop_indices": [-1]}
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+
+
+def test_explorer_candidate_nested_constraints_transfer() -> None:
+    # T0.1 约束透传：空 hops → too_short
+    payload = _explorer_candidate()
+    payload["chain_proposal"]["hops"] = []
+    with pytest.raises(ValidationError) as error:
+        ExplorerCandidate.model_validate(payload)
+    assert error.value.errors()[0]["type"] == "too_short"
+    # call_site_line=0 → ge=1 透传
+    payload = _explorer_candidate()
+    payload["chain_proposal"]["hops"][0]["call_site_line"] = 0
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+
+
+def test_explorer_candidate_bounds() -> None:
+    # component.name 超长（ShortText max 256）
+    payload = _explorer_candidate()
+    payload["component"]["name"] = "x" * 257
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+    # api_entry_ref 超长（Identifier max 160）
+    payload = _explorer_candidate()
+    payload["api_entry_ref"] = "x" * 161
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+    # 嵌套 hops 33 项（max 32）
+    payload = _explorer_candidate()
+    hop = payload["chain_proposal"]["hops"][0]
+    payload["chain_proposal"]["hops"] = [hop] * 33
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+    # component 子对象必填缺失
+    payload = _explorer_candidate()
+    payload["component"].pop("entry_method")
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
+    # validation bool 类型错误
+    payload = _explorer_candidate()
+    payload["validation"] = {"status": "pending", "blocked_by_guard": "yes"}
+    with pytest.raises(ValidationError):
+        ExplorerCandidate.model_validate(payload)
