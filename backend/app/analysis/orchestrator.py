@@ -205,6 +205,12 @@ class ScanOrchestrator:
             for candidate in candidates:
                 apply_guard_verification(candidate, guard_index_path, guard_manifest_facts)
 
+        # API 入口表（T2.2，方案 §2.1 时序：rule_prescan 之后、funnel 之前——
+        # Binder/动态 Receiver/WebView 三类入口来源依赖 T2.1 规则产物）
+        if self.settings.api_surface.enabled:
+            self._stage(run_id, "api_surface")
+            await self._generate_api_entry_table(run_id, run_dir, manifest, code_index)
+
         self._stage(run_id, "candidate_funnel")
         funnel_result = CandidateFunnel(self.settings.funnel).process(candidates)
         candidates = funnel_result.candidates
@@ -1135,6 +1141,55 @@ class ScanOrchestrator:
     def _stage(self, run_id: str, stage: str) -> None:
         self.repository.update_run(run_id, status="running", stage=stage)
         self.storage.update_manifest(run_id, status="running", stage=stage)
+
+    async def _generate_api_entry_table(
+        self, run_id: str, run_dir: Path, manifest: dict[str, Any], code_index: dict[str, Any] | None
+    ) -> None:
+        """生成 api_entry_table 产物并注册 manifest artifacts（T2.2）。
+
+        同步 SQLite 查询经 to_thread（evidence 阶段先例）；空 code_index
+        （source 关闭）时 reader 短路 None——manifest-only 降级（entry_method
+        为 null 不伪造）；产物读写盘 chmod 0o600（decompile 先例）。
+        """
+
+        from app.analysis.api_surface import build_api_entry_table
+
+        reader = None
+        database_path = str((code_index or {}).get("database_path") or "")
+        if database_path and Path(database_path).is_file():
+            reader = SQLiteCodeIndexReader(code_index or {})
+        try:
+            entry_table = await asyncio.to_thread(
+                build_api_entry_table,
+                run_dir,
+                manifest,
+                self.settings.api_surface,
+                reader,
+            )
+        finally:
+            if reader is not None:
+                reader.close()
+
+        table_path = run_dir / "api-surface" / "api_entry_table.json"
+        table_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        table_path.write_text(json.dumps(entry_table, ensure_ascii=False, indent=2), "utf-8")
+        table_path.chmod(0o600)
+        entries = entry_table["api_entries"]
+        by_kind: dict[str, int] = {}
+        for entry in entries:
+            by_kind[entry["kind"]] = by_kind.get(entry["kind"], 0) + 1
+        run_manifest = self.storage.read_manifest(run_id)
+        run_manifest.setdefault("artifacts", []).append({
+            "type": "api_entry_table",
+            "path": "api-surface/api_entry_table.json",
+            "entry_count": len(entries),
+            "package": entry_table.get("package"),
+        })
+        self.storage.write_manifest(run_id, run_manifest)
+        self._record_stage(run_id, "api_surface", "completed", {
+            "entry_count": len(entries),
+            "by_kind": by_kind,
+        })
 
     def _register_rule_artifacts(self, run_id: str) -> None:
         """规则产物注册进 run_manifest.artifacts（T2.1，对齐 decompile 先例）。"""
