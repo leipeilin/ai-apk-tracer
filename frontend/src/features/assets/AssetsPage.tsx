@@ -148,8 +148,9 @@ export function AssetsPage() {
                 <span>全选（{assets.length}）</span>
               </label>
               <span className="launcher-count">已选 <strong>{selectedIds.length}</strong> 项</span>
-              <label className="authorization-note compact">
+              <label className="authorization-note compact" htmlFor="batch-authorized-toggle">
                 <input
+                  id="batch-authorized-toggle"
                   type="checkbox"
                   checked={batchAuthorized}
                   disabled={selectedIds.length === 0}

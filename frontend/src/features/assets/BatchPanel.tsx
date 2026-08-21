@@ -66,14 +66,14 @@ export function BatchPanel({ batchId, onMissing }: { batchId: string; onMissing:
           </div>
 
           {batch.ai_skipped > 0 && (
-            <div className="batch-degrade" role="status">
+            <output className="batch-degrade">
               <Gauge size={17} weight="duotone" />
               <span>
                 {batch.ai_skipped} 个 run 因批次预算/墙钟降级为仅确定性主链
                 {batch.ai_skipped_by_budget > 0 && <em className="degrade-badge">预算 {batch.ai_skipped_by_budget}</em>}
                 {batch.ai_skipped_by_wall_clock > 0 && <em className="degrade-badge">墙钟 {batch.ai_skipped_by_wall_clock}</em>}
               </span>
-            </div>
+            </output>
           )}
 
           {stale && batch && ACTIVE_STATUSES.has(batch.status) && (

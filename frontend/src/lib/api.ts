@@ -76,17 +76,15 @@ function normalizeList<T>(payload: T[] | ListResponse<T> | { data?: T[]; results
  * 解析失败时回退为状态码文案。
  */
 function postFormData<T>(
-  path: string,
-  form: FormData,
-  fallbackTotal: number,
+  options: { path: string; form: FormData; fallbackTotal: number },
   onProgress: (progress: CreateRunProgress) => void,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `${API_BASE}${path}`)
+    xhr.open('POST', `${API_BASE}${options.path}`)
     xhr.responseType = 'json'
     xhr.upload.addEventListener('progress', (event) => {
-      const total = event.lengthComputable ? event.total : fallbackTotal
+      const total = event.lengthComputable ? event.total : options.fallbackTotal
       onProgress({ loaded: event.loaded, total, percent: total ? Math.round((event.loaded / total) * 100) : 0 })
     })
     xhr.addEventListener('load', () => {
@@ -98,7 +96,7 @@ function postFormData<T>(
       reject(new ApiError(String(detail), xhr.status, xhr.response))
     })
     xhr.addEventListener('error', () => reject(new ApiError('网络连接失败，请检查 API 地址', 0)))
-    xhr.send(form)
+    xhr.send(options.form)
   })
 }
 
@@ -151,7 +149,7 @@ export const api = {
     form.append('file', input.file)
     form.append('authorized', String(input.authorized))
     form.append('source_analysis_enabled', String(input.sourceAnalysisEnabled))
-    return postFormData<AnalysisRun>('/api/runs', form, input.file.size, onProgress)
+    return postFormData<AnalysisRun>({ path: '/api/runs', form, fallbackTotal: input.file.size }, onProgress)
   },
   async listAssets() {
     const payload = await request<Asset[] | ListResponse<Asset> | { data?: Asset[] }>('/api/assets')
@@ -165,7 +163,7 @@ export const api = {
     form.append('file', input.file)
     form.append('package_name', input.packageName)
     form.append('authorized', String(input.authorized))
-    return postFormData<Asset>('/api/assets/import', form, input.file.size, onProgress)
+    return postFormData<Asset>({ path: '/api/assets/import', form, fallbackTotal: input.file.size }, onProgress)
   },
   createBatch: (input: { authorized: boolean; assetIds: string[] }) =>
     request<BatchSummary>('/api/batches', {
