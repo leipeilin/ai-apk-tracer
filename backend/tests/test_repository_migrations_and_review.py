@@ -102,7 +102,7 @@ def test_legacy_database_migration_is_idempotent(tmp_path: Path) -> None:
 
     with sqlite3.connect(path) as db:
         versions = db.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
-        assert versions == [(1,), (2,), (3,)]
+        assert versions == [(1,), (2,), (3,), (4,)]
         assert db.execute("PRAGMA user_version").fetchone()[0] == DATABASE_SCHEMA_VERSION
         run_columns = {row[1] for row in db.execute("PRAGMA table_info(runs)")}
         finding_columns = {row[1] for row in db.execute("PRAGMA table_info(findings)")}

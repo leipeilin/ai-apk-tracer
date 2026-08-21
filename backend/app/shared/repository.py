@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from app.shared.errors import ConflictError, NotFoundError
 
-
-DATABASE_SCHEMA_VERSION = 3
+DATABASE_SCHEMA_VERSION = 4
 MANUAL_REVIEW_STATUSES = {"confirmed", "manual_false_positive"}
 
 
@@ -22,10 +22,9 @@ def scope_finding_id(run_id: str, finding: dict[str, Any]) -> str:
     prefix = f"{run_id}_"
     finding_id = str(finding["id"])
     base_id = str(finding.get("base_id") or "")
-    if base_id.startswith(prefix):
-        base_id = base_id[len(prefix):]
+    base_id = base_id.removeprefix(prefix)
     if not base_id:
-        base_id = finding_id[len(prefix):] if finding_id.startswith(prefix) else finding_id
+        base_id = finding_id.removeprefix(prefix)
     scoped_id = f"{prefix}{base_id}"
     finding["base_id"] = base_id
     finding["id"] = scoped_id
@@ -139,6 +138,9 @@ class SQLiteRepository:
             if 3 not in applied:
                 self._migrate_scoped_finding_ids_v3(db)
                 self._record_migration(db, 3)
+            if 4 not in applied:
+                self._migrate_assets_batches_v4(db)
+                self._record_migration(db, 4)
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_findings_run_active "
                 "ON findings(run_id, deleted_at)"
@@ -198,6 +200,66 @@ class SQLiteRepository:
         )
 
     @staticmethod
+    def _migrate_assets_batches_v4(db: sqlite3.Connection) -> None:
+        """v4：资产/批量扫描层（assets/batches 表 + runs 关联列，T0.8 设计稿）。
+
+        幂等：CREATE TABLE IF NOT EXISTS + 列存在检查；不触碰既有表数据。
+        FK 恒开启（connect 的 PRAGMA foreign_keys=ON），ON DELETE SET NULL 生效。
+        全部语句逐条 db.execute()：DDL 在挂起事务内执行，与 v2 ALTER 行为一致——
+        不用 executescript（其隐式 COMMIT 会提前提交迁移链中段挂起的 v2/v3 事务，
+        破坏 initialize"连接事务负责回滚"契约；T1.1 评审 R-1）。
+        v4 仅建结构：不产生 assets.source='package_list'、batches.status='partial'
+        等 M1 功能语义行（由 T1.2/T1.3 写入）。
+        """
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS assets (
+                id TEXT PRIMARY KEY,
+                package_name TEXT NOT NULL,
+                apk_filename TEXT NOT NULL,
+                apk_sha256 TEXT NOT NULL UNIQUE,
+                source TEXT NOT NULL DEFAULT 'local_upload',
+                status TEXT NOT NULL DEFAULT 'ready',
+                last_run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_assets_status ON assets(status)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_assets_created_at ON assets(created_at DESC)")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS batches (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'pending',
+                max_ai_calls INTEGER,
+                max_wall_seconds INTEGER,
+                ai_skipped_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status)")
+        run_columns = {row[1] for row in db.execute("PRAGMA table_info(runs)").fetchall()}
+        if "asset_id" not in run_columns:
+            db.execute(
+                "ALTER TABLE runs ADD COLUMN asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL"
+            )
+        if "batch_id" not in run_columns:
+            db.execute(
+                "ALTER TABLE runs ADD COLUMN batch_id TEXT REFERENCES batches(id) ON DELETE SET NULL"
+            )
+        if "ai_skipped_by_batch_budget" not in run_columns:
+            db.execute(
+                "ALTER TABLE runs ADD COLUMN ai_skipped_by_batch_budget INTEGER NOT NULL DEFAULT 0"
+            )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_runs_batch_id ON runs(batch_id)")
+
+    @staticmethod
     def _migrate_scoped_finding_ids_v3(db: sqlite3.Connection) -> None:
         """将 v1/v2 base ID 迁移为 run-scoped ID，并确定性合并重复记录。
 
@@ -211,10 +273,9 @@ class SQLiteRepository:
             payload = json.loads(row["payload_json"])
             prefix = f"{row['run_id']}_"
             base_id = str(payload.get("base_id") or "")
-            if base_id.startswith(prefix):
-                base_id = base_id[len(prefix):]
+            base_id = base_id.removeprefix(prefix)
             if not base_id:
-                base_id = row["id"][len(prefix):] if row["id"].startswith(prefix) else row["id"]
+                base_id = row["id"].removeprefix(prefix)
             groups.setdefault(f"{prefix}{base_id}", []).append(row)
 
         for scoped_id, members in groups.items():
