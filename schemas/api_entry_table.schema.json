@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-apk-tracer.local/schemas/api_entry_table.schema.json",
+  "title": "API entry table",
+  "type": "object",
+  "required": ["schema_version", "package", "api_entries"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "package": {"type": ["string", "null"]},
+    "api_entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["entry_id", "kind", "component_name", "source"],
+        "properties": {
+          "entry_id": {"type": "string", "pattern": "^(act|svc|rcv|prv|binder|dynrcv|webview)_[A-Za-z0-9_]+$"},
+          "kind": {"enum": ["activity", "service", "provider", "receiver", "binder", "webview_bridge"]},
+          "component_name": {"type": "string", "minLength": 1},
+          "source": {"enum": ["manifest", "rule_artifact:binder_bindings", "rule_artifact:receiver_registrations", "rule_artifact:webview_js_bridges"]},
+          "exported": {"type": ["boolean", "null"]},
+          "permissions": {"type": "array", "items": {"type": "string"}},
+          "entry_method": {"type": ["string", "null"]},
+          "intent_filters": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "properties": {
+                "actions": {"type": "array", "items": {"type": "string"}},
+                "categories": {"type": "array", "items": {"type": "string"}},
+                "data": {"type": "array", "items": {"type": "object"}}
+              }
+            }
+          },
+          "authorities": {"type": ["array", "null"], "items": {"type": "string"}},
+          "interface_method": {"type": ["string", "null"]},
+          "transaction_code": {"type": ["integer", "null"]},
+          "implementation_method_id": {"type": ["string", "null"]},
+          "reliability": {"enum": ["bound", "ambiguous", "unresolved", "not_applicable"]},
+          "actions": {"type": ["array", "null"], "items": {"type": "string"}},
+          "export_status": {"enum": ["exported", "not_exported", "unknown"]},
+          "externally_reachable": {"type": ["boolean", "null"]},
+          "bridge_path": {"type": ["string", "null"]},
+          "bridge_line": {"type": ["integer", "null"]},
+          "bridge_name": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}

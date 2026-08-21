@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-apk-tracer.local/schemas/attack_surface.schema.json",
+  "title": "Attack surface (per component kind)",
+  "type": "object",
+  "required": ["schema_version", "package", "components"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "package": {"type": ["string", "null"]},
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "name", "exported"],
+        "properties": {
+          "kind": {"enum": ["activity", "service", "provider", "receiver"]},
+          "name": {"type": "string", "minLength": 1},
+          "exported": {"type": "boolean"},
+          "exported_reason": {"type": ["string", "null"]},
+          "permission": {"type": ["string", "null"]},
+          "permission_protection": {"type": ["string", "null"]},
+          "entry_methods": {"type": "array", "items": {"type": "string"}},
+          "intent_filters": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "properties": {
+                "actions": {"type": "array", "items": {"type": "string"}},
+                "categories": {"type": "array", "items": {"type": "string"}},
+                "data": {"type": "array", "items": {"type": "object"}}
+              }
+            }
+          },
+          "authorities": {"type": ["array", "null"], "items": {"type": "string"}},
+          "actions": {"type": ["array", "null"], "items": {"type": "string"}},
+          "sensitive_capabilities": {"type": "array", "items": {"type": "string"}},
+          "api_entry_refs": {"type": "array", "items": {"type": "string"}},
+          "source": {"enum": ["manifest", "dynamic", "manifest+dynamic"]}
+        }
+      }
+    }
+  }
+}
