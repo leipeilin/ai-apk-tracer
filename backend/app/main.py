@@ -16,7 +16,7 @@ from app.assets.batch import BatchOrchestrator
 from app.assets.registry import AssetRegistry
 from app.config import WORKSPACE_ROOT, Settings, get_settings
 from app.runs.storage import RunStorage
-from app.shared.errors import AppError
+from app.shared.errors import AppError, NotFoundError
 from app.shared.logging import TraceIdMiddleware, configure_logging, trace_id_var
 from app.shared.repository import SQLiteRepository
 
@@ -123,6 +123,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # （react-router 客户端接管）。
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa_fallback(full_path: str) -> FileResponse:
+            # API 命名空间不落入 SPA 回退（M1 审查 §4.2）：未匹配的 /api/* 路径
+            # 保持 404 JSON 语义（经 AppError handler 统一结构），供 API 消费者
+            # 判定端点不存在；其余未知路径回退 index.html（react-router 接管）。
+            if full_path == "api" or full_path.startswith("api/"):
+                raise NotFoundError("endpoint", f"/{full_path}")
             candidate = (frontend_dist / full_path).resolve()
             if full_path and candidate.is_file() and candidate.is_relative_to(frontend_dist.resolve()):
                 return FileResponse(candidate)

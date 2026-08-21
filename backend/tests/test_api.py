@@ -55,6 +55,17 @@ def test_upload_requires_authorization(tmp_path: Path) -> None:
         assert response.json()["error"]["code"] == "AUTHORIZATION_CONFIRMATION_REQUIRED"
 
 
+def test_unknown_api_path_returns_404_json(tmp_path: Path) -> None:
+    """M1 审查 §4.2：未知 API 路径不落入 SPA catch-all（404 JSON 而非 200 HTML）。"""
+    with client_for(tmp_path) as client:
+        response = client.get("/api/definitely-not-an-endpoint")
+        assert response.status_code == 404
+        assert response.headers["content-type"].startswith("application/json")
+        # dist 存在时为统一 AppError 结构；无 dist（干净 CI）时 FastAPI 默认 404 JSON
+        payload = response.json()
+        assert payload.get("error", {}).get("code") == "NOT_FOUND" or "detail" in payload
+
+
 def test_unexpected_error_keeps_trace_id(tmp_path: Path) -> None:
     settings = Settings(
         database_path=tmp_path / "trace.sqlite3",
