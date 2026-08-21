@@ -11,11 +11,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.analysis.ai import OpenAICompatibleAnalyzer
 from app.analysis.ai_runtime import AIRuntime
-from app.analysis.ai_scheduler import IndexedJob, JobStatus, TaskCircuit, run_indexed_jobs
+from app.analysis.ai_scheduler import (
+    IndexedJob,
+    JobStatus,
+    TaskCircuit,
+    run_indexed_jobs,
+)
 from app.analysis.ai_trace import AITraceStore, candidate_input_key
-from app.analysis.candidate_funnel import CandidateFunnel, propagate_representative_analysis
+from app.analysis.candidate_funnel import (
+    CandidateFunnel,
+    propagate_representative_analysis,
+)
 from app.analysis.context_budget import ContextBudgeter
 from app.analysis.context_builder import (
     ContextBuilder,
@@ -25,8 +32,8 @@ from app.analysis.context_builder import (
 from app.analysis.coverage import finalize_run_coverage
 from app.analysis.decompiler import JadxAdapter
 from app.analysis.guard_verifier import apply_guard_verification
-from app.analysis.indexer import build_code_index
 from app.analysis.index_store import SQLiteCodeIndexReader
+from app.analysis.indexer import build_code_index
 from app.analysis.manifest import parse_manifest
 from app.analysis.manifest_extractor import extract_decoded_manifest
 from app.analysis.rule_runner import RuleRunner
@@ -380,6 +387,8 @@ class ScanOrchestrator:
                 "preflight": preflight,
                 "circuit_open": False,
                 "analyzed": 0,
+                # run 级 AI 请求数（T1.3：batch 预算计数事实源；跳过路径=0）
+                "requests_used": 0,
                 "completed": 0,
                 "failed": 0,
                 "skipped": len(ai_candidate_indexes),
@@ -415,6 +424,8 @@ class ScanOrchestrator:
                 "preflight": preflight,
                 "circuit_open": True,
                 "analyzed": 0,
+                # run 级 AI 请求数（T1.3：batch 预算计数的持久化事实源；早退路径=0）
+                "requests_used": 0,
                 "completed": 0,
                 "failed": len(circuit_indexes) if recoverable else 0,
                 "skipped": 0 if recoverable else len(circuit_indexes),
@@ -549,6 +560,8 @@ class ScanOrchestrator:
             "circuit_open": circuit_open,
             "analyzed": analyzed_count,
             "peak_concurrent": scheduled.stats.peak_active,
+            # run 级 AI 请求数（T1.3：batch 预算计数的持久化事实源）
+            "requests_used": self._ai_requests_used,
             **ai_counts,
         }
         if circuit_reason:

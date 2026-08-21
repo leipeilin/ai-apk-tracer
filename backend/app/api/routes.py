@@ -13,6 +13,7 @@ from app.analysis.orchestrator import ScanOrchestrator
 from app.api.models import CleanupRequest, ReviewRequest
 from app.findings.report import build_report_payload, render_markdown
 from app.runs.cleanup import CleanupService
+from app.runs.run_config import build_run_config
 from app.shared.errors import NotFoundError, ValidationError
 from app.shared.logging import trace_id_var
 
@@ -106,19 +107,7 @@ def create_run(
     storage = request.app.state.storage
     repository = request.app.state.repository
     trace_id = trace_id_var.get()
-    config = {
-        "analysis_platform_api": settings.analysis_platform_api,
-        "source_analysis": {
-            **settings.source_analysis.model_dump(mode="json"),
-            "enabled": source_analysis_enabled,
-        },
-        "ai": {
-            "enabled": settings.ai.enabled,
-            "allow_external_code": settings.ai.allow_external_code,
-            "provider_kind": "openai-compatible",
-            "model": settings.ai.model,
-        },
-    }
+    config = build_run_config(settings, source_analysis_enabled=source_analysis_enabled)
     ingested = storage.ingest(file.file, file.filename or "upload.apk", trace_id, config)
     run = repository.create_run({
         "id": ingested["id"],

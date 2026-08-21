@@ -12,7 +12,7 @@ from typing import Any
 
 from app.shared.errors import ConflictError, NotFoundError
 
-DATABASE_SCHEMA_VERSION = 4
+DATABASE_SCHEMA_VERSION = 5
 MANUAL_REVIEW_STATUSES = {"confirmed", "manual_false_positive"}
 
 
@@ -141,6 +141,9 @@ class SQLiteRepository:
             if 4 not in applied:
                 self._migrate_assets_batches_v4(db)
                 self._record_migration(db, 4)
+            if 5 not in applied:
+                self._migrate_batches_assets_json_v5(db)
+                self._record_migration(db, 5)
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_findings_run_active "
                 "ON findings(run_id, deleted_at)"
@@ -260,6 +263,17 @@ class SQLiteRepository:
         db.execute("CREATE INDEX IF NOT EXISTS idx_runs_batch_id ON runs(batch_id)")
 
     @staticmethod
+    def _migrate_batches_assets_json_v5(db: sqlite3.Connection) -> None:
+        """为 batches 表补充资产清单快照列（T1.3 评审 D1）。
+
+        assets_json 存创建时的有序对象数组（{asset_id, package_name, apk_sha256}），
+        资产删除后审计信息仍可回溯；幂等加列（v4 风格，逐条 execute）。
+        """
+        batch_columns = {row[1] for row in db.execute("PRAGMA table_info(batches)").fetchall()}
+        if "assets_json" not in batch_columns:
+            db.execute("ALTER TABLE batches ADD COLUMN assets_json TEXT NOT NULL DEFAULT '[]'")
+
+    @staticmethod
     def _migrate_scoped_finding_ids_v3(db: sqlite3.Connection) -> None:
         """将 v1/v2 base ID 迁移为 run-scoped ID，并确定性合并重复记录。
 
@@ -370,7 +384,12 @@ class SQLiteRepository:
             return db.execute("SELECT 1").fetchone()[0] == 1
 
     def create_run(self, run: dict[str, Any]) -> dict[str, Any]:
-        """持久化已确认授权的扫描任务并返回规范化记录。"""
+        """持久化已确认授权的扫描任务并返回规范化记录。
+
+        可选关联列（T1.3 评审 R-2）：asset_id/batch_id/ai_skipped_by_batch_budget
+        随 INSERT 一次落库（batch 编排路径），消除 ingest→UPDATE 两步不一致窗口；
+        单 run 路径（routes）不传即默认 NULL/NULL/0。
+        """
 
         now = utc_now()
         with self.connect() as db:
@@ -378,14 +397,18 @@ class SQLiteRepository:
                 """INSERT INTO runs
                 (id, trace_id, status, stage, apk_filename, apk_sha256, authorized,
                  config_json, manifest_path, pipeline_version, schema_version,
+                 asset_id, batch_id, ai_skipped_by_batch_budget,
                  created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     run["id"], run["trace_id"], run["status"], run["stage"],
                     run["apk_filename"], run["apk_sha256"],
                     json.dumps(run["config"], ensure_ascii=False), run["manifest_path"],
                     run.get("pipeline_version", "2.0.0"),
-                    run.get("schema_version", "2.0.0"), now, now,
+                    run.get("schema_version", "2.0.0"),
+                    run.get("asset_id"), run.get("batch_id"),
+                    int(run.get("ai_skipped_by_batch_budget") or 0),
+                    now, now,
                 ),
             )
         return self.get_run(run["id"])

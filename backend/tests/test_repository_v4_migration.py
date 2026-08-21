@@ -70,8 +70,8 @@ def test_v4_fresh_database_creates_assets_batches(tmp_path: Path) -> None:
 
     with sqlite3.connect(path) as db:
         versions = [row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == [1, 2, 3, 4]
-        assert db.execute("PRAGMA user_version").fetchone()[0] == DATABASE_SCHEMA_VERSION == 4
+        assert versions == [1, 2, 3, 4, 5]
+        assert db.execute("PRAGMA user_version").fetchone()[0] == DATABASE_SCHEMA_VERSION == 5
         assert _table_exists(db, "assets") and _table_exists(db, "batches")
         assert V4_RUN_COLUMNS <= _table_columns(db, "runs")
         # assets 表核心约束在位（apk_sha256 唯一）
@@ -89,7 +89,7 @@ def test_v4_upgrade_from_v1_legacy_preserves_data(tmp_path: Path) -> None:
 
     with sqlite3.connect(path) as db:
         versions = [row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == [1, 2, 3, 4]
+        assert versions == [1, 2, 3, 4, 5]
         assert V4_RUN_COLUMNS <= _table_columns(db, "runs")
         assert _table_exists(db, "assets") and _table_exists(db, "batches")
         # 既有数据完好：v1 base id 经 v3 迁移为 run-scoped id（run_one_finding_same）
@@ -120,8 +120,8 @@ def test_v4_upgrade_from_v3_with_migration_records(tmp_path: Path) -> None:
     repository.initialize()
     with sqlite3.connect(path) as db:
         versions = [row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == [1, 2, 3, 4]
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert versions == [1, 2, 3, 4, 5]
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
         assert _table_exists(db, "assets") and _table_exists(db, "batches")
         assert V4_RUN_COLUMNS <= _table_columns(db, "runs")
 
@@ -139,7 +139,7 @@ def test_v4_interrupted_migration_reruns_idempotently(tmp_path: Path) -> None:
 
     with sqlite3.connect(path) as db:
         versions = [row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == [1, 2, 3, 4]
+        assert versions == [1, 2, 3, 4, 5]
         assert _table_exists(db, "assets") and _table_exists(db, "batches")
         assert V4_RUN_COLUMNS <= _table_columns(db, "runs")
 
@@ -216,7 +216,7 @@ def test_v4_half_migration_columns_missing_backfilled(tmp_path: Path) -> None:
     with sqlite3.connect(path) as db:
         assert V4_RUN_COLUMNS <= _table_columns(db, "runs")
         versions = [row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY version")]
-        assert versions == [1, 2, 3, 4]
+        assert versions == [1, 2, 3, 4, 5]
 
 
 def test_v4_get_run_returns_new_columns(tmp_path: Path) -> None:
