@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-apk-tracer.local/schemas/receiver_registrations.schema.json",
+  "title": "Dynamic receiver registrations artifact",
+  "type": "object",
+  "required": ["schema_version", "registrations"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "registrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["receiver_class", "path", "line"],
+        "properties": {
+          "receiver_class": {"type": "string", "minLength": 1},
+          "call": {"type": ["object", "null"]},
+          "method_id": {"type": ["string", "null"]},
+          "method_name": {"type": ["string", "null"]},
+          "path": {"type": ["string", "null"]},
+          "line": {"type": "integer"},
+          "actions": {"type": "array", "items": {"type": "string"}},
+          "unresolved_action_expressions": {"type": "array", "items": {"type": "string"}},
+          "filter_expression": {"type": ["string", "null"]},
+          "flag_expression": {"type": ["string", "null"]},
+          "flag_value": {"type": ["integer", "null"]},
+          "flag_status": {"type": ["string", "null"]},
+          "export_status": {"enum": ["exported", "not_exported", "unknown"]},
+          "externally_reachable": {"type": ["boolean", "null"]},
+          "permission_expression": {"type": ["string", "null"]},
+          "permission": {"type": ["string", "null"]},
+          "permission_status": {"type": ["string", "null"]},
+          "permission_policy": {"type": ["object", "null"]},
+          "local_broadcast": {"type": "boolean"},
+          "platform_branch": {"type": "boolean"},
+          "reportable": {"type": "boolean"},
+          "coverage_gaps": {"type": "array", "items": {"type": "object"}}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-apk-tracer.local/schemas/binder_bindings.schema.json",
+  "title": "Binder AIDL bindings artifact",
+  "type": "object",
+  "required": ["schema_version", "bindings"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["service_class", "code", "resolve_status"],
+        "properties": {
+          "service_class": {"type": "string", "minLength": 1},
+          "code": {"type": ["integer", "null"]},
+          "case_token": {"type": ["string", "null"]},
+          "interface_method": {"type": ["string", "null"]},
+          "descriptor": {"type": ["string", "null"]},
+          "on_transact_method_id": {"type": ["string", "null"]},
+          "on_transact_descriptor": {"type": ["string", "null"]},
+          "case_line": {"type": ["integer", "null"]},
+          "dispatch_call_site": {"type": ["object", "null"]},
+          "dispatch_descriptor": {"type": ["string", "null"]},
+          "dispatch_assigned_to": {"type": ["string", "null"]},
+          "path": {"type": ["string", "null"]},
+          "line": {"type": ["integer", "null"]},
+          "implementation_class": {"type": ["string", "null"]},
+          "implementation_method_id": {"type": ["string", "null"]},
+          "implementation_path": {"type": ["string", "null"]},
+          "implementation_line": {"type": ["integer", "null"]},
+          "resolve_status": {"enum": ["bound", "ambiguous", "unresolved"]},
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["code"],
+              "properties": {
+                "code": {"type": "string"},
+                "critical": {"type": "boolean"},
+                "detail": {"type": ["string", "null"]}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

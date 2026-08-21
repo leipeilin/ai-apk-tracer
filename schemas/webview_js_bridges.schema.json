@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-apk-tracer.local/schemas/webview_js_bridges.schema.json",
+  "title": "WebView JavaScript bridge call sites artifact",
+  "type": "object",
+  "required": ["schema_version", "bridges"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "bridges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["line", "text"],
+        "properties": {
+          "line": {"type": "integer"},
+          "text": {"type": ["string", "null"]},
+          "description": {"type": ["string", "null"]},
+          "sink_kind": {"type": ["string", "null"]},
+          "path": {"type": ["string", "null"]},
+          "bridge_name": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}
