@@ -31,8 +31,8 @@ class NotFoundError(AppError):
 class ConflictError(AppError):
     """表示资源当前状态与请求操作冲突。"""
 
-    def __init__(self, message: str, code: str = "CONFLICT"):
-        super().__init__(message, code, 409)
+    def __init__(self, message: str, code: str = "CONFLICT", details: dict | None = None):
+        super().__init__(message, code, 409, details)
 
 
 class DependencyError(AppError):
