@@ -18,7 +18,6 @@ from pydantic import (
     model_validator,
 )
 
-
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
 LongText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10_000)]
 Identifier = Annotated[
