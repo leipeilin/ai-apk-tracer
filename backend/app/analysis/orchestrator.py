@@ -210,6 +210,8 @@ class ScanOrchestrator:
         if self.settings.api_surface.enabled:
             self._stage(run_id, "api_surface")
             await self._generate_api_entry_table(run_id, run_dir, manifest, code_index)
+            # 四组件攻击面（T2.3）：依赖 api_entry_table（refs）——同门禁
+            await self._generate_attack_surfaces(run_id, run_dir, manifest, candidates)
 
         self._stage(run_id, "candidate_funnel")
         funnel_result = CandidateFunnel(self.settings.funnel).process(candidates)
@@ -1190,6 +1192,37 @@ class ScanOrchestrator:
             "entry_count": len(entries),
             "by_kind": by_kind,
         })
+
+    async def _generate_attack_surfaces(
+        self, run_id: str, run_dir: Path, manifest: dict[str, Any], candidates: list[dict[str, Any]]
+    ) -> None:
+        """生成四组件攻击面并注册 manifest artifacts（T2.3，复用 api_surface.enabled 门禁）。"""
+
+        from app.analysis.attack_surface import build_attack_surfaces
+
+        self._stage(run_id, "attack_surface")
+        surfaces = await asyncio.to_thread(build_attack_surfaces, run_dir, manifest, candidates)
+
+        surface_dir = run_dir / "attack_surface"
+        surface_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        artifacts: list[dict[str, Any]] = []
+        by_kind: dict[str, int] = {}
+        for kind, payload in surfaces.items():
+            file_path = surface_dir / f"{kind}.json"
+            file_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), "utf-8")
+            file_path.chmod(0o600)
+            count = len(payload["components"])
+            by_kind[kind] = count
+            artifacts.append({
+                "type": "attack_surface",
+                "component_kind": kind,
+                "path": f"attack_surface/{kind}.json",
+                "component_count": count,
+            })
+        run_manifest = self.storage.read_manifest(run_id)
+        run_manifest.setdefault("artifacts", []).extend(artifacts)
+        self.storage.write_manifest(run_id, run_manifest)
+        self._record_stage(run_id, "attack_surface", "completed", {"by_kind": by_kind})
 
     def _register_rule_artifacts(self, run_id: str) -> None:
         """规则产物注册进 run_manifest.artifacts（T2.1，对齐 decompile 先例）。"""
