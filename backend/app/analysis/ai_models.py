@@ -41,6 +41,14 @@ RelativePath = Annotated[
     AfterValidator(_require_relative_path),
 ]
 
+# 探索轨（Agent1）的 method_id 是"低信任建议"：格式正确性（path#Class.method:line 可回查）
+# 由探索轨三档校验层（explorer_validation，T2.6）的 call_sites 回查判定，不在 schema 层做
+# 严格 pattern 前置，避免 LLM 输出带签名/构造器/泛型/内部类写法时频繁校验失败。
+MethodId = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=512),
+]
+
 
 class StrictAIModel(BaseModel):
     """所有 AI 边界模型共享的严格校验策略。"""
@@ -255,6 +263,96 @@ class L2ReviewOutput(StrictAIModel):
     analysis_complete: bool = Field(description="当前 L2 阶段是否无需额外上下文即可结束；与 verdict 值相互独立")
 
 
+class ExplorerEvidenceRef(StrictAIModel):
+    """探索轨轻量证据引用（低信任）：仅指向可回查的源码位置。
+
+    不复用 EvidenceReference（其 context_id/claim 必填，属确定性语义 bundle 的输入上下文
+    引用）；探索轨证据由 T2.6 三档校验回查通过后归一化为正式证据。
+    """
+
+    path: RelativePath = Field(description="证据所在工作区相对路径（必填，可回查）")
+    line: int | None = Field(default=None, ge=1, le=10_000_000, description="证据起始行")
+    end_line: int | None = Field(default=None, ge=1, le=10_000_000, description="证据结束行；缺省表示单行")
+    claim: LongText | None = Field(default=None, description="可选：该引用支撑的主张（供人工视图；校验后补全）")
+
+
+class Hop(StrictAIModel):
+    """数据流链上的一跳（结构化路径，评审 §4.2）。"""
+
+    from_method_id: MethodId = Field(description="源方法 ID 建议（path#Class.method:line；可回查性由 T2.6 校验）")
+    to_method_id: MethodId = Field(description="目标方法 ID 建议")
+    call_site_line: int = Field(ge=1, le=10_000_000, description="调用点源码行号")
+    arg_positions: list[Annotated[int, Field(ge=0)]] = Field(
+        default_factory=list, max_length=32, description="攻击者可控参数位置（从 0 起，非负）"
+    )
+    resolved_via: Literal["direct_call", "virtual_call", "dynamic_invoke", "binder_transaction", "other"] = Field(
+        description="调用解析方式"
+    )
+
+
+class ChainProposal(StrictAIModel):
+    """从攻击面入口到 sink 的候选链（低信任建议，非正式 sources/sinks）。"""
+
+    source: ShortText = Field(description="候选 source 表达式/方法")
+    sink: ShortText = Field(description="候选 sink 方法/操作")
+    hops: list[Hop] = Field(min_length=1, max_length=32, description="结构化逐跳路径；每跳须可对 call_sites 表回查")
+    call_tree_refs: list[RelativePath] = Field(default_factory=list, max_length=16, description="可选：支撑该链的 call_tree 产物相对路径")
+    evidence_refs: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=64, description="支撑本链的轻量证据引用（T2.6 回查后归一化）")
+    confidence: Literal["low", "medium", "high"] = Field(description="模型对本链成立度的置信度")
+    hypothesis: Literal["likely", "possible", "unlikely"] = Field(description="假设（非裁决）：是否倾向构成漏洞，评审 §4.1")
+    impact_proposal: LongText = Field(description="影响面/攻击场景/漏洞类型描述（假设级，非结论）")
+    reasoning: LongText = Field(description="构造本链的依据")
+    needs_expansion: bool = Field(default=False, description="本链是否需进一步扩片取证")
+
+
+class ReadRequest(StrictAIModel):
+    """探索循环中的结构化读码请求。
+
+    仅暴露四种检索操作（评审 R-4 决策）：入口来自确定性 api_entry_table/attack_surface
+    （属信任边界，不让 Agent 自由枚举入口）；class_hierarchy / resolve_invoke_target 为
+    call_tree 内部实现细节，不对模型暴露。
+    """
+
+    operation: Literal["get_method_body", "get_callees", "get_callers", "search_symbol"] = Field(description="call_tree 服务可执行操作")
+    target: ShortText = Field(description="目标符号/方法/类名")
+    path: RelativePath | None = Field(default=None, description="消歧用工作区相对路径")
+    line: int | None = Field(default=None, ge=1, le=10_000_000, description="消歧用源码行号")
+    reason: LongText = Field(description="为什么需要这份代码/调用关系")
+
+
+class ComponentSummary(StrictAIModel):
+    """对当前入口组件/代码的功能描述。"""
+
+    component: ShortText = Field(description="组件类名")
+    kind: Literal["activity", "service", "provider", "receiver", "other"] = Field(description="组件类型")
+    exported: bool = Field(description="是否导出（可从外部触发）")
+    summary: LongText = Field(description="组件/代码功能描述")
+
+
+class ExplorerLoopState(StrictAIModel):
+    """探索循环轮末状态（评审 §4.3：终止由代码判定，模型只声明意图）。"""
+
+    done: bool = Field(description="是否已形成完整 sink 链、可结束循环")
+    reason: ShortText = Field(description="结束或继续的原因说明（必填，便于审计）")
+
+
+class ExplorerObservation(StrictAIModel):
+    """探索 Agent（Agent1）单轮输出：低信任建议链 + 读码请求（方案 §2.4）。"""
+
+    read_requests: list[ReadRequest] = Field(default_factory=list, max_length=8, description="本轮的读码请求")
+    chain_proposals: list[ChainProposal] = Field(default_factory=list, max_length=8, description="本轮的候选链（低信任）")
+    component_summary: ComponentSummary = Field(
+        description="组件/代码功能描述（每轮绑定一个入口组件，attack_surface 保证可总结，故必填）"
+    )
+    loop: ExplorerLoopState = Field(description="循环状态")
+
+    @model_validator(mode="after")
+    def _done_requires_chain(self) -> ExplorerObservation:
+        if self.loop.done and not self.chain_proposals:
+            raise ValueError("loop.done=True 必须伴随至少一条 chain_proposal（评审 R-3）")
+        return self
+
+
 class RepairInput(StrictAIModel):
     """只携带无效输出与校验错误的格式修复输入。"""
 
@@ -411,6 +509,7 @@ AI_SCHEMA_MODELS: dict[str, type[StrictAIModel]] = {
     "ai_l1_triage_output.schema.json": L1TriageOutput,
     "ai_l2_review_input.schema.json": L2ReviewInput,
     "ai_l2_review_output.schema.json": L2ReviewOutput,
+    "ai_explorer_observation.schema.json": ExplorerObservation,
     "ai_repair_input.schema.json": RepairInput,
     "ai_repair_output.schema.json": RepairOutput,
     "ai_finalization_input.schema.json": FinalizationInput,

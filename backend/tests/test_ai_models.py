@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from app.analysis.ai_models import (
     AI_SCHEMA_MODELS,
     AITraceEntry,
+    ExplorerObservation,
     L1TriageOutput,
     L2ReviewOutput,
     PreflightOutput,
@@ -205,3 +206,158 @@ def test_pure_analysis_strips_injected_fields() -> None:
                   "verified_evidence_refs", "invalid_evidence_refs"):
         assert field not in pure, f"注入字段 {field} 必须被剥离"
     assert _pure_analysis(None) is None
+
+
+# ---------------------------------------------------------------------------
+# 探索轨 ExplorerObservation（T0.1）：低信任建议链 + 读码请求
+# ---------------------------------------------------------------------------
+
+def _explorer_observation() -> dict:
+    return {
+        "read_requests": [
+            {"operation": "get_callees", "target": "com.example.WebHelper.loadUrl", "reason": "追查 loadUrl 的调用方"}
+        ],
+        "chain_proposals": [
+            {
+                "source": "Intent.getExtras().getString",
+                "sink": "WebView.loadUrl",
+                "hops": [
+                    {"from_method_id": "sources/com/example/SplashActivity.java#onCreate:42",
+                     "to_method_id": "sources/com/example/WebHelper.java#loadUrl:120",
+                     "call_site_line": 55,
+                     "arg_positions": [0],
+                     "resolved_via": "direct_call"}
+                ],
+                "evidence_refs": [{"path": "sources/com/example/SplashActivity.java", "line": 42}],
+                "confidence": "medium",
+                "hypothesis": "likely",
+                "impact_proposal": "外部 Intent 可控制 WebView 加载 URL，可能构成任意 URL 加载攻击面",
+                "reasoning": "外部 intent 可控制 URL 并传入 loadUrl，未见 scheme 校验",
+            }
+        ],
+        "component_summary": {
+            "component": "com.example.SplashActivity",
+            "kind": "activity",
+            "exported": True,
+            "summary": "启动入口，将外部 Intent 参数传入 WebView",
+        },
+        "loop": {"done": True, "reason": "已形成完整 sink 链"},
+    }
+
+
+def test_explorer_observation_valid() -> None:
+    obs = ExplorerObservation.model_validate(_explorer_observation())
+    assert obs.loop.done is True
+    assert obs.chain_proposals[0].hops[0].resolved_via == "direct_call"
+    # 轻量证据：path 必填、line/claim 可空
+    assert obs.chain_proposals[0].evidence_refs[0].claim is None
+
+
+def test_explorer_observation_first_round_empty_arrays_allowed() -> None:
+    payload = _explorer_observation()
+    payload["read_requests"] = []
+    payload["chain_proposals"] = []
+    payload["loop"] = {"done": False, "reason": "首轮，先请求上下文"}
+    obs = ExplorerObservation.model_validate(payload)
+    assert obs.read_requests == []
+    assert obs.chain_proposals == []
+
+
+@pytest.mark.parametrize("field", ["component_summary", "loop"])
+def test_explorer_observation_required_missing(field: str) -> None:
+    payload = _explorer_observation()
+    payload.pop(field)
+    with pytest.raises(ValidationError) as error:
+        ExplorerObservation.model_validate(payload)
+    assert error.value.errors()[0]["type"] == "missing"
+
+
+def test_explorer_observation_empty_hops_rejected() -> None:
+    payload = _explorer_observation()
+    payload["chain_proposals"][0]["hops"] = []
+    with pytest.raises(ValidationError) as error:
+        ExplorerObservation.model_validate(payload)
+    assert error.value.errors()[0]["type"] == "too_short"
+
+
+def test_explorer_observation_extra_fields_forbidden() -> None:
+    payload = {**_explorer_observation(), "invented_field": "x"}
+    with pytest.raises(ValidationError) as error:
+        ExplorerObservation.model_validate(payload)
+    assert any(item["type"] == "extra_forbidden" for item in error.value.errors())
+
+
+@pytest.mark.parametrize("field,values", [
+    ("hypothesis", ["confirmed", "no"]),
+    ("confidence", ["certain", "max"]),
+    ("resolved_via", ["nonsense", "indirect"]),
+])
+def test_explorer_observation_rejects_wrong_enums(field: str, values: list[str]) -> None:
+    for value in values:
+        payload = _explorer_observation()
+        payload["chain_proposals"][0][field] = value
+        with pytest.raises(ValidationError):
+            ExplorerObservation.model_validate(payload)
+
+
+@pytest.mark.parametrize("value", ["get_bogus", "resolve_invoke_target", "class_hierarchy"])
+def test_read_request_rejects_operations_outside_whitelist(value: str) -> None:
+    payload = _explorer_observation()
+    payload["read_requests"][0]["operation"] = value
+    with pytest.raises(ValidationError):
+        ExplorerObservation.model_validate(payload)
+
+
+@pytest.mark.parametrize("value", ["widget", "fragment"])
+def test_component_summary_rejects_wrong_kind(value: str) -> None:
+    payload = _explorer_observation()
+    payload["component_summary"]["kind"] = value
+    with pytest.raises(ValidationError):
+        ExplorerObservation.model_validate(payload)
+
+
+def test_explorer_observation_done_requires_chain() -> None:
+    payload = _explorer_observation()
+    payload["chain_proposals"] = []
+    payload["loop"] = {"done": True, "reason": "应非法：done 但无链"}
+    with pytest.raises(ValidationError, match="loop.done=True"):
+        ExplorerObservation.model_validate(payload)
+
+
+def test_explorer_observation_path_traversal_rejected() -> None:
+    payload = _explorer_observation()
+    payload["chain_proposals"][0]["evidence_refs"][0]["path"] = "../../etc/passwd"
+    with pytest.raises(ValidationError):
+        ExplorerObservation.model_validate(payload)
+
+
+def test_explorer_observation_bounds_rejected() -> None:
+    # 33 hops 超 max_length=32
+    payload = _explorer_observation()
+    hop = payload["chain_proposals"][0]["hops"][0]
+    payload["chain_proposals"][0]["hops"] = [hop] * 33
+    with pytest.raises(ValidationError):
+        ExplorerObservation.model_validate(payload)
+    # call_site_line=0 越界（ge=1）
+    payload = _explorer_observation()
+    payload["chain_proposals"][0]["hops"][0]["call_site_line"] = 0
+    with pytest.raises(ValidationError):
+        ExplorerObservation.model_validate(payload)
+    # 超长 method_id（max_length=512）
+    payload = _explorer_observation()
+    payload["chain_proposals"][0]["hops"][0]["from_method_id"] = "x" * 513
+    with pytest.raises(ValidationError):
+        ExplorerObservation.model_validate(payload)
+    # arg_positions 负数拒绝（ge=0；A-5 验收点）
+    payload = _explorer_observation()
+    payload["chain_proposals"][0]["hops"][0]["arg_positions"] = [-1]
+    with pytest.raises(ValidationError):
+        ExplorerObservation.model_validate(payload)
+
+
+def test_explorer_loop_state_requires_reason() -> None:
+    payload = _explorer_observation()
+    payload["loop"].pop("reason")
+    with pytest.raises(ValidationError) as error:
+        ExplorerObservation.model_validate(payload)
+    assert error.value.errors()[0]["type"] == "missing"
