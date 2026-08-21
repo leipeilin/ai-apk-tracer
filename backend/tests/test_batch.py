@@ -289,6 +289,30 @@ def test_run_batch_budget_degradation(tmp_path: Path) -> None:
     assert degraded_config["ai"]["model"] == settings.ai.model  # 其余 AI 元数据保留
 
 
+def test_run_batch_budget_degradation_cap_one(tmp_path: Path) -> None:
+    """max_ai_calls=1 字面场景（T1.6 评审 R-4）：预算耗尽后后续 run 连续降级、批次继续。"""
+    settings, repository, storage, registry = _make_stack(
+        tmp_path, BatchSettings(max_concurrent_runs=1, max_ai_calls=1)
+    )
+    assets = _register_assets(registry, 3)
+    factory = _factory_with_behaviors(storage, repository, ["ok"], requests_used=1)
+    orchestrator = _make_orchestrator(settings, repository, storage, registry, factory)
+
+    batch = orchestrator.create_batch([asset["id"] for asset in assets])
+    asyncio.run(_run(orchestrator, batch["id"]))
+
+    final = orchestrator.get_batch(batch["id"])
+    assert final["status"] == "completed"
+    assert final["ai_skipped"] == 2  # run2/3 连续降级
+    assert final["ai_skipped_by_budget"] == 2
+    with repository.connect() as db:
+        rows = db.execute(
+            "SELECT ai_skipped_by_batch_budget FROM runs WHERE batch_id=? ORDER BY created_at",
+            (batch["id"],),
+        ).fetchall()
+    assert [row[0] for row in rows] == [0, 1, 1]
+
+
 def test_run_batch_wall_clock_degradation(tmp_path: Path) -> None:
     settings, repository, storage, registry = _make_stack(
         tmp_path, BatchSettings(max_concurrent_runs=1, max_wall_seconds=1)
@@ -379,6 +403,57 @@ def test_get_batch_summary_from_runs(tmp_path: Path) -> None:
 
     tampered = orchestrator.get_batch(batch["id"])
     assert (tampered["completed_runs"], tampered["failed_runs"]) == (0, 2)
+
+
+def test_batch_real_pipeline_degradation(tmp_path: Path) -> None:
+    """真实 pipeline 降级端到端（T1.6 评审 R-1/R-2/R-4）：
+
+    3 资产真实 ScanOrchestrator + 墙钟 1s：run1 正常（真实 decompile 耗时越墙钟），
+    run2/3 启动前降级——降级必须真正跳过 AI 阶段（修复前 orchestrator 不消费
+    run config 的 ai 段，降级只落审计元数据、预算帽仍会被超耗）。
+    """
+    settings, repository, storage, registry = _make_stack(
+        tmp_path, BatchSettings(max_concurrent_runs=1, max_wall_seconds=1)
+    )
+    assets = _register_assets(registry, 3)
+    # 不注入 factory：使用默认真实 ScanOrchestrator（无 AI key 时 preflight
+    # 跳过，单 run 秒级；jadx 真实反编译确保 run1 耗时 > 1s 触发墙钟）
+    orchestrator = BatchOrchestrator(settings, repository, storage, None, registry)
+
+    batch = orchestrator.create_batch([asset["id"] for asset in assets])
+    asyncio.run(_run(orchestrator, batch["id"]))
+
+    final = orchestrator.get_batch(batch["id"])
+    assert final["status"] == "completed"
+    assert final["total_runs"] == 3
+    assert final["ai_skipped"] == 2
+    assert final["ai_skipped_by_wall_clock"] == 2
+
+    with repository.connect() as db:
+        rows = db.execute(
+            """SELECT id, status, ai_skipped_by_batch_budget FROM runs
+            WHERE batch_id=? ORDER BY created_at""",
+            (batch["id"],),
+        ).fetchall()
+    assert [row[2] for row in rows] == [0, 1, 1]  # run1 正常、run2/3 降级
+    assert all(row[1] == "completed" for row in rows)  # 降级 run 仍完成确定性主链
+
+    # R-1 核心：降级 run 的 AI 阶段真实跳过（manifest 断言，非仅元数据）
+    for run_id, degraded in [(rows[0][0], False), (rows[1][0], True), (rows[2][0], True)]:
+        manifest = storage.read_manifest(run_id)
+        ai_stages = [s for s in manifest["stages"] if s["name"] == "ai_analysis"]
+        assert ai_stages, f"{run_id} 缺 ai_analysis 阶段"
+        summary = ai_stages[0]["summary"]
+        assert summary["requests_used"] == 0
+        if degraded:
+            assert ai_stages[0]["status"] == "skipped"
+            assert "batch 预算/墙钟降级" in summary["reason"]
+
+    # 资产联动（3-APK 真实批次：方案 L160 验收要素）
+    for asset in assets:
+        latest = registry.get(asset["id"])
+        assert latest["status"] == "ready"
+        assert latest["last_run_id"] is not None
 
 
 # ----------------------------------------------------------------------

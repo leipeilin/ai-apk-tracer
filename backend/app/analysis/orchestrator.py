@@ -248,6 +248,11 @@ class ScanOrchestrator:
             self._record_stage(run_id, "code_slicing", "skipped", {"reason": "source_analysis.enabled=false"})
 
         self._stage(run_id, "ai_analysis")
+        # run 级 AI 开关（T1.6 评审 R-1 修复）：batch 预算/墙钟降级时 config
+        # 写入 ai.enabled=false——真实编排器必须消费该标记跳过 AI 阶段
+        # （否则降级只落审计元数据，预算帽仍会被超耗）。默认 True 兼容
+        # 无 ai 段的历史 run。
+        ai_enabled = run.get("config", {}).get("ai", {}).get("enabled", True)
         await self._run_ai_stage(
             run_id,
             candidates,
@@ -256,6 +261,7 @@ class ScanOrchestrator:
             context_builder,
             source_enabled,
             run_dir,
+            ai_enabled=ai_enabled,
         )
         propagate_representative_analysis(candidates)
 
@@ -354,6 +360,7 @@ class ScanOrchestrator:
         context_builder: ContextBuilder | None,
         source_enabled: bool,
         run_dir: Path,
+        ai_enabled: bool = True,
     ) -> None:
         """执行一次任务级预检、恢复 checkpoint，并有界调度代表候选。
 
@@ -367,6 +374,32 @@ class ScanOrchestrator:
             index for index, candidate in enumerate(candidates)
             if index in slice_candidate_indexes
         ]
+        if not ai_enabled:
+            # batch 预算/墙钟降级（T1.6 评审 R-1）：跳过 AI 仅确定性主链，
+            # 候选标记与 stage summary 同构"AI 不可用跳过"路径。
+            skip_reason = "ai.enabled=false（batch 预算/墙钟降级：跳过 AI 仅确定性主链）"
+            preflight = {
+                "status": "skipped",
+                "classification": "disabled_by_run_config",
+                "recoverable": False,
+                "http_status": None,
+                "message": skip_reason,
+                "metadata": {"attempts": 0},
+            }
+            for candidate_index in ai_candidate_indexes:
+                _mark_ai_unavailable(candidates[candidate_index], "ai_skipped", skip_reason, preflight)
+            self._record_stage(run_id, "ai_analysis", "skipped", {
+                "reason": skip_reason,
+                "preflight": preflight,
+                "circuit_open": False,
+                "analyzed": 0,
+                "requests_used": 0,
+                "completed": 0,
+                "failed": 0,
+                "skipped": len(ai_candidate_indexes),
+                "incomplete": 0,
+            })
+            return
         if not ai_candidate_indexes or not context_builder:
             skip_reason = (
                 "source_analysis.enabled=false" if not source_enabled
