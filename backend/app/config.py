@@ -171,6 +171,69 @@ class ContextBudgetSettings(BaseModel):
     max_methods_per_class_request: int = Field(default=8, ge=1, description="单次 class/component 扩片最多加入的方法数")
 
 
+class CallTreeSettings(BaseModel):
+    """call_tree on-demand 有界构建预算（方案 §2.2）。"""
+
+    max_depth: int = Field(default=8, ge=1, description="按入口构建调用树的最大深度")
+    max_nodes: int = Field(default=500, ge=1, description="按入口构建调用树的最大节点数")
+
+
+class ExplorerSettings(BaseModel):
+    """探索轨（Agent1）开关与循环预算（方案 §2.4/§5.5）。"""
+
+    enabled: bool = Field(default=False, description="是否启用探索轨；默认关闭，开启前须过 M2 三加一验收")
+    max_candidates_per_run: int = Field(default=50, ge=1, description="单次扫描最多纳入 funnel 的探索候选数")
+    auto_promote: bool = Field(default=False, description="validated 探索候选是否自动升入正式候选池；默认 false（走 L2 复核）")
+    allow_external_code: bool = Field(default=True, description="是否允许向模型发送探索检索读回的代码片段（仅方法级片段，非完整代码索引）")
+    prompt_version: str = Field(default="explorer/1.0.0", description="探索协议版本；先声明后注册（T2.5），注册前不得运行时解析")
+    max_rounds_per_entry: int = Field(default=4, ge=1, description="单入口检索循环轮数上限（评审 §4.3）")
+    max_requests_per_entry: int = Field(default=20, ge=1, description="单入口读码请求总数上限（评审 §4.3）")
+    max_requests_per_candidate: int = Field(default=4, ge=1, description="单探索候选的 AI 请求上限")
+    deep_dive_prompt_version: str = Field(default="explorer-deep-dive/1.0.0", description="partial 候选深挖协议版本（T0.3 已注册）")
+    call_tree: CallTreeSettings = CallTreeSettings()
+
+
+class VerifySettings(BaseModel):
+    """核验 agent（L2 agent 化演进）开关与预算（方案 §2.7）。"""
+
+    enabled: bool = Field(default=False, description="是否启用核验 agent 替代单轮 L2；默认关闭")
+    prompt_version: str = Field(default="verify/1.0.0", description="核验协议版本；先声明后注册（T0.9），注册前不得运行时解析")
+    max_rounds_per_candidate: int = Field(default=4, ge=1, description="单候选取证循环轮数上限")
+    max_requests_per_candidate: int = Field(default=12, ge=1, description="单候选读码请求总数上限")
+    fallback_to_single_turn_l2: bool = Field(default=True, description="agent 失败/预算耗尽时回退现有单轮 L2（主链不阻塞）")
+
+
+class ApiSurfaceSettings(BaseModel):
+    """API 入口表生成开关（方案 §2.1）。"""
+
+    enabled: bool = Field(default=False, description="是否生成 api_entry_table 产物；默认关闭")
+    include_binder: bool = Field(default=True, description="是否包含 Binder 入口（读 binder_bindings 产物）")
+    include_webview_jsbridge: bool = Field(default=True, description="是否包含 WebView bridge 入口（读 webview_js_bridges 产物）")
+
+
+class AssetsSettings(BaseModel):
+    """资产注册与批量扫描（Phase 1）。"""
+
+    enabled: bool = Field(default=False, description="是否启用资产/批量扫描；默认关闭")
+    max_concurrent_runs: int = Field(default=2, ge=1, description="资产扫描层并发 run 上限（资产级，区别于 batch 段批内并发）")
+    data_root: Path = Field(default=Path(".ai-apk-tracer/assets"), description="资产元数据与 APK 副本根目录（相对路径以工作区为基准，经 resolved_assets_data_root 解析）")
+
+
+class BatchSettings(BaseModel):
+    """batch 级预算帽（评审 §4.12：Phase 1 即生效）。"""
+
+    max_concurrent_runs: int = Field(default=2, ge=1, description="批内 run 并发上限（batch 级，区别于 assets 段资产扫描并发）")
+    max_ai_calls: int = Field(default=0, ge=0, description="batch 总 AI 预算帽；0=沿用 run 级（默认）；>0 超限降级为仅确定性主链")
+    max_wall_seconds: int = Field(default=0, ge=0, description="batch 墙钟上限；0=不限（默认）")
+
+
+class ReportSettings(BaseModel):
+    """漏洞报告与 PoC 骨架（Phase 3）。"""
+
+    allow_executable_poc: bool = Field(default=False, description="是否允许生成可执行 PoC；默认禁止（仅骨架）")
+    require_confirmed_finding: bool = Field(default=True, description="仅已确认 finding 可触发报告生成")
+
+
 class Settings(BaseSettings):
     """汇总服务配置，并支持环境变量覆盖 YAML 默认值。"""
 
@@ -196,6 +259,12 @@ class Settings(BaseSettings):
     ai: AISettings = AISettings()
     funnel: FunnelSettings = FunnelSettings()
     context_budget: ContextBudgetSettings = ContextBudgetSettings()
+    explorer: ExplorerSettings = ExplorerSettings()
+    verify: VerifySettings = VerifySettings()
+    api_surface: ApiSurfaceSettings = ApiSurfaceSettings()
+    assets: AssetsSettings = AssetsSettings()
+    batch: BatchSettings = BatchSettings()
+    report: ReportSettings = ReportSettings()
 
     @classmethod
     def settings_customise_sources(
@@ -220,6 +289,11 @@ class Settings(BaseSettings):
         """返回相对工作区解析后的任务数据根目录。"""
 
         return _resolve_workspace_path(self.storage.data_root)
+
+    def resolved_assets_data_root(self) -> Path:
+        """返回相对工作区解析后的资产数据根目录（Phase 1）。"""
+
+        return _resolve_workspace_path(self.assets.data_root)
 
 
 def _resolve_workspace_path(path: Path) -> Path:

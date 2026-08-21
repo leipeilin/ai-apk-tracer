@@ -3,7 +3,7 @@
   "$id": "https://ai-apk-tracer.local/schemas/config.schema.json",
   "title": "AI-APK-Tracer config",
   "type": "object",
-  "required": ["analysis_platform_api", "source_analysis", "rule_runtime", "storage", "ai", "funnel", "context_budget"],
+  "required": ["analysis_platform_api", "source_analysis", "rule_runtime", "storage", "ai", "funnel", "context_budget", "explorer", "verify", "api_surface", "assets", "batch", "report"],
   "properties": {
     "app_name": {"type": "string", "description": "应用显示名称。"},
     "app_version": {"type": "string", "description": "扫描引擎语义版本。"},
@@ -113,6 +113,80 @@
         "max_methods_per_class_request": {"type": "integer", "minimum": 1, "default": 8, "description": "单次 class 或 component 扩片最多加入的方法数。"}
       },
       "additionalProperties": false
+    },
+    "explorer": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean", "default": false, "description": "是否启用探索轨；默认关闭，开启前须过 M2 三加一验收。"},
+        "max_candidates_per_run": {"type": "integer", "minimum": 1, "default": 50, "description": "单次扫描最多纳入 funnel 的探索候选数。"},
+        "auto_promote": {"type": "boolean", "default": false, "description": "validated 探索候选是否自动升入正式候选池；默认 false。"},
+        "allow_external_code": {"type": "boolean", "default": true, "description": "是否允许向模型发送探索检索读回的代码片段。"},
+        "prompt_version": {"type": "string", "minLength": 1, "default": "explorer/1.0.0", "description": "探索协议版本；先声明后注册（T2.5）。"},
+        "max_rounds_per_entry": {"type": "integer", "minimum": 1, "default": 4, "description": "单入口检索循环轮数上限。"},
+        "max_requests_per_entry": {"type": "integer", "minimum": 1, "default": 20, "description": "单入口读码请求总数上限。"},
+        "max_requests_per_candidate": {"type": "integer", "minimum": 1, "default": 4, "description": "单探索候选的 AI 请求上限。"},
+        "deep_dive_prompt_version": {"type": "string", "minLength": 1, "default": "explorer-deep-dive/1.0.0", "description": "partial 候选深挖协议版本。"},
+        "call_tree": {
+          "type": "object",
+          "properties": {
+            "max_depth": {"type": "integer", "minimum": 1, "default": 8, "description": "按入口构建调用树的最大深度。"},
+            "max_nodes": {"type": "integer", "minimum": 1, "default": 500, "description": "按入口构建调用树的最大节点数。"}
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "verify": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean", "default": false, "description": "是否启用核验 agent 替代单轮 L2；默认关闭。"},
+        "prompt_version": {"type": "string", "minLength": 1, "default": "verify/1.0.0", "description": "核验协议版本；先声明后注册（T0.9）。"},
+        "max_rounds_per_candidate": {"type": "integer", "minimum": 1, "default": 4, "description": "单候选取证循环轮数上限。"},
+        "max_requests_per_candidate": {"type": "integer", "minimum": 1, "default": 12, "description": "单候选读码请求总数上限。"},
+        "fallback_to_single_turn_l2": {"type": "boolean", "default": true, "description": "agent 失败/预算耗尽时回退现有单轮 L2。"}
+      },
+      "additionalProperties": true
+    },
+    "api_surface": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean", "default": false, "description": "是否生成 api_entry_table 产物；默认关闭。"},
+        "include_binder": {"type": "boolean", "default": true, "description": "是否包含 Binder 入口。"},
+        "include_webview_jsbridge": {"type": "boolean", "default": true, "description": "是否包含 WebView bridge 入口。"}
+      },
+      "additionalProperties": true
+    },
+    "assets": {
+      "type": "object",
+      "required": ["enabled", "data_root"],
+      "properties": {
+        "enabled": {"type": "boolean", "default": false, "description": "是否启用资产/批量扫描；默认关闭。"},
+        "max_concurrent_runs": {"type": "integer", "minimum": 1, "default": 2, "description": "资产扫描层并发 run 上限。"},
+        "data_root": {"type": "string", "minLength": 1, "default": ".ai-apk-tracer/assets", "description": "资产元数据与 APK 副本根目录。"}
+      },
+      "additionalProperties": true
+    },
+    "batch": {
+      "type": "object",
+      "properties": {
+        "max_concurrent_runs": {"type": "integer", "minimum": 1, "default": 2, "description": "批内 run 并发上限。"},
+        "max_ai_calls": {"type": "integer", "minimum": 0, "default": 0, "description": "batch 总 AI 预算帽；0=沿用 run 级。"},
+        "max_wall_seconds": {"type": "integer", "minimum": 0, "default": 0, "description": "batch 墙钟上限；0=不限。"}
+      },
+      "additionalProperties": true
+    },
+    "report": {
+      "type": "object",
+      "required": ["allow_executable_poc", "require_confirmed_finding"],
+      "properties": {
+        "allow_executable_poc": {"type": "boolean", "default": false, "description": "是否允许生成可执行 PoC；默认禁止。"},
+        "require_confirmed_finding": {"type": "boolean", "default": true, "description": "仅已确认 finding 可触发报告生成。"}
+      },
+      "additionalProperties": true
     }
   },
   "additionalProperties": true

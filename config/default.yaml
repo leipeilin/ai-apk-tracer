@@ -155,3 +155,58 @@ ai:
   # 单次输出 token 上限；None 时沿用 context_budget.max_output_tokens（8000）。
   # 仅在关闭思维链后仍需更大输出的场景覆盖。
   max_output_tokens: null
+
+# 探索轨（Agent1）。全部默认关闭：开启前须通过 M2 三加一验收
+# （2026-08-21-explorer-track-implementation-plan.md §4.3）。
+explorer:
+  enabled: false
+  max_candidates_per_run: 50
+  auto_promote: false
+  allow_external_code: true
+  # 协议版本先声明后注册（T2.5 新增 prompts/explorer/1.0.0），注册前不得运行时解析。
+  prompt_version: explorer/1.0.0
+  # 检索循环预算（评审 §4.3）：轮数与读码请求上限，跑满产出"部分链+缺口清单"。
+  max_rounds_per_entry: 4
+  max_requests_per_entry: 20
+  max_requests_per_candidate: 4
+  # partial 候选深挖协议（评审 §7.1 决断，T0.3 已注册）。
+  deep_dive_prompt_version: explorer-deep-dive/1.0.0
+  call_tree:
+    max_depth: 8
+    max_nodes: 500
+
+# 核验 agent（L2 agent 化演进，方案 §2.7）。默认关闭；失败/预算耗尽回退单轮 L2。
+verify:
+  enabled: false
+  # 协议版本先声明后注册（T0.9 新增 prompts/verify/1.0.0）。
+  prompt_version: verify/1.0.0
+  max_rounds_per_candidate: 4
+  max_requests_per_candidate: 12
+  fallback_to_single_turn_l2: true
+
+# API 入口表（方案 §2.1）。默认关闭；生成须在 rule_prescan 之后。
+api_surface:
+  enabled: false
+  include_binder: true
+  include_webview_jsbridge: true
+
+# 资产注册与批量扫描（Phase 1）。默认关闭。
+assets:
+  enabled: false
+  max_concurrent_runs: 2
+  data_root: .ai-apk-tracer/assets
+
+# batch 级预算帽（评审 §4.12，Phase 1 即生效）。
+batch:
+  max_concurrent_runs: 2
+  # 0=沿用 run 级预算；>0 时超限 run 降级为仅确定性主链并标记 ai_skipped_by_batch_budget。
+  max_ai_calls: 0
+  # 0=不限。
+  max_wall_seconds: 0
+
+# 漏洞报告与 PoC 骨架（Phase 3）。
+report:
+  # 禁止生成可执行 PoC，仅产出不可执行骨架。
+  allow_executable_poc: false
+  # 仅已确认 finding 可触发报告生成。
+  require_confirmed_finding: true

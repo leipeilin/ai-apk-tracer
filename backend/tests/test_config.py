@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from app.config import AISettings, Settings, WORKSPACE_ROOT
+from app.config import WORKSPACE_ROOT, AISettings, Settings
 
 
 def test_settings_source_priority_and_nested_environment_override(monkeypatch, tmp_path) -> None:
@@ -47,3 +47,138 @@ def test_handwritten_config_schema_describes_recent_fields_without_old_consts() 
     assert "逻辑 AI 调用" in properties["context_budget"]["properties"]["max_requests_per_run"]["description"]
     assert "const" not in properties["source_analysis"]["properties"]["decompiler"]
     assert "const" not in properties["rule_runtime"]["properties"]["wall_timeout_seconds"]
+
+
+# ---------------------------------------------------------------------------
+# T0.7：探索轨/核验/资产/批量/报告配置段
+# ---------------------------------------------------------------------------
+
+def test_explorer_and_related_sections_defaults() -> None:
+    settings = Settings()
+    assert settings.explorer.enabled is False
+    assert settings.explorer.max_candidates_per_run == 50
+    assert settings.explorer.auto_promote is False
+    assert settings.explorer.max_rounds_per_entry == 4
+    assert settings.explorer.max_requests_per_entry == 20
+    assert settings.explorer.max_requests_per_candidate == 4
+    assert settings.explorer.deep_dive_prompt_version == "explorer-deep-dive/1.0.0"
+    assert settings.explorer.call_tree.max_depth == 8
+    assert settings.explorer.call_tree.max_nodes == 500
+    assert settings.verify.enabled is False
+    assert settings.verify.max_rounds_per_candidate == 4
+    assert settings.verify.max_requests_per_candidate == 12
+    assert settings.verify.fallback_to_single_turn_l2 is True
+    assert settings.api_surface.enabled is False
+    assert settings.assets.enabled is False
+    assert settings.batch.max_concurrent_runs == 2
+    assert settings.batch.max_ai_calls == 0
+    assert settings.batch.max_wall_seconds == 0
+    assert settings.report.allow_executable_poc is False
+    assert settings.report.require_confirmed_finding is True
+
+
+def test_nested_env_override_explorer(monkeypatch) -> None:
+    monkeypatch.setenv("AI_APK_TRACER_EXPLORER__MAX_ROUNDS_PER_ENTRY", "6")
+    monkeypatch.setenv("AI_APK_TRACER_VERIFY__ENABLED", "true")
+    monkeypatch.setenv("AI_APK_TRACER_BATCH__MAX_AI_CALLS", "25")
+    settings = Settings()
+    assert settings.explorer.max_rounds_per_entry == 6
+    assert settings.verify.enabled is True
+    assert settings.batch.max_ai_calls == 25
+
+
+def test_default_yaml_loads_with_new_sections() -> None:
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.explorer.enabled is False
+    assert settings.explorer.prompt_version == "explorer/1.0.0"
+    assert settings.verify.fallback_to_single_turn_l2 is True
+    assert settings.api_surface.enabled is False
+    assert settings.assets.enabled is False
+    assert settings.batch.max_ai_calls == 0
+    assert settings.report.require_confirmed_finding is True
+    # 基线：现有段以 default.yaml 为准（既有 config.py/yaml 漂移不归因 T0.7；评审 R-7）
+    assert settings.context_budget.max_output_tokens == 8000
+    get_settings.cache_clear()
+
+
+def test_config_schema_describes_new_sections() -> None:
+    document = json.loads((WORKSPACE_ROOT / "schemas/config.schema.json").read_text("utf-8"))
+    properties = document["properties"]
+    required = set(document["required"])
+    for section in ("explorer", "verify", "api_surface", "assets", "batch", "report"):
+        assert section in properties, f"schema 缺段 {section}"
+        assert section in required, f"schema 顶层 required 缺 {section}（评审 R-5）"
+    # Path 类型与关键字段（评审 R-3/R-5）
+    assert properties["assets"]["properties"]["data_root"]["type"] == "string"
+    assert properties["explorer"]["properties"]["max_rounds_per_entry"]["default"] == 4
+    assert properties["verify"]["properties"]["fallback_to_single_turn_l2"]["default"] is True
+    assert properties["batch"]["properties"]["max_ai_calls"]["default"] == 0
+    assert properties["report"]["properties"]["allow_executable_poc"]["default"] is False
+
+
+def test_batch_zero_semantics() -> None:
+    from app.config import BatchSettings
+
+    settings = BatchSettings(max_ai_calls=0, max_wall_seconds=0)
+    assert settings.max_ai_calls == 0
+    assert settings.max_wall_seconds == 0
+
+
+def test_resolved_assets_data_root(tmp_path, monkeypatch) -> None:
+    from app.config import Settings as S
+
+    monkeypatch.chdir(tmp_path)
+    settings = S(assets={"data_root": ".ai-apk-tracer/assets"})
+    resolved = settings.resolved_assets_data_root()
+    assert resolved.is_absolute()
+    assert str(resolved).endswith(".ai-apk-tracer/assets")
+
+
+def test_prompt_version_declared_matches_registry() -> None:
+    import yaml
+
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    registry = yaml.safe_load((WORKSPACE_ROOT / "prompts/registry.yaml").read_text("utf-8"))
+    registered = {(entry["id"], entry["version"]) for entry in registry["prompts"]}
+    # explorer-deep-dive 已注册（T0.3），默认值必须匹配
+    deep_dive_id, deep_dive_version = settings.explorer.deep_dive_prompt_version.split("/")
+    assert (deep_dive_id, deep_dive_version) in registered
+    # explorer/verify 先声明后注册（T2.5/T0.9），当前未注册属预期（评审 R-1）
+    explorer_id, explorer_version = settings.explorer.prompt_version.split("/")
+    assert (explorer_id, explorer_version) not in registered
+    verify_id, verify_version = settings.verify.prompt_version.split("/")
+    assert (verify_id, verify_version) not in registered
+    get_settings.cache_clear()
+
+
+def test_unknown_section_ignored() -> None:
+    settings = Settings(explorer_bogus={"x": 1})
+    assert settings.explorer.enabled is False
+
+
+def test_batch_invalid_max_ai_calls_rejected() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.config import BatchSettings
+
+    with pytest.raises(ValidationError):
+        BatchSettings(max_ai_calls=-1)
+    # 正向：缺省默认 0（评审 R-6）
+    assert BatchSettings().max_ai_calls == 0
+
+
+def test_explorer_call_tree_invalid_rejected() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.config import ExplorerSettings
+
+    with pytest.raises(ValidationError):
+        ExplorerSettings(call_tree={"max_depth": 0})
