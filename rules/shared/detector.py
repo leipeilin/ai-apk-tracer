@@ -379,6 +379,11 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     reader = RuleIndexReader(payload["index"]) if payload.get("index") else None
     candidates: list[dict[str, Any]] = []
     component_diagnostics: list[dict[str, Any]] = []
+    # 规则产物收集（T2.1：stdout 协议可选字段，backend 汇总侧落盘为
+    # rule-results/{binder_bindings|receiver_registrations|webview_js_bridges}.json）
+    binder_bindings_records: list[dict[str, Any]] = []
+    receiver_registration_records: list[dict[str, Any]] = []
+    webview_bridge_records: list[dict[str, Any]] = []
     started = time.monotonic()
     deadline = started + 119.0
     try:
@@ -390,6 +395,11 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             else:
                 files = reader.search_for_rule(rule_id) if reader else legacy_files
             candidates.extend(_global_code_rule(rule_id, files, manifest, dynamic_receiver_scope=dynamic_scope))
+            if rule_id == "DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION":
+                # 产物全量导出（不按 reportable 过滤——T2.2 api_surface 需要
+                # 完整注册面，非 reportable 的 local/not_exported 判定正是可排除证据）
+                for file in files:
+                    receiver_registration_records.extend(parse_receiver_registrations(file, manifest))
         elif rule_id == "SERVICE_BINDER_CALLER_CHECK_MISSING":
             services = [
                 component for component in manifest.get("components", [])
@@ -443,6 +453,8 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
                         "status": status,
                         "gaps": gaps,
                     })
+            # 产物导出（T2.1）：超时清空 services 时 binder_batch 保留已解析部分
+            binder_bindings_records.extend(_binder_bindings_artifact(binder_batch))
         elif rule_id in PROVIDER_FLOW_RULES and reader:
             for component in manifest.get("components", []):
                 if component.get("kind") != "provider" or component.get("exported") != "true":
@@ -456,6 +468,12 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             # WebView/密码学族（§12.2 ②③）：全局代码模式扫描，不绑定清单组件。
             files = reader.search_for_rule(rule_id) if reader else legacy_files
             candidates.extend(_global_code_rule(rule_id, files, manifest))
+            if rule_id == "WEBVIEW_JS_BRIDGE_EXPOSED":
+                # 产物独立收集（finditer 全枚举同文件多桥——候选单 match 行为不动）
+                for file in files:
+                    webview_bridge_records.extend(
+                        _webview_bridge_artifact_records(str(file.get("content") or ""), file)
+                    )
         else:
             kind = RULE_META[rule_id][0]
             for component in manifest.get("components", []):
@@ -509,6 +527,25 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     if rule_id == "SERVICE_BINDER_CALLER_CHECK_MISSING":
         result["component_diagnostics"] = component_diagnostics
         result["duration_ms"] = round((time.monotonic() - started) * 1000, 3)
+    # 规则产物（T2.1）：预算自控后挂可选协议字段（向后兼容——旧 backend 忽略）
+    artifacts: dict[str, list[dict[str, Any]]] = {}
+    artifact_gaps: list[dict[str, Any]] = []
+    if rule_id == "SERVICE_BINDER_CALLER_CHECK_MISSING":
+        bounded, gaps = _bound_artifact_records("binder_bindings", binder_bindings_records)
+        artifacts["binder_bindings"] = bounded
+        artifact_gaps.extend(gaps)
+    elif rule_id == "DYNAMIC_RECEIVER_EXPORTED_NO_PERMISSION":
+        bounded, gaps = _bound_artifact_records("receiver_registrations", receiver_registration_records)
+        artifacts["receiver_registrations"] = bounded
+        artifact_gaps.extend(gaps)
+    elif rule_id == "WEBVIEW_JS_BRIDGE_EXPOSED":
+        bounded, gaps = _bound_artifact_records("webview_js_bridges", webview_bridge_records)
+        artifacts["webview_js_bridges"] = bounded
+        artifact_gaps.extend(gaps)
+    if artifacts:
+        result["artifacts"] = artifacts
+    if artifact_gaps:
+        result["artifact_gaps"] = artifact_gaps
     return result
 
 
@@ -519,6 +556,105 @@ _CHAIN_EVIDENCE_FIELDS = (
     "receiver_type", "receiver_text", "effect_verified", "sensitive_result",
     "sensitive_data_evidence", "status",
 )
+
+# ---------------------------------------------------------------------------
+# 规则产物导出（T2.1）：stdout 协议内嵌 artifacts，backend 汇总侧落盘。
+# 依据 docs/analysis/2026-08-22-t2-1-implementation-plan.md（评审 R-1~R-7 修订）。
+# ---------------------------------------------------------------------------
+
+_ARTIFACT_MAX_BYTES = 2 * 1024 * 1024  # 单产物 2 MiB（stdout 预算 10 MiB 内自控）
+
+
+def _binder_resolve_status(transaction: dict[str, Any]) -> str:
+    """推导 transaction 的绑定状态（transaction 记录无该字段——T2.1 评审 R-2）。
+
+    实现已唯一绑定 → bound（对齐 v2026-08-16 降级逻辑：dispatch 歧义在实现
+    唯一时不再一票否决）；否则按 implementation gap 判 ambiguous/unresolved。
+    """
+
+    if transaction.get("implementation_method_id"):
+        return "bound"
+    codes = {gap.get("code") for gap in transaction.get("gaps", []) if isinstance(gap, dict)}
+    if "BINDER_IMPLEMENTATION_AMBIGUOUS" in codes:
+        return "ambiguous"
+    return "unresolved"
+
+
+def _binder_bindings_artifact(binder_batch: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """组装 Binder 绑定产物（评审 R-1：service_class 是 class 记录 dict，
+    注入源取 qualified_name；manifest 组件名兜底）。
+
+    service_class 与代码事实同源（索引 qualified_name），manifest 名仅在
+    索引缺失时兜底——两者不一致时以索引为准。
+    """
+
+    records: list[dict[str, Any]] = []
+    for service_name, facts in binder_batch.items():
+        service_class = (
+            (facts.get("service_class") or {}).get("qualified_name")
+            if isinstance(facts.get("service_class"), dict)
+            else facts.get("service_class")
+        ) or service_name
+        for transaction in facts.get("transactions", []):
+            records.append({
+                "service_class": service_class,
+                **transaction,
+                "resolve_status": _binder_resolve_status(transaction),
+            })
+    return records
+
+
+def _webview_bridge_artifact_records(code: str, file: dict[str, Any]) -> list[dict[str, Any]]:
+    """枚举单文件全部 addJavascriptInterface 桥调用点（评审 R-7：finditer
+    全枚举——候选生成的单 match 行为不动，产物与候选收集解耦）。"""
+
+    records: list[dict[str, Any]] = []
+    pattern = re.compile(r"addJavascriptInterface\s*\(\s*[^,]+,\s*[\"']([^\"']+)[\"']")
+    for match in pattern.finditer(code):
+        # 注释行剔除：取 match 前缀的当前行行首（rfind 须在 prefix 上做，
+        # 对整个 code rfind 会错位到文件末行）
+        prefix = code[:match.start()]
+        if re.match(r"\s*//", prefix[prefix.rfind("\n") + 1:]):
+            continue
+        records.append({
+            "path": file.get("path"),
+            "line": code.count("\n", 0, match.start()) + 1,
+            "text": match.group(0)[:120],
+            "description": "WebView.addJavascriptInterface 注入 JS 桥：任意加载到该 WebView 的"
+                           "网页 JS 均可调用被注入对象的全部导出方法，若桥对象暴露敏感能力则构成"
+                           "远程代码/数据访问面（JS 桥注入）。",
+            "sink_kind": "js_bridge",
+            "bridge_name": match.group(1),
+        })
+    return records
+
+
+def _bound_artifact_records(
+    name: str, records: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """按字节预算截断产物记录（stdout 10 MiB 红线自控，防 RULE_OUTPUT_LIMIT）。
+
+    字节估算与 detect.py 落盘同口径（ensure_ascii=False——CJK 不低估，评审 R-4）；
+    截断是显式声明（gap 保真实总数供覆盖判断，对齐 _summarize_reaching_definitions
+    的"摘要与输入解耦"先例）。
+    """
+
+    total = len(records)
+    bounded: list[dict[str, Any]] = []
+    size = 2  # json 数组括号
+    for record in records:
+        record_size = len(json.dumps(record, ensure_ascii=False)) + 1
+        if size + record_size > _ARTIFACT_MAX_BYTES and bounded:
+            return bounded, [{
+                "code": "RULE_ARTIFACT_TRUNCATED",
+                "critical": False,
+                "artifact": name,
+                "kept": len(bounded),
+                "total": total,
+            }]
+        bounded.append(record)
+        size += record_size
+    return bounded, []
 
 
 def chain_to_candidate(

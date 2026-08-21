@@ -173,6 +173,7 @@ class ScanOrchestrator:
             },
         )
         rule_component_gaps = list(self.rule_runner.last_coverage_gaps)
+        self._register_rule_artifacts(run_id)
         self._record_stage(
             run_id,
             "rule_prescan",
@@ -1134,6 +1135,15 @@ class ScanOrchestrator:
     def _stage(self, run_id: str, stage: str) -> None:
         self.repository.update_run(run_id, status="running", stage=stage)
         self.storage.update_manifest(run_id, status="running", stage=stage)
+
+    def _register_rule_artifacts(self, run_id: str) -> None:
+        """规则产物注册进 run_manifest.artifacts（T2.1，对齐 decompile 先例）。"""
+
+        if not self.rule_runner.last_artifacts:
+            return
+        run_manifest = self.storage.read_manifest(run_id)
+        run_manifest.setdefault("artifacts", []).extend(self.rule_runner.last_artifacts)
+        self.storage.write_manifest(run_id, run_manifest)
 
     def _record_stage(self, run_id: str, stage: str, status: str, summary: dict[str, Any]) -> None:
         manifest = self.storage.read_manifest(run_id)

@@ -12,7 +12,7 @@
         "type": "object",
         "required": ["receiver_class", "path", "line"],
         "properties": {
-          "receiver_class": {"type": "string", "minLength": 1},
+          "receiver_class": {"type": ["string", "null"]},
           "call": {"type": ["object", "null"]},
           "method_id": {"type": ["string", "null"]},
           "method_name": {"type": ["string", "null"]},
@@ -24,7 +24,7 @@
           "flag_expression": {"type": ["string", "null"]},
           "flag_value": {"type": ["integer", "null"]},
           "flag_status": {"type": ["string", "null"]},
-          "export_status": {"enum": ["exported", "not_exported", "unknown"]},
+          "export_status": {"enum": ["exported", "not_exported", "unknown", "legacy_unspecified"]},
           "externally_reachable": {"type": ["boolean", "null"]},
           "permission_expression": {"type": ["string", "null"]},
           "permission": {"type": ["string", "null"]},

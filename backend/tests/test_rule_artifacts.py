@@ -236,6 +236,13 @@ def test_receiver_path_null_ok(receiver_schema: dict) -> None:
     jsonschema.validate(payload, receiver_schema)
 
 
+def test_receiver_class_null_ok(receiver_schema: dict) -> None:
+    """T2.1 评审 R-3：opaque 注册点 receiver_class 可空（nullable schema 修订回归）。"""
+    payload = _receiver_sample()
+    payload["registrations"][0]["receiver_class"] = None
+    jsonschema.validate(payload, receiver_schema)
+
+
 def test_webview_required_missing(webview_schema: dict) -> None:
     payload = _webview_sample()
     payload["bridges"][0].pop("line")

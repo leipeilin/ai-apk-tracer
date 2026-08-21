@@ -25,6 +25,28 @@ from app.analysis.coverage_domain import coverage_domain_from_facts
 from app.analysis.index_store import SCHEMA_VERSION
 from app.shared.errors import ValidationError
 
+# 规则产物键白名单（T2.1）：键 → 产物文件内的记录键名（T0.4 schema 顶层键）。
+RULE_ARTIFACT_KEYS = ("binder_bindings", "receiver_registrations", "webview_js_bridges")
+RULE_ARTIFACT_ENTRY_KEY = {
+    "binder_bindings": "bindings",
+    "receiver_registrations": "registrations",
+    "webview_js_bridges": "bridges",
+}
+# schema 懒加载缓存（模块级——多 run 复用）
+_ARTIFACT_SCHEMAS: dict[str, Any] = {}
+
+
+def _load_artifact_schema(schemas_root: Path, name: str) -> Any:
+    """加载并缓存产物 schema（jsonschema validator 构造有成本）。"""
+
+    if name not in _ARTIFACT_SCHEMAS:
+        import jsonschema
+
+        with (schemas_root / f"{name}.schema.json").open(encoding="utf-8") as fp:
+            schema = json.load(fp)
+        _ARTIFACT_SCHEMAS[name] = jsonschema.validators.validator_for(schema)(schema)
+    return _ARTIFACT_SCHEMAS[name]
+
 
 class RuleRunner:
     """发现可信内置规则，并以有界并发在资源受限的独立进程中执行。"""
@@ -37,6 +59,9 @@ class RuleRunner:
         self.rules_root = rules_root.resolve()
         self.settings = settings
         self.last_coverage_gaps: list[dict[str, Any]] = []
+        # 最近一次 run_all 导出的规则产物清单（对齐 last_coverage_gaps 模式，
+        # orchestrator 消费后注册进 run_manifest.artifacts——T2.1）
+        self.last_artifacts: list[dict[str, Any]] = []
 
     def discover(self) -> list[dict[str, Any]]:
         """发现规则根目录内声明为内置且入口安全的规则。"""
@@ -70,6 +95,7 @@ class RuleRunner:
         self.last_coverage_gaps = []
         candidates: list[dict] = []
         failures: list[dict] = []
+        self.last_artifacts = []
         rules = sorted(self.discover(), key=lambda rule: str(rule["metadata"]["id"]))
         max_workers = (
             min(max(1, int(getattr(self.settings, "max_concurrency", 2))), len(rules))
@@ -102,6 +128,7 @@ class RuleRunner:
             result_path = run_dir / "rule-results" / f"{rule['metadata']['id']}.json"
             self._write_result(result_path, result)
             if result["status"] == "completed":
+                self._export_rule_artifacts(run_dir, result)
                 candidates.extend(result["candidates"])
                 for diagnostic in result.get("component_diagnostics", []):
                     critical_gaps = [
@@ -137,6 +164,66 @@ class RuleRunner:
             os.replace(temporary_path, result_path)
         finally:
             temporary_path.unlink(missing_ok=True)
+
+    def _export_rule_artifacts(self, run_dir: Path, result: dict[str, Any]) -> None:
+        """提取规则产物：jsonschema 校验（T0.4）→ 写 rule-results/{name}.json
+        → 记录 last_artifacts（T2.1，§4.11 决断 2：产物 JSON 由规则运行时
+        输出、backend 汇总侧落盘——不 import 规则侧代码）。
+
+        per-record 校验粒度（评审 R-3）：单条坏记录剔除 + gap 携带索引与
+        摘要，不毒化整产物；产物整体结构错误才整级降级。
+        """
+
+        import jsonschema
+
+        artifacts = result.get("artifacts")
+        if not isinstance(artifacts, dict) or not artifacts:
+            return
+        schemas_root = self.rules_root.parent / "schemas"
+        for name, records in artifacts.items():
+            if name not in RULE_ARTIFACT_KEYS or not isinstance(records, list):
+                continue
+            try:
+                validator = _load_artifact_schema(schemas_root, name)
+            except FileNotFoundError:
+                self.last_coverage_gaps.append({
+                    "code": "RULE_ARTIFACT_SCHEMA_MISSING",
+                    "critical": False,
+                    "artifact": name,
+                })
+                continue
+            entry_key = RULE_ARTIFACT_ENTRY_KEY[name]
+            kept: list[dict[str, Any]] = []
+            for index, record in enumerate(records):
+                try:
+                    validator.validate({"schema_version": "1.0.0", entry_key: [record]})
+                except jsonschema.ValidationError as exc:
+                    self.last_coverage_gaps.append({
+                        "code": "RULE_ARTIFACT_RECORD_INVALID",
+                        "critical": False,
+                        "artifact": name,
+                        "record_index": index,
+                        "detail": str(exc.message)[:200],
+                    })
+                    continue
+                kept.append(record)
+            truncated = any(
+                gap.get("code") == "RULE_ARTIFACT_TRUNCATED"
+                and gap.get("artifact") == name
+                for gap in result.get("artifact_gaps", [])
+                if isinstance(gap, dict)
+            )
+            payload = {
+                "schema_version": "1.0.0",
+                entry_key: kept,
+            }
+            self._write_result(run_dir / "rule-results" / f"{name}.json", payload)
+            self.last_artifacts.append({
+                "type": name,
+                "path": f"rule-results/{name}.json",
+                "record_count": len(kept),
+                "truncated": truncated,
+            })
 
     @staticmethod
     def _validate_index_reference(run_dir: Path, payload: dict[str, Any]) -> None:
@@ -287,6 +374,21 @@ class RuleRunner:
             raise ValidationError("规则 component_diagnostics 必须是对象数组", "RULE_PROTOCOL_ERROR")
         if any(not isinstance(item.get("gaps", []), list) for item in diagnostics):
             raise ValidationError("组件诊断 gaps 必须是数组", "RULE_PROTOCOL_ERROR")
+        # 规则产物协议校验（T2.1）：白名单键 + 数组值（宽松——深度校验由
+        # 汇总侧 jsonschema 做，见 _export_rule_artifacts）
+        artifacts = output.get("artifacts")
+        if artifacts is not None and (
+            not isinstance(artifacts, dict)
+            or any(key not in RULE_ARTIFACT_KEYS or not isinstance(value, list)
+                   for key, value in artifacts.items())
+        ):
+            raise ValidationError("规则 artifacts 必须是白名单键的数组字典", "RULE_PROTOCOL_ERROR")
+        artifact_gaps = output.get("artifact_gaps")
+        if artifact_gaps is not None and (
+            not isinstance(artifact_gaps, list)
+            or any(not isinstance(item, dict) for item in artifact_gaps)
+        ):
+            raise ValidationError("规则 artifact_gaps 必须是对象数组", "RULE_PROTOCOL_ERROR")
 
     @staticmethod
     def _normalize_component_diagnostics(rule_id: str, output: dict[str, Any]) -> None:
