@@ -74,7 +74,7 @@ def _manifest_entries(manifest: dict[str, Any], reader: Any | None) -> list[dict
         name = str(component.get("name") or "")
         if not name:
             continue
-        methods = _resolve_lifecycle_methods(reader, name, kind)
+        methods = resolve_component_lifecycle_methods(reader, name, kind)
         base = _sanitize_id(name)
         exported = _map_exported(component)
         common = {
@@ -105,8 +105,11 @@ def _manifest_entries(manifest: dict[str, Any], reader: Any | None) -> list[dict
     return entries
 
 
-def _resolve_lifecycle_methods(reader: Any | None, component_fqcn: str, kind: str) -> list[dict[str, Any]]:
-    """解析组件生命周期入口方法（评审 R-3：qualified_class 精确过滤防同简名异包误匹配）。"""
+def resolve_component_lifecycle_methods(reader: Any | None, component_fqcn: str, kind: str) -> list[dict[str, Any]]:
+    """解析组件生命周期入口方法（公共函数——call_tree 等消费方复用，T2.4 评审 R-5）。
+
+    评审 R-3：qualified_class 精确过滤防同简名异包误匹配。
+    """
 
     if reader is None:
         return []
@@ -201,7 +204,7 @@ def _dynrcv_entries(run_dir: Path, manifest: dict[str, Any], reader: Any | None)
         if export_status == "legacy_unspecified":
             export_status = "unknown"  # 转换层职责：api_entry_table 无 legacy 枚举
         methods = (
-            _resolve_lifecycle_methods(reader, str(receiver_class), "receiver")
+            resolve_component_lifecycle_methods(reader, str(receiver_class), "receiver")
             if receiver_class else []
         )
         if methods:
