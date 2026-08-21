@@ -19,6 +19,9 @@ from app.analysis.ai_models import (
     L2ReviewOutput,
     PreflightOutput,
     SchemaSerialization,
+    VerifyChainFacts,
+    VerifyInput,
+    VerifyOutput,
 )
 from app.config import WORKSPACE_ROOT
 
@@ -623,3 +626,188 @@ def test_deep_dive_output_rejects_chain_field() -> None:
     with pytest.raises(ValidationError) as error:
         DeepDiveOutput.model_validate(payload)
     assert any(item["type"] == "extra_forbidden" for item in error.value.errors())
+
+
+# ---------------------------------------------------------------------------
+# verify 核验协议（T0.9）：命题清单 + 盲验 + L2 关键决策字段对齐
+# ---------------------------------------------------------------------------
+
+def _verify_input() -> dict:
+    hop = _explorer_observation()["chain_proposals"][0]["hops"][0]
+    return {
+        "candidate_id": "expl_" + "a" * 20,
+        "claims": [
+            {"index": 0, "statement": "入口 SplashActivity.onCreate 的外部 Intent 参数传播到 WebHelper.loadUrl", "kind": "propagation"},
+            {"index": 1, "statement": "loadUrl 前无 scheme 白名单 Guard", "kind": "guard_effective"},
+        ],
+        "chain_facts": {
+            "source": "Intent.getExtras().getString",
+            "sink": "WebView.loadUrl",
+            "hops": [hop],
+            "evidence_refs": [{"path": "sources/com/example/SplashActivity.java", "line": 42}],
+        },
+        "evidence_refs": [{"path": "sources/com/example/SplashActivity.java", "line": 42}],
+        "deterministic_facts": [
+            {"fact_type": "component", "statement": "SplashActivity exported=true"},
+            {"fact_type": "guard", "statement": "未见 scheme 校验"},
+        ],
+        "code_context": "public void loadUrl(String url) { /* 无校验 */ }",
+    }
+
+
+def _verify_output() -> dict:
+    return {
+        "summary": "两条命题均已核验",
+        "verdict": "refutes_candidate",
+        "confidence_tier": "high",
+        "flaw_holds": False,
+        "exploitability": {
+            "entry_reachable": True,
+            "propagation_proven": False,
+            "sink_effective": True,
+            "guard_bypassed": False,
+            "authorization_absent": True,
+            "exfiltration_channel": "unverified",
+        },
+        "refutation_basis": ["constant_sink_argument"],
+        "claims_verdicts": [
+            {"index": 0, "conclusion": "refuted",
+             "evidence": [{"path": "sources/com/example/WebHelper.java", "line": 120}],
+             "reasoning": "sink 参数为常量"},
+            {"index": 1, "conclusion": "confirmed", "evidence": [], "reasoning": "确无 Guard"},
+        ],
+        "evidence_refs": [{"path": "sources/com/example/WebHelper.java", "line": 120}],
+        "read_requests": [
+            {"operation": "get_callers", "target": "com.example.WebHelper.loadUrl", "reason": "确认调用方"},
+        ],
+        "loop": {"done": True, "reason": "全部命题已判定"},
+        "analysis_complete": True,
+    }
+
+
+def test_verify_input_valid() -> None:
+    inp = VerifyInput.model_validate(_verify_input())
+    assert inp.claims[0].kind == "propagation"
+    assert inp.chain_facts is not None and inp.chain_facts.hops[0].resolved_via == "direct_call"
+    assert inp.deterministic_facts[0].fact_type == "component"
+
+
+def test_verify_output_valid() -> None:
+    out = VerifyOutput.model_validate(_verify_output())
+    assert out.verdict == "refutes_candidate"
+    assert out.confidence_tier == "high"
+    assert out.exploitability.sink_effective is True
+    assert out.refutation_basis == ["constant_sink_argument"]
+    assert out.claims_verdicts[0].conclusion == "refuted"
+
+
+@pytest.mark.parametrize("payload,field", [
+    (_verify_input(), "claims"),
+    (_verify_input(), "candidate_id"),
+])
+def test_verify_input_required_missing(payload: dict, field: str) -> None:
+    payload.pop(field)
+    with pytest.raises(ValidationError) as error:
+        VerifyInput.model_validate(payload)
+    assert error.value.errors()[0]["type"] == "missing"
+
+
+def test_verify_output_required_missing() -> None:
+    for field in ("summary", "verdict", "confidence_tier", "flaw_holds", "exploitability", "loop", "analysis_complete"):
+        payload = _verify_output()
+        payload.pop(field)
+        with pytest.raises(ValidationError):
+            VerifyOutput.model_validate(payload)
+    payload = _verify_output()
+    payload["claims_verdicts"][0].pop("reasoning")
+    with pytest.raises(ValidationError):
+        VerifyOutput.model_validate(payload)
+
+
+def test_verify_rejects_wrong_enums() -> None:
+    # claims[].kind
+    payload = _verify_input()
+    payload["claims"][0]["kind"] = "bogus"
+    with pytest.raises(ValidationError):
+        VerifyInput.model_validate(payload)
+    # verdict 旧值（supports/refutes 非法，须 supports_candidate/refutes_candidate；评审 R-2）
+    payload = _verify_output()
+    payload["verdict"] = "supports"
+    with pytest.raises(ValidationError):
+        VerifyOutput.model_validate(payload)
+    # claims_verdicts[].conclusion
+    payload = _verify_output()
+    payload["claims_verdicts"][0]["conclusion"] = "verified"
+    with pytest.raises(ValidationError):
+        VerifyOutput.model_validate(payload)
+    # deterministic_facts[].fact_type
+    payload = _verify_input()
+    payload["deterministic_facts"][0]["fact_type"] = "bogus"
+    with pytest.raises(ValidationError):
+        VerifyInput.model_validate(payload)
+    # refutation_basis 非法枚举
+    payload = _verify_output()
+    payload["refutation_basis"] = ["bogus"]
+    with pytest.raises(ValidationError):
+        VerifyOutput.model_validate(payload)
+
+
+def test_verify_blind_structure() -> None:
+    """盲验双重结构保证：顶层与剥离版链事实均无假设层字段（评审 R-1/R-3）。"""
+    forbidden = {"hypothesis", "impact_proposal", "confidence", "reasoning", "needs_expansion"}
+    assert not forbidden & set(VerifyInput.model_fields)
+    assert not forbidden & set(VerifyChainFacts.model_fields)
+
+
+def test_verify_bounds() -> None:
+    # claims 33 项超 max_length=32
+    payload = _verify_input()
+    payload["claims"] = [{"index": i, "statement": "命题", "kind": "other"} for i in range(33)]
+    with pytest.raises(ValidationError):
+        VerifyInput.model_validate(payload)
+    # index=-1
+    payload = _verify_input()
+    payload["claims"][0]["index"] = -1
+    with pytest.raises(ValidationError):
+        VerifyInput.model_validate(payload)
+    # code_context 超 LongText max 10_000
+    payload = _verify_input()
+    payload["code_context"] = "x" * 10_001
+    with pytest.raises(ValidationError):
+        VerifyInput.model_validate(payload)
+    # read_requests 9 项超 max_length=8
+    payload = _verify_output()
+    request = payload["read_requests"][0]
+    payload["read_requests"] = [request] * 9
+    with pytest.raises(ValidationError):
+        VerifyOutput.model_validate(payload)
+
+
+def test_verify_claims_empty_rejected() -> None:
+    payload = _verify_input()
+    payload["claims"] = []
+    with pytest.raises(ValidationError) as error:
+        VerifyInput.model_validate(payload)
+    assert error.value.errors()[0]["type"] == "too_short"
+
+
+def test_verify_done_requires_verdicts() -> None:
+    payload = _verify_output()
+    payload["claims_verdicts"] = []
+    payload["loop"] = {"done": True, "reason": "应非法：done 但无判定"}
+    with pytest.raises(ValidationError, match="loop.done=True"):
+        VerifyOutput.model_validate(payload)
+
+
+def test_verify_output_rejects_hypothesis_field() -> None:
+    payload = {**_verify_output(), "hypothesis": "likely"}
+    with pytest.raises(ValidationError) as error:
+        VerifyOutput.model_validate(payload)
+    assert any(item["type"] == "extra_forbidden" for item in error.value.errors())
+
+
+def test_verify_prompt_variable_matches_registry_convention() -> None:
+    """渲染路径一致性：placeholder 遵循 _prompt_variable 惯例（T0.3 评审 R-1 教训）。"""
+    from app.analysis.ai import _prompt_variable
+
+    assert _prompt_variable("verify") == "verify_input_json"

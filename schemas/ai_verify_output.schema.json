@@ -1,0 +1,359 @@
+{
+  "$defs": {
+    "ExploitabilityAssessment": {
+      "additionalProperties": false,
+      "description": "vuln-judgment-prompt §3：可利用性逐项评估。",
+      "properties": {
+        "authorization_absent": {
+          "description": "是否存在权限/签名级授权保护；无保护时为 True",
+          "title": "Authorization Absent",
+          "type": "boolean"
+        },
+        "entry_reachable": {
+          "description": "攻击者入口是否可达（组件 exported/隐式 intent 可触发）",
+          "title": "Entry Reachable",
+          "type": "boolean"
+        },
+        "exfiltration_channel": {
+          "description": "执行结果回到攻击者的跨进程通道状态；静态无法证明时用 unverified",
+          "enum": [
+            "confirmed",
+            "unverified",
+            "absent"
+          ],
+          "title": "Exfiltration Channel",
+          "type": "string"
+        },
+        "guard_bypassed": {
+          "description": "是否存在且被绕过的 Guard；无 Guard 时为 False",
+          "title": "Guard Bypassed",
+          "type": "boolean"
+        },
+        "propagation_proven": {
+          "description": "攻击者输入是否沿同值/同对象/key-slot 传播到 Sink",
+          "title": "Propagation Proven",
+          "type": "boolean"
+        },
+        "sink_effective": {
+          "description": "Sink 是否真实执行了敏感操作而非空操作",
+          "title": "Sink Effective",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "entry_reachable",
+        "propagation_proven",
+        "sink_effective",
+        "guard_bypassed",
+        "authorization_absent",
+        "exfiltration_channel"
+      ],
+      "title": "ExploitabilityAssessment",
+      "type": "object"
+    },
+    "ExplorerEvidenceRef": {
+      "additionalProperties": false,
+      "description": "探索轨轻量证据引用（低信任）：仅指向可回查的源码位置。\n\n不复用 EvidenceReference（其 context_id/claim 必填，属确定性语义 bundle 的输入上下文\n引用）；探索轨证据由 T2.6 三档校验回查通过后归一化为正式证据。",
+      "properties": {
+        "claim": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "可选：该引用支撑的主张（供人工视图；校验后补全）",
+          "title": "Claim"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据结束行；缺省表示单行",
+          "title": "End Line"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "证据起始行",
+          "title": "Line"
+        },
+        "path": {
+          "description": "证据所在工作区相对路径（必填，可回查）",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ExplorerEvidenceRef",
+      "type": "object"
+    },
+    "ReadRequest": {
+      "additionalProperties": false,
+      "description": "探索循环中的结构化读码请求。\n\n仅暴露四种检索操作（评审 R-4 决策）：入口来自确定性 api_entry_table/attack_surface\n（属信任边界，不让 Agent 自由枚举入口）；class_hierarchy / resolve_invoke_target 为\ncall_tree 内部实现细节，不对模型暴露。",
+      "properties": {
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "消歧用源码行号",
+          "title": "Line"
+        },
+        "operation": {
+          "description": "call_tree 服务可执行操作",
+          "enum": [
+            "get_method_body",
+            "get_callees",
+            "get_callers",
+            "search_symbol"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "消歧用工作区相对路径",
+          "title": "Path"
+        },
+        "reason": {
+          "description": "为什么需要这份代码/调用关系",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "target": {
+          "description": "目标符号/方法/类名",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "target",
+        "reason"
+      ],
+      "title": "ReadRequest",
+      "type": "object"
+    },
+    "VerifyClaimVerdict": {
+      "additionalProperties": false,
+      "description": "对单条命题的核验判定（与 ResolvedFact 同构，协议边界独立）。",
+      "properties": {
+        "conclusion": {
+          "description": "命题判定结论",
+          "enum": [
+            "confirmed",
+            "refuted",
+            "still_unknown"
+          ],
+          "title": "Conclusion",
+          "type": "string"
+        },
+        "evidence": {
+          "description": "支撑该结论的可回查证据",
+          "items": {
+            "$ref": "#/$defs/ExplorerEvidenceRef"
+          },
+          "maxItems": 32,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "index": {
+          "description": "对应 VerifyClaim.index",
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "reasoning": {
+          "description": "判定依据",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reasoning",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index",
+        "conclusion",
+        "reasoning"
+      ],
+      "title": "VerifyClaimVerdict",
+      "type": "object"
+    },
+    "VerifyLoopState": {
+      "additionalProperties": false,
+      "description": "核验循环轮末状态（独立于 ExplorerLoopState：done 语义=全部命题已判定；T0.9 评审 R-6）。",
+      "properties": {
+        "done": {
+          "description": "是否全部命题已判定、可结束核验循环（终止由代码判定）",
+          "title": "Done",
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "结束或继续的原因说明（必填，便于审计）",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "done",
+        "reason"
+      ],
+      "title": "VerifyLoopState",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "核验输出：逐命题判定 + L2 关键决策字段对齐的整体 observation（方案 §2.7；T0.9 评审 R-2）。\n\n- verdict/confidence_tier/flaw_holds/exploitability/refutation_basis 与 L2ReviewOutput\n  对齐（DecisionEngine 消费路径不变）；harm/reachability_class/impact_vector/\n  reverse_exclusion 等其余 L2 字段由 T2.12 适配层以确定性默认值补齐；\n- 整体判定须与 claims_verdicts 一致（T2.11 实现层校验）；\n- 取证循环：read_requests 请求下一轮代码；loop.done 仅声明意图，终止由代码判定。",
+  "properties": {
+    "analysis_complete": {
+      "description": "核验是否已完整结束；不得掩盖 still_unknown",
+      "title": "Analysis Complete",
+      "type": "boolean"
+    },
+    "claims_verdicts": {
+      "description": "逐命题判定",
+      "items": {
+        "$ref": "#/$defs/VerifyClaimVerdict"
+      },
+      "maxItems": 32,
+      "title": "Claims Verdicts",
+      "type": "array"
+    },
+    "confidence_tier": {
+      "description": "裁决置信等级（对齐 L2）",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence Tier",
+      "type": "string"
+    },
+    "evidence_refs": {
+      "description": "本轮新增的可回查证据引用",
+      "items": {
+        "$ref": "#/$defs/ExplorerEvidenceRef"
+      },
+      "maxItems": 64,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "exploitability": {
+      "$ref": "#/$defs/ExploitabilityAssessment",
+      "description": "可利用性逐项评估（直接复用 L2 模型，6 字段零漂移）"
+    },
+    "flaw_holds": {
+      "description": "缺陷是否成立（对齐 L2）",
+      "title": "Flaw Holds",
+      "type": "boolean"
+    },
+    "loop": {
+      "$ref": "#/$defs/VerifyLoopState",
+      "description": "轮末状态声明（终止由代码判定）"
+    },
+    "read_requests": {
+      "description": "下一轮取证读码请求",
+      "items": {
+        "$ref": "#/$defs/ReadRequest"
+      },
+      "maxItems": 8,
+      "title": "Read Requests",
+      "type": "array"
+    },
+    "refutation_basis": {
+      "description": "refutes_candidate 的静态确定性反证依据（对齐 L2，决策层交叉验证）",
+      "items": {
+        "enum": [
+          "non_exported_provider",
+          "fixed_local_target",
+          "constant_sink_argument",
+          "in_process_terminus",
+          "no_real_call_site",
+          "guard_fail_closed"
+        ],
+        "type": "string"
+      },
+      "maxItems": 8,
+      "title": "Refutation Basis",
+      "type": "array"
+    },
+    "summary": {
+      "description": "本轮核验摘要",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "verdict": {
+      "description": "候选整体裁决（对齐 L2 枚举）",
+      "enum": [
+        "supports_candidate",
+        "refutes_candidate",
+        "unresolved"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "required": [
+    "summary",
+    "verdict",
+    "confidence_tier",
+    "flaw_holds",
+    "exploitability",
+    "loop",
+    "analysis_complete"
+  ],
+  "title": "VerifyOutput",
+  "type": "object"
+}

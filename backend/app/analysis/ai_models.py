@@ -432,6 +432,100 @@ class DeepDiveOutput(StrictAIModel):
     analysis_complete: bool = Field(description="深挖是否已完整结束；不得掩盖 remaining_gaps")
 
 
+class VerifyFact(StrictAIModel):
+    """确定性事实（结构化，杜绝假设层文本混入；T0.9 评审 R-3）。"""
+
+    fact_type: Literal["source", "sink", "guard", "authorization", "component", "reachability", "other"] = Field(description="事实类型")
+    statement: LongText = Field(description="事实陈述（不含 severity/confidence/hypothesis 等假设语义）")
+
+
+class VerifyChainFacts(StrictAIModel):
+    """盲验链事实（剥离版 ChainProposal：仅可回查事实层，不含假设字段；T0.9 评审 R-1）。
+
+    构造层（T2.11）从 ExplorerCandidate.chain_proposal 投影，剥离
+    confidence/hypothesis/impact_proposal/reasoning/needs_expansion。
+    """
+
+    source: ShortText = Field(description="候选 source 表达式/方法")
+    sink: ShortText = Field(description="候选 sink 方法/操作")
+    hops: list[Hop] = Field(min_length=1, max_length=32, description="结构化逐跳路径（纯事实，Hop 无假设字段）")
+    call_tree_refs: list[RelativePath] = Field(default_factory=list, max_length=16, description="可选：支撑该链的 call_tree 产物相对路径")
+    evidence_refs: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=64, description="链上轻量证据引用")
+
+
+class VerifyClaim(StrictAIModel):
+    """待证命题（确定性代码从候选 facts/Guard/hops 生成，不含提出者假设）。"""
+
+    index: int = Field(ge=0, description="命题索引（从 0 起，输出按此对应）")
+    statement: LongText = Field(description="命题陈述（如“入口 X 的参数在无 Guard 下传播到 sink Y”）")
+    kind: Literal["entry_reachable", "propagation", "guard_effective", "authorization", "sink_behavior", "source_controllability", "other"] = Field(description="命题类型")
+
+
+class VerifyInput(StrictAIModel):
+    """核验输入（盲验：结构上不含假设层字段——顶层与嵌套均无；T0.9 评审 R-1/R-3）。"""
+
+    candidate_id: Identifier = Field(description="被核验候选的稳定 ID")
+    claims: list[VerifyClaim] = Field(min_length=1, max_length=32, description="待证命题清单")
+    chain_facts: VerifyChainFacts | None = Field(default=None, description="可选：探索候选的剥离版链事实（无假设字段）")
+    evidence_refs: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=64, description="已确认可回查的既有证据")
+    deterministic_facts: list[VerifyFact] = Field(default_factory=list, max_length=64, description="候选确定性事实（结构化；构造层剥离假设语义）")
+    code_context: LongText | None = Field(default=None, description="可选：已取回的相关代码片段文本")
+
+
+class VerifyLoopState(StrictAIModel):
+    """核验循环轮末状态（独立于 ExplorerLoopState：done 语义=全部命题已判定；T0.9 评审 R-6）。"""
+
+    done: bool = Field(description="是否全部命题已判定、可结束核验循环（终止由代码判定）")
+    reason: ShortText = Field(description="结束或继续的原因说明（必填，便于审计）")
+
+
+class VerifyClaimVerdict(StrictAIModel):
+    """对单条命题的核验判定（与 ResolvedFact 同构，协议边界独立）。"""
+
+    index: int = Field(ge=0, description="对应 VerifyClaim.index")
+    conclusion: Literal["confirmed", "refuted", "still_unknown"] = Field(description="命题判定结论")
+    evidence: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=32, description="支撑该结论的可回查证据")
+    reasoning: LongText = Field(description="判定依据")
+
+
+class VerifyOutput(StrictAIModel):
+    """核验输出：逐命题判定 + L2 关键决策字段对齐的整体 observation（方案 §2.7；T0.9 评审 R-2）。
+
+    - verdict/confidence_tier/flaw_holds/exploitability/refutation_basis 与 L2ReviewOutput
+      对齐（DecisionEngine 消费路径不变）；harm/reachability_class/impact_vector/
+      reverse_exclusion 等其余 L2 字段由 T2.12 适配层以确定性默认值补齐；
+    - 整体判定须与 claims_verdicts 一致（T2.11 实现层校验）；
+    - 取证循环：read_requests 请求下一轮代码；loop.done 仅声明意图，终止由代码判定。
+    """
+
+    summary: LongText = Field(description="本轮核验摘要")
+    verdict: Literal["supports_candidate", "refutes_candidate", "unresolved"] = Field(description="候选整体裁决（对齐 L2 枚举）")
+    confidence_tier: Literal["low", "medium", "high"] = Field(description="裁决置信等级（对齐 L2）")
+    flaw_holds: bool = Field(description="缺陷是否成立（对齐 L2）")
+    exploitability: ExploitabilityAssessment = Field(description="可利用性逐项评估（直接复用 L2 模型，6 字段零漂移）")
+    refutation_basis: list[
+        Literal[
+            "non_exported_provider",
+            "fixed_local_target",
+            "constant_sink_argument",
+            "in_process_terminus",
+            "no_real_call_site",
+            "guard_fail_closed",
+        ]
+    ] = Field(default_factory=list, max_length=8, description="refutes_candidate 的静态确定性反证依据（对齐 L2，决策层交叉验证）")
+    claims_verdicts: list[VerifyClaimVerdict] = Field(default_factory=list, max_length=32, description="逐命题判定")
+    evidence_refs: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=64, description="本轮新增的可回查证据引用")
+    read_requests: list[ReadRequest] = Field(default_factory=list, max_length=8, description="下一轮取证读码请求")
+    loop: VerifyLoopState = Field(description="轮末状态声明（终止由代码判定）")
+    analysis_complete: bool = Field(description="核验是否已完整结束；不得掩盖 still_unknown")
+
+    @model_validator(mode="after")
+    def _done_requires_verdicts(self) -> VerifyOutput:
+        if self.loop.done and not self.claims_verdicts:
+            raise ValueError("loop.done=True 必须伴随至少一条 claims_verdicts（T0.9 评审 R-5）")
+        return self
+
+
 class RepairInput(StrictAIModel):
     """只携带无效输出与校验错误的格式修复输入。"""
 
@@ -549,6 +643,7 @@ AI_OUTPUT_MODEL_REGISTRY: dict[str, type[StrictAIModel]] = {
         RepairOutput,
         FinalizationOutput,
         DeepDiveOutput,
+        VerifyOutput,
     )
 }
 AI_OUTPUT_MODEL_VERSIONS: dict[str, str] = {
@@ -581,6 +676,8 @@ AI_MODEL_REGISTRY: dict[str, type[StrictAIModel]] = {
         AITraceEntry,
         DeepDiveInput,
         DeepDiveOutput,
+        VerifyInput,
+        VerifyOutput,
     )
 }
 
@@ -595,6 +692,8 @@ AI_SCHEMA_MODELS: dict[str, type[StrictAIModel]] = {
     "explorer_candidate.schema.json": ExplorerCandidate,
     "ai_explorer_deep_dive_input.schema.json": DeepDiveInput,
     "ai_explorer_deep_dive_output.schema.json": DeepDiveOutput,
+    "ai_verify_input.schema.json": VerifyInput,
+    "ai_verify_output.schema.json": VerifyOutput,
     "ai_repair_input.schema.json": RepairInput,
     "ai_repair_output.schema.json": RepairOutput,
     "ai_finalization_input.schema.json": FinalizationInput,

@@ -370,3 +370,19 @@ prompts:
   schema_sha256:
     input: 811645d3d17dd3cd875e61f44eb5eed283198c32c8eb0a5b3d1419934a9f2c73
     output: f0a1469cbcb3159750a5e32e1fcf31416bd03ecc62c7eb46f8eec0ab99a652b4
+- id: verify
+  version: 1.0.0
+  system_file: verify/1.0.0/system.md
+  user_file: verify/1.0.0/user.md
+  allowed_placeholders:
+  - verify_input_json
+  input_model: VerifyInput
+  output_model: VerifyOutput
+  input_schema_file: ai_verify_input.schema.json
+  output_schema_file: ai_verify_output.schema.json
+  template_sha256:
+    system: a8d8939f5f99d668c3e23c1a63932cc55d82b20739ac0d5d359c8e172d7a4dc0
+    user: 55dd1888bb824946405b427ff2dbad3106d83191bd8b421af1262ec185f28c29
+  schema_sha256:
+    input: 21608b57507d5a42615e817f24638c5d24910f5f3c09db029a3221d715ee8b79
+    output: 323ac68ccf1ecad7339f56dc57dd5bffa2a1deae4feb7d5cf656b3d800e6a5fc
