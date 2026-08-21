@@ -156,7 +156,7 @@ export function AssetsPage() {
                   disabled={selectedIds.length === 0}
                   onChange={(event) => setBatchAuthorized(event.target.checked)}
                 />
-                <span><strong>确认授权批量扫描</strong></span>
+                确认授权批量扫描
               </label>
               <Button
                 variant="primary"
