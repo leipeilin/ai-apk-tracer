@@ -5,16 +5,17 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse
 
 from app.analysis.orchestrator import ScanOrchestrator
-from app.api.models import CleanupRequest, ReviewRequest
+from app.api.models import BatchCreateRequest, CleanupRequest, ReviewRequest
 from app.findings.report import build_report_payload, render_markdown
 from app.runs.cleanup import CleanupService
 from app.runs.run_config import build_run_config
-from app.shared.errors import NotFoundError, ValidationError
+from app.shared.errors import AppError, NotFoundError, ValidationError
 from app.shared.logging import trace_id_var
 
 router = APIRouter()
@@ -271,3 +272,86 @@ def cleanup_run(run_id: str, body: CleanupRequest, request: Request) -> dict:
     if body.mode.value == "clear_sensitive_content":
         repository.clear_findings(run_id)
     return result
+
+
+# ----------------------------------------------------------------------
+# 资产与批量扫描（T1.4；门禁/授权/脱敏设计见
+# docs/analysis/2026-08-22-t1-4-implementation-plan.md）
+# ----------------------------------------------------------------------
+
+
+def _require_assets_enabled(request: Request) -> None:
+    """assets.enabled 门禁（T1.2 决策：门禁归 API 层，领域模块无门禁）。
+
+    503 语义=功能未启用（非请求校验 422 / 不存在 404）。
+    """
+
+    if not request.app.state.settings.assets.enabled:
+        raise AppError("资产批量功能未启用（assets.enabled=false）", "ASSETS_DISABLED", 503)
+
+
+def _public_asset(asset: dict) -> dict:
+    """脱敏（T1.2 评审遗留）：apk_path 为服务端路径，不外泄。"""
+
+    return {key: value for key, value in asset.items() if key != "apk_path"}
+
+
+def _public_batch(batch: dict) -> dict:
+    """脱敏（T1.4 评审 R-1）：剔除 assets_json 原始列（解析后 assets 已在）。"""
+
+    return {key: value for key, value in batch.items() if key != "assets_json"}
+
+
+@router.get("/api/assets")
+def list_assets(request: Request) -> dict:
+    """按创建时间倒序返回资产列表。"""
+
+    _require_assets_enabled(request)
+    items = [_public_asset(asset) for asset in request.app.state.asset_registry.list_assets()]
+    return {"items": items}
+
+
+@router.post("/api/assets/import", status_code=status.HTTP_201_CREATED)
+def import_asset(
+    request: Request,
+    file: Annotated[UploadFile, File(...)],
+    package_name: Annotated[str, Form(...)],
+    authorized: Annotated[bool, Form(...)],
+) -> dict:
+    """导入本地 APK 资产（同步注册：流式副本 + sha256/大小/ZIP 校验复用 registry）。
+
+    未确认合法测试授权时拒绝导入（与 create_run 同级安全语义，T1.4 D2）；
+    重复 sha256 返回 409（details.asset_id 供前端跳转既有资产）。
+    """
+
+    _require_assets_enabled(request)
+    if authorized is not True:
+        raise ValidationError("必须确认拥有合法测试授权", "AUTHORIZATION_CONFIRMATION_REQUIRED")
+    asset = request.app.state.asset_registry.register(
+        file.file, file.filename or "upload.apk", package_name
+    )
+    return _public_asset(asset)
+
+
+@router.post("/api/batches", status_code=status.HTTP_202_ACCEPTED)
+def create_batch(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body: BatchCreateRequest,
+) -> dict:
+    """创建批量扫描（秒回 pending + 资产快照）并异步启动编排。"""
+
+    _require_assets_enabled(request)
+    if body.authorized is not True:
+        raise ValidationError("必须确认拥有合法测试授权", "AUTHORIZATION_CONFIRMATION_REQUIRED")
+    batch = request.app.state.batch_orchestrator.create_batch(body.asset_ids)
+    background_tasks.add_task(request.app.state.batch_orchestrator.run_batch, batch["id"])
+    return _public_batch(batch)
+
+
+@router.get("/api/batches/{batch_id}")
+def get_batch(batch_id: str, request: Request) -> dict:
+    """返回批量进度与汇总（runs 聚合 + 降级原因分解）。"""
+
+    _require_assets_enabled(request)
+    return _public_batch(request.app.state.batch_orchestrator.get_batch(batch_id))

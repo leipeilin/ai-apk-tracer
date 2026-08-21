@@ -59,3 +59,10 @@ class CleanupRequest(BaseModel):
 
     mode: CleanupMode
     confirm_delete: bool = False
+
+
+class BatchCreateRequest(BaseModel):
+    """创建批量扫描请求（authorized 与 asset_ids 同体提交，T1.4 D2）。"""
+
+    authorized: bool
+    asset_ids: list[str] = Field(min_length=1, max_length=100)

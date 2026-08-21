@@ -13,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.analysis.ai_runtime import AIRuntime
 from app.api.routes import router
+from app.assets.batch import BatchOrchestrator
+from app.assets.registry import AssetRegistry
 from app.config import WORKSPACE_ROOT, Settings, get_settings
 from app.runs.storage import RunStorage
 from app.shared.errors import AppError
@@ -32,6 +34,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     repository.initialize()
     storage = RunStorage(settings.resolved_data_root(), settings.storage)
     ai_runtime = AIRuntime(settings.ai)
+    # 资产/批量组装（T1.4 D6：无条件组装，运行时门禁在 API 层）
+    asset_registry = AssetRegistry(repository, storage, settings.resolved_assets_data_root())
+    batch_orchestrator = BatchOrchestrator(settings, repository, storage, ai_runtime, asset_registry)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -45,6 +50,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.repository = repository
     app.state.storage = storage
     app.state.ai_runtime = ai_runtime
+    app.state.asset_registry = asset_registry
+    app.state.batch_orchestrator = batch_orchestrator
     app.add_middleware(TraceIdMiddleware)
     app.include_router(router)
 
