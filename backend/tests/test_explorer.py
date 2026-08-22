@@ -574,6 +574,10 @@ def test_explorer_stage_normalizes_validated_into_main_candidates(tmp_path: Path
     assert summary["normalization_counts"]["partial_kept"] == 0
     assert summary["normalization_counts"]["unverified_kept"] == 0
     assert summary["ai_requests_used"] == 1
+    # T2.10：探索产物注册（explorer_candidates 既有 + explorer_observations 补注册）
+    artifact_types = {a["type"] for a in manifest.get("artifacts", [])}
+    assert "explorer_candidates" in artifact_types
+    assert "explorer_observations" in artifact_types
 
 
 def _real_partial_proposal(descriptor: dict[str, Any]) -> dict[str, Any]:

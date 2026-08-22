@@ -267,6 +267,47 @@ export interface BatchAssetSnapshot {
   apk_sha256: string
 }
 
+/** 探索候选人工队列条目（GET /api/runs/{id}/explorer/candidates；T2.10——
+ *  投影脱 hops 全文与轮审计；服务端预排序：置信度 → deep_dive 证据 → 跳完整度）。 */
+export interface ExplorerQueueEntry {
+  candidate_id: string | null
+  component: { kind: string | null; name: string | null; entry_method: string | null }
+  chain: { source: string | null; sink: string | null; hop_count: number }
+  validation: {
+    status: 'validated' | 'partially_validated' | 'unverified' | 'pending'
+    verified_hop_count: number | null
+    failed_hop_indices: number[]
+    blocked_by_guard: boolean
+    custom_sink_proposal: boolean
+    notes: string | null
+  }
+  deep_dive: {
+    status: string | null
+    evidence_count: number
+    confirmed_fact_count: number
+    remaining_gap_count: number
+    unverifiable_evidence_count: number
+    evidence_truncated_count: number
+    requests_used: number
+  } | null
+  confidence: string | null
+  sort_keys: { confidence_rank: number; deep_dive_evidence: number; hop_ratio: number }
+}
+
+/** 人工队列响应（partial/unverified/pending 主体；validated 仅计数对照）。 */
+export interface ExplorerQueueResponse {
+  entries: ExplorerQueueEntry[]
+  counts: {
+    validated: number
+    partially_validated: number
+    unverified: number
+    pending: number
+    total: number
+    queue_length: number
+    deep_dive_completed: number
+  }
+}
+
 /** 批量扫描记录与 runs 聚合汇总（GET /api/batches/{id}；assets_json 已剔除）。 */
 export interface BatchSummary {
   id: string

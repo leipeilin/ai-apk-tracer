@@ -6,6 +6,7 @@ import type {
   ContextSliceResponse,
   CreateRunInput,
   CreateRunProgress,
+  ExplorerQueueResponse,
   Finding,
   LegacyReviewStatus,
   ListResponse,
@@ -116,6 +117,8 @@ export const api = {
   },
   getFindingSlice: (id: string) =>
     request<ContextSliceResponse>(`/api/findings/${encodeURIComponent(id)}/slice`),
+  getExplorerCandidates: (id: string) =>
+    request<ExplorerQueueResponse>(`/api/runs/${encodeURIComponent(id)}/explorer/candidates`),
   reviewFinding: (
     id: string,
     status: ReviewStatus,

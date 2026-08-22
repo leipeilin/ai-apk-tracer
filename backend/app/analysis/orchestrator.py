@@ -1194,6 +1194,14 @@ class ScanOrchestrator:
             "path": "explorer/candidates.json",
             "candidate_count": len(candidates),
         })
+        # T2.10：轮审计产物注册（explore_all 末尾无条件写盘——T2.5b；
+        # 守卫兼容历史 run 与零候选场景）
+        observations_path = run_dir / "explorer" / "observations.json"
+        if observations_path.is_file():
+            run_manifest.setdefault("artifacts", []).append({
+                "type": "explorer_observations",
+                "path": "explorer/observations.json",
+            })
         self.storage.write_manifest(run_id, run_manifest)
         self._record_stage(run_id, "explorer", "completed", {
             "entry_count": len(effective),

@@ -345,6 +345,19 @@ a { color: inherit; text-decoration: none; }
 .receiver-tier-unresolved, .receiver-tier-unknown { color: var(--muted); background: var(--bg-soft); }
 .receiver-tier-unknown { opacity: .75; }
 
+/* 探索人工队列（T2.10）：三档徽章与队列布局——复用 receiver-tier-badge 基类 */
+.explorer-tier-partial { color: var(--warning); background: rgba(155,118,57,.1); }
+.explorer-tier-unverified { color: var(--muted); background: var(--bg-soft); }
+.explorer-tier-pending { color: var(--muted); background: var(--bg-soft); opacity: .75; }
+.explorer-queue-counts { display: flex; gap: 6px; flex-wrap: wrap; }
+.explorer-queue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.explorer-queue-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-solid); }
+.explorer-queue-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.explorer-queue-chain { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+.explorer-queue-component { font-size: 11px; color: var(--muted); }
+.explorer-queue-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted); }
+.explorer-queue-notes { max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .drawer-root { position: fixed; z-index: 50; inset: 0; display: flex; justify-content: flex-end; }
 .drawer-backdrop { position: absolute; inset: 0; border: 0; background: rgba(25, 23, 19, .48); backdrop-filter: blur(4px); cursor: default; }
 .drawer-panel { position: relative; width: min(670px, calc(100% - 24px)); height: 100%; background: var(--surface-solid); box-shadow: -24px 0 70px rgba(22,20,17,.22); border-left: 1px solid var(--line); overflow-y: auto; }

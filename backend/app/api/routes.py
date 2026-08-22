@@ -89,11 +89,15 @@ def list_runs(request: Request) -> dict:
     return {"items": [_public_run(run) for run in request.app.state.repository.list_runs()]}
 
 
+# FastAPI UploadFile 参数的模块级单例（B008：不得在参数默认值中调用函数）
+_APK_UPLOAD = File(...)
+
+
 @router.post("/api/runs", status_code=status.HTTP_202_ACCEPTED)
 def create_run(
     request: Request,
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    file: UploadFile = _APK_UPLOAD,
     authorized: bool = Form(...),
     source_analysis_enabled: bool = Form(default=True),
 ) -> dict:
@@ -148,7 +152,7 @@ def get_run(run_id: str, request: Request) -> dict:
             parsed = json.loads(index_manifest.read_text("utf-8"))
             run["package_name"] = parsed.get("package")
             run["app_name"] = parsed.get("package")
-    except Exception:
+    except (AppError, OSError, ValueError):
         run["manifest"] = None
         run["stages"] = []
     return _public_run(run)
@@ -159,6 +163,32 @@ def list_findings(run_id: str, request: Request) -> dict:
     """返回指定任务的全部聚合发现项。"""
 
     return {"items": request.app.state.repository.list_findings(run_id)}
+
+
+@router.get("/api/runs/{run_id}/explorer/candidates")
+def explorer_candidates(run_id: str, request: Request) -> dict:
+    """探索候选人工队列（T2.10，方案 §2.0/§5.4）。
+
+    partial/unverified/pending 主体（validated 仅计数对照——已并入主链）；
+    服务端预排序：置信度 ↓ → deep_dive 证据 ↓ → 跳回查完整度 ↓。
+    产物缺失/损坏 → 空态（探索轨未启用是常态，非 404）。
+    """
+
+    request.app.state.repository.get_run(run_id)  # 404 校验
+    from app.analysis.explorer_queue import build_explorer_queue
+
+    candidates_path = (
+        request.app.state.storage.run_dir(run_id) / "explorer" / "candidates.json"
+    )
+    raw: list = []
+    if candidates_path.is_file():
+        try:
+            loaded = json.loads(candidates_path.read_text("utf-8"))
+            if isinstance(loaded, list):
+                raw = loaded
+        except (json.JSONDecodeError, OSError):
+            raw = []
+    return build_explorer_queue(raw)
 
 
 @router.get("/api/findings/{finding_id}/slice")

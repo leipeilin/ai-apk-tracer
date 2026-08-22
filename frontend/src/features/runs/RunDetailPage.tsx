@@ -8,6 +8,7 @@ import { StatusBadge } from '../../ui/Badge'
 import { ErrorState, SkeletonRows } from '../../ui/StateView'
 import { CleanupPanel } from '../cleanup/CleanupPanel'
 import { FindingsPanel } from '../findings/FindingsPanel'
+import { ExplorerQueuePanel } from './ExplorerQueuePanel'
 import { StageTimeline } from './StageTimeline'
 
 /**
@@ -27,6 +28,13 @@ export function RunDetailPage() {
   // getRun 响应中，hero 区数字不受影响）。
   const findingState = usePolling(
     () => api.getFindings(id),
+    runState.data ? (active ? 2000 : false) : false,
+    [id],
+  )
+  // T2.10：探索人工队列轮询——与 findings 同一活跃判定（评审 R-4：
+  // explorer/candidates.json 在探索阶段末落盘，进行中轮询以捕捉产出）。
+  const explorerQueueState = usePolling(
+    () => api.getExplorerCandidates(id),
     runState.data ? (active ? 2000 : false) : false,
     [id],
   )
@@ -83,6 +91,7 @@ export function RunDetailPage() {
           {findingState.loading && !findingState.data && <SkeletonRows count={5} />}
           {findingState.error && !findingState.data && <ErrorState error={findingState.error} onRetry={() => void findingState.reload()} />}
           {findingState.data && <FindingsPanel findings={findingState.data} onChange={(findings: Finding[]) => findingState.setData(findings)} />}
+          {explorerQueueState.data && <ExplorerQueuePanel queue={explorerQueueState.data} />}
         </main>
       </div>
     </div>
