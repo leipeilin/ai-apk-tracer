@@ -149,9 +149,9 @@ def test_prompt_version_declared_matches_registry() -> None:
     # explorer-deep-dive 已注册（T0.3），默认值必须匹配
     deep_dive_id, deep_dive_version = settings.explorer.deep_dive_prompt_version.split("/")
     assert (deep_dive_id, deep_dive_version) in registered
-    # explorer 先声明后注册（T2.5），当前未注册属预期（评审 R-1）
+    # explorer 已注册（T2.5a 协议层交付），默认值必须匹配
     explorer_id, explorer_version = settings.explorer.prompt_version.split("/")
-    assert (explorer_id, explorer_version) not in registered
+    assert (explorer_id, explorer_version) in registered
     # verify 已在 T0.9 注册（先声明后注册闭合）
     verify_id, verify_version = settings.verify.prompt_version.split("/")
     assert (verify_id, verify_version) in registered

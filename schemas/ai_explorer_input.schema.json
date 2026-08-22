@@ -1,0 +1,84 @@
+{
+  "additionalProperties": false,
+  "description": "探索 Agent 每轮输入（T2.5a：explorer.py 构造——上下文累积 + 预算透明）。\n\nentry_json/attack_surface_json 为 api_entry_table/attack_surface 条目的\nJSON 序列化文本（六类入口字段异构——扁平文本注入优于投影模型，对齐\nDeepDiveInput.code_context 先例；评审 R-1/R-5：既有输出模型零改动）。",
+  "properties": {
+    "attack_surface_json": {
+      "anyOf": [
+        {
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "入口所属组件的 attack_surface 条目 JSON（攻击面/索引摘要上下文）",
+      "title": "Attack Surface Json"
+    },
+    "code_context": {
+      "anyOf": [
+        {
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "本轮 read_requests 取回的代码片段/调用关系",
+      "title": "Code Context"
+    },
+    "entry_json": {
+      "description": "本轮入口的 api_entry_table 条目 JSON",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Entry Json",
+      "type": "string"
+    },
+    "prior_observations": {
+      "anyOf": [
+        {
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "前轮累积摘要（component_summary + 已取回代码事实）",
+      "title": "Prior Observations"
+    },
+    "requests_budget": {
+      "description": "剩余读码请求预算",
+      "minimum": 0,
+      "title": "Requests Budget",
+      "type": "integer"
+    },
+    "round_index": {
+      "description": "当前轮次（从 1 起）",
+      "minimum": 1,
+      "title": "Round Index",
+      "type": "integer"
+    },
+    "rounds_budget": {
+      "description": "总轮数预算（max_rounds_per_entry）",
+      "minimum": 1,
+      "title": "Rounds Budget",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "round_index",
+    "rounds_budget",
+    "requests_budget",
+    "entry_json"
+  ],
+  "title": "ExplorerInput",
+  "type": "object"
+}

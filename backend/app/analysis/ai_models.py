@@ -403,6 +403,32 @@ class ExplorerCandidate(StrictAIModel):
     validation: ExplorerCandidateValidation | None = Field(default=None, description="三档校验结果；生成时为空占位")
 
 
+class ExplorerInput(StrictAIModel):
+    """探索 Agent 每轮输入（T2.5a：explorer.py 构造——上下文累积 + 预算透明）。
+
+    entry_json/attack_surface_json 为 api_entry_table/attack_surface 条目的
+    JSON 序列化文本（六类入口字段异构——扁平文本注入优于投影模型，对齐
+    DeepDiveInput.code_context 先例；评审 R-1/R-5：既有输出模型零改动）。
+    """
+
+    round_index: int = Field(ge=1, description="当前轮次（从 1 起）")
+    rounds_budget: int = Field(ge=1, description="总轮数预算（max_rounds_per_entry）")
+    requests_budget: int = Field(ge=0, description="剩余读码请求预算")
+    entry_json: LongText = Field(description="本轮入口的 api_entry_table 条目 JSON")
+    attack_surface_json: LongText | None = Field(
+        default=None,
+        description="入口所属组件的 attack_surface 条目 JSON（攻击面/索引摘要上下文）",
+    )
+    prior_observations: LongText | None = Field(
+        default=None,
+        description="前轮累积摘要（component_summary + 已取回代码事实）",
+    )
+    code_context: LongText | None = Field(
+        default=None,
+        description="本轮 read_requests 取回的代码片段/调用关系",
+    )
+
+
 class DeepDiveInput(StrictAIModel):
     """partial 候选深挖输入（评审 §7.1 决断：专用协议，职责=补齐事实，非裁决）。"""
 
@@ -676,6 +702,8 @@ AI_MODEL_REGISTRY: dict[str, type[StrictAIModel]] = {
         AITraceEntry,
         DeepDiveInput,
         DeepDiveOutput,
+        ExplorerInput,
+        ExplorerObservation,
         VerifyInput,
         VerifyOutput,
     )
@@ -689,6 +717,7 @@ AI_SCHEMA_MODELS: dict[str, type[StrictAIModel]] = {
     "ai_l2_review_input.schema.json": L2ReviewInput,
     "ai_l2_review_output.schema.json": L2ReviewOutput,
     "ai_explorer_observation.schema.json": ExplorerObservation,
+    "ai_explorer_input.schema.json": ExplorerInput,
     "explorer_candidate.schema.json": ExplorerCandidate,
     "ai_explorer_deep_dive_input.schema.json": DeepDiveInput,
     "ai_explorer_deep_dive_output.schema.json": DeepDiveOutput,
