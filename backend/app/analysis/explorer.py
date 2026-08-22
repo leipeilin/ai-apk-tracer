@@ -277,6 +277,10 @@ class ExplorerOrchestrator:
         path.write_text(json.dumps(observations, ensure_ascii=False, indent=2), "utf-8")
         path.chmod(0o600)
 
+    def save_candidates(self, candidates: list[dict[str, Any]]) -> None:
+        """候选落盘（公有：T2.6 校验后重写调用——评审 R-8 包装私有写盘）。"""
+        self._write_candidates(candidates)
+
     def _write_candidates(self, candidates: list[dict[str, Any]]) -> None:
         path = self._run_dir / "explorer" / "candidates.json"
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

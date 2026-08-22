@@ -278,7 +278,7 @@ class ScanOrchestrator:
         # run_dir/explorer/（T2.7 归一化后入 funnel）；默认关闭
         if self.settings.explorer.enabled:
             self._stage(run_id, "explorer")
-            await self._run_explorer_stage(run_id, run_dir, code_index)
+            await self._run_explorer_stage(run_id, run_dir, manifest, code_index)
 
         if context_builder:
             context_builder.close()
@@ -886,7 +886,7 @@ class ScanOrchestrator:
             current_slice = expanded_slice
 
     async def _run_explorer_stage(
-        self, run_id: str, run_dir: Path, code_index: dict[str, Any] | None
+        self, run_id: str, run_dir: Path, manifest: dict[str, Any], code_index: dict[str, Any] | None
     ) -> None:
         """探索轨阶段（T2.5b）：入口遍历 → 受控检索循环 → 候选落盘。
 
@@ -922,6 +922,19 @@ class ScanOrchestrator:
                 budgeted_ai_call, call_tree, explorer_settings, run_dir
             )
             candidates = await orchestrator.explore_all(effective)
+            # 三档校验（T2.6）：reader 存活期内回查（跳/methods/call_sites）
+            from app.analysis.explorer_validation import validate_explorer_candidates
+
+            validation_counts = validate_explorer_candidates(
+                candidates,
+                reader,
+                str(run_dir / "index" / "analysis.sqlite3"),
+                {
+                    "debuggable": manifest.get("debuggable"),
+                    "target_sdk": manifest.get("target_sdk"),
+                },
+            )
+            orchestrator.save_candidates(candidates)
         finally:
             if reader is not None:
                 reader.close()
@@ -938,6 +951,7 @@ class ScanOrchestrator:
             "candidate_count": len(candidates),
             "ai_requests_used": orchestrator.ai_requests_used,
             "read_requests_used": orchestrator.read_requests_used,
+            "validation_counts": validation_counts,
             "degraded_entry_table": degraded,
         })
 
