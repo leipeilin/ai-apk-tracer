@@ -33,6 +33,8 @@ from app.analysis.ai_models import (
     RepairInput,
     RepairOutput,
     StrictAIModel,
+    VerifyInput,
+    VerifyOutput,
 )
 from app.analysis.ai_scheduler import TaskCircuit
 from app.analysis.ai_transport import (
@@ -470,6 +472,26 @@ class OpenAICompatibleAnalyzer:
             model_input,
             DeepDiveOutput,
             "explorer-deep-dive",
+        )
+
+    async def verify_entry(self, model_input: VerifyInput) -> dict[str, Any]:
+        """单轮核验协议执行（T2.11）：命题逐项取证判定（L2 agent 化演进）。
+
+        与 explorer/deep_dive 同模式复用状态机；prompt_version 沿先例硬编码
+        "1.0.0"（registry 哈希门禁 + test_config 注册对齐护栏兜底）。缓存
+        判据同 explorer 轨 no-op 放弃（VerifyOutput.evidence_refs 对无切片
+        校验恒不通过）。终止条件由驱动层代码判定（loop.done 仅声明意图）。
+        """
+
+        unavailable = self._analysis_unavailable_result()
+        if unavailable is not None:
+            return unavailable
+        return await self._invoke_prompt(
+            "verify",
+            "1.0.0",
+            model_input,
+            VerifyOutput,
+            "verify",
         )
 
     async def _invoke_prompt(

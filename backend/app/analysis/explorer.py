@@ -539,58 +539,16 @@ class ExplorerOrchestrator:
             return None
 
     def _file_window(self, reader: Any, path: str, line: int) -> dict[str, Any] | None:
-        """files 表行切片窗口（get_method_body 不支持按行定位——任务方案 §3.3.2）。"""
+        """files 表行切片窗口（委托模块级公共函数）。"""
 
-        content = self._file_content(reader, path)
-        if content is None:
-            return None
-        lines = content.splitlines()
-        if not (1 <= line <= len(lines)):
-            return None
-        start, end = max(line - 41, 0), min(line + 40, len(lines))
-        return {"path": path, "lines": [start + 1, end], "content": "\n".join(lines[start:end])}
-
-    def _file_content(self, reader: Any, path: str) -> str | None:
-        """按 path 取文件内容（回查尝试原样与剥离 sources/ 前缀两种形态）。"""
-
-        for candidate_path in (path, path.removeprefix("sources/")):
-            try:
-                row = reader.db.execute(
-                    "SELECT content FROM files WHERE path = ?", (candidate_path,)
-                ).fetchone()
-            except sqlite3.Error:
-                return None
-            if row is not None:
-                return str(row["content"] or "")
-        return None
+        return file_window(reader, path, line)
 
     def _filter_evidence(
         self, refs: list[Any], reader: Any
     ) -> tuple[list[dict[str, Any]], int]:
-        """证据回查过滤（§3.3.3/D3：文件存在 + 行界；不可回查丢弃并计数）。"""
+        """证据回查过滤（委托模块级公共函数——T2.11 单一实现防漂移）。"""
 
-        kept: list[dict[str, Any]] = []
-        dropped = 0
-        for ref in refs:
-            if isinstance(ref, dict) and self._evidence_verifiable(ref, reader):
-                kept.append(ref)
-            else:
-                dropped += 1
-        return kept, dropped
-
-    def _evidence_verifiable(self, ref: dict[str, Any], reader: Any) -> bool:
-        path = str(ref.get("path") or "")
-        line, end = ref.get("line"), ref.get("end_line")
-        if not path:
-            return False
-        content = self._file_content(reader, path)
-        if content is None:
-            return False
-        if not isinstance(line, int):
-            return True  # 无行号：仅文件存在即可回查
-        total = len(content.splitlines())
-        end_line = end if isinstance(end, int) else line
-        return 1 <= line <= total and end_line <= total and line <= end_line
+        return filter_evidence(refs, reader)
 
     # ------------------------------------------------------------------
     # read_requests 执行（本地检索——模型不自循环）
@@ -612,19 +570,7 @@ class ExplorerOrchestrator:
         return {"records": records, "texts": texts}
 
     def _dispatch_read(self, operation: str, target: str, path: str | None, line: int | None) -> dict[str, Any]:
-        try:
-            if operation == "get_method_body":
-                result = self._call_tree.get_method_body(target)
-                return result if result is not None else {"not_found": target}
-            if operation == "get_callees":
-                return self._call_tree.get_callees(target)
-            if operation == "get_callers":
-                return self._call_tree.get_callers(target)
-            if operation == "search_symbol":
-                return {"results": self._call_tree.search_symbol(target)}
-        except (sqlite3.Error, ValueError, TypeError, KeyError):
-            LOGGER.warning("读码请求执行失败", extra={"operation": operation, "target": target})
-        return {"not_found": target}
+        return dispatch_read(self._call_tree, operation, target, path, line)
 
     # ------------------------------------------------------------------
     # 候选转换（T0.1 ExplorerCandidate schema）
@@ -707,3 +653,89 @@ def _evidence_key(ref: dict[str, Any]) -> tuple[Any, ...]:
     """证据去重键（评审 R-3：跨轮累积按 (path, line, end_line) 去重）。"""
 
     return (ref.get("path"), ref.get("line"), ref.get("end_line"))
+
+
+def filter_evidence(refs: list[Any], reader: Any) -> tuple[list[dict[str, Any]], int]:
+    """证据回查过滤（文件存在 + 行界；不可回查丢弃并计数）。
+
+    T2.11 提升为模块级公共函数：ExplorerOrchestrator（深挖）与 VerifyAgent
+    （核验）共用（单一实现防漂移）。
+    """
+
+    kept: list[dict[str, Any]] = []
+    dropped = 0
+    for ref in refs:
+        if isinstance(ref, dict) and evidence_verifiable(ref, reader):
+            kept.append(ref)
+        else:
+            dropped += 1
+    return kept, dropped
+
+
+def evidence_verifiable(ref: dict[str, Any], reader: Any) -> bool:
+    """单条证据可回查性（文件存在 + 行界；无行号仅查文件存在）。"""
+
+    path = str(ref.get("path") or "")
+    line, end = ref.get("line"), ref.get("end_line")
+    if not path:
+        return False
+    content = file_content(reader, path)
+    if content is None:
+        return False
+    if not isinstance(line, int):
+        return True
+    total = len(content.splitlines())
+    end_line = end if isinstance(end, int) else line
+    return 1 <= line <= total and end_line <= total and line <= end_line
+
+
+def file_content(reader: Any, path: str) -> str | None:
+    """按 path 取文件内容（回查尝试原样与剥离 sources/ 前缀两种形态）。"""
+
+    for candidate_path in (path, path.removeprefix("sources/")):
+        try:
+            row = reader.db.execute(
+                "SELECT content FROM files WHERE path = ?", (candidate_path,)
+            ).fetchone()
+        except sqlite3.Error:
+            return None
+        if row is not None:
+            return str(row["content"] or "")
+    return None
+
+
+def file_window(reader: Any, path: str, line: int) -> dict[str, Any] | None:
+    """files 表行切片窗口（±40 行——get_method_body 不支持按行定位）。"""
+
+    content = file_content(reader, path)
+    if content is None:
+        return None
+    lines = content.splitlines()
+    if not (1 <= line <= len(lines)):
+        return None
+    start, end = max(line - 41, 0), min(line + 40, len(lines))
+    return {"path": path, "lines": [start + 1, end], "content": "\n".join(lines[start:end])}
+
+
+def dispatch_read(
+    call_tree: Any, operation: str, target: str, path: str | None, line: int | None
+) -> dict[str, Any]:
+    """结构化读码分发（四种操作；未命中/异常统一 not_found 结构）。
+
+    T2.11 提升为模块级公共函数：ExplorerOrchestrator 与 VerifyAgent 共用
+    （单一实现防漂移）。call_tree 为 duck-type（CallTreeService 四操作）。
+    """
+
+    try:
+        if operation == "get_method_body":
+            result = call_tree.get_method_body(target)
+            return result if result is not None else {"not_found": target}
+        if operation == "get_callees":
+            return call_tree.get_callees(target)
+        if operation == "get_callers":
+            return call_tree.get_callers(target)
+        if operation == "search_symbol":
+            return {"results": call_tree.search_symbol(target)}
+    except (sqlite3.Error, ValueError, TypeError, KeyError):
+        LOGGER.warning("读码请求执行失败", extra={"operation": operation, "target": target})
+    return {"not_found": target}
