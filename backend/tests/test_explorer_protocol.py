@@ -188,7 +188,11 @@ def test_registry_entry_registered() -> None:
 
 
 def test_prompt_declares_required_and_enums() -> None:
-    """评审 R-6：prompt 声明必填字段与枚举（防回归约束缺失）。"""
+    """评审 R-6：prompt 声明必填字段与枚举（防回归约束缺失）。
+
+    EXPLORER-PROMPT-FIX：追加严格输出契约断言（只输出 JSON/禁止旧字段/
+    顶层 loop 显式声明/字段名/数组上限——实施方案 §3.3；S-4）。
+    """
     system = (PROMPTS_ROOT / "explorer" / "1.0.0" / "system.md").read_text("utf-8")
     # 必填字段声明（嵌套 required 提示）
     for token in ("reason", "call_site_line", "entry_json", "component_summary"):
@@ -201,3 +205,12 @@ def test_prompt_declares_required_and_enums() -> None:
         assert token in system, f"prompt 缺少禁止项约束: {token}"
     # loop.done 校验器语义对齐
     assert "done=true 必须伴随至少一条 chain_proposal" in system
+    # 严格输出契约（EXPLORER-PROMPT-FIX S-4：schema_invalid 根因防护）
+    assert "只输出一个 JSON 对象" in system, "prompt 缺少'只输出一个 JSON 对象'约束"
+    assert "禁止使用旧字段名" in system, "prompt 缺少'禁止使用旧字段名'约束"
+    assert "顶层必填字段：component_summary、loop" in system, "prompt 缺少顶层必填字段显式声明"
+    for token in ("read_requests", "chain_proposals"):
+        assert token in system, f"prompt 缺少字段名声明: {token}"
+    # 数组上限声明（Pydantic 校验先于驱动归一化——超限即 schema_invalid）
+    for token in ("1-32 个", "最多 32 个", "最多 16 个", "最多 64 个"):
+        assert token in system, f"prompt 缺少数组上限声明: {token}"
