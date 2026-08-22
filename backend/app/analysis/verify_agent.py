@@ -225,7 +225,7 @@ class VerifyAgent:
             # 评审 R-8：无命题可证（schema minItems=1 防线前移）——快速返回
             result = {
                 "status": "skipped", "terminated_by": "no_claims", "output": None,
-                "rounds": [], "requests_used": 0, "read_requests_used": 0,
+                "claims": [], "rounds": [], "requests_used": 0, "read_requests_used": 0,
                 "undecided_claim_indices": [], "consistency_downgraded": False,
             }
             self._append_observation(candidate, result)
@@ -383,6 +383,7 @@ class VerifyAgent:
             "status": "completed",
             "terminated_by": terminated_by,
             "output": aggregated,
+            "claims": claims,
             "rounds": rounds,
             "requests_used": len(rounds),
             "read_requests_used": self._read_requests_used,
@@ -500,6 +501,7 @@ class VerifyAgent:
             "status": status,
             "terminated_by": terminated_by,
             "output": None,
+            "claims": claims,
             "rounds": rounds,
             "requests_used": len(rounds),
             "read_requests_used": self._read_requests_used,
@@ -549,3 +551,118 @@ def _input_hash(model_input: VerifyInput) -> str:
     return hashlib.sha256(
         json.dumps(model_input.model_dump(mode="json"), ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# 适配层（T2.12，M0 审查 §4.2）：VerifyOutput 聚合 → L2 analysis 形状
+# ---------------------------------------------------------------------------
+
+
+def _to_evidence_reference(ref: Mapping[str, Any]) -> dict[str, Any] | None:
+    """ExplorerEvidenceRef → EvidenceReference（context_id=path#window 格式）。
+
+    无 line 证据不可定位进 window 格式——静默丢弃（D3：保守削弱不拦截；
+    丢弃计数由 verify_agent 的 evidence_filter_note 承载）。
+    """
+
+    path, line = ref.get("path"), ref.get("line")
+    if not path or not isinstance(line, int):
+        return None
+    end = ref.get("end_line") if isinstance(ref.get("end_line"), int) else line
+    return {
+        "context_id": f"{path}#window:{line}-{end}",
+        "path": path, "line": line, "end_line": end,
+        "claim": f"verify agent 回查通过的证据位置（{path}:{line}）",
+    }
+
+
+def adapt_verify_result(verify_result: Mapping[str, Any]) -> dict[str, Any]:
+    """VerifyOutput 聚合 → L2 analysis dict（_adapt_l2_analysis 同构 + 溯源）。
+
+    铁律（M0 审查 §4.2）：补齐字段全部确定性默认值——harm/reachability_class/
+    impact_vector/reverse_exclusion 生产代码零消费（纯前向兼容存储）；guard_status
+    ="unknown" 为诚实缺省（决策层不消费分析层 guard——评审 R-6，仅审计展示）。
+    evidence_refs 转 EvidenceReference 后由调用方注入 ai_evidence_contexts
+    （评审 R-1：聚合层 _ai_evidence_contexts 优先读取显式注入）。
+    """
+
+    output = verify_result.get("output") or {}
+    refs = [
+        reference for reference in (
+            _to_evidence_reference(ref) for ref in output.get("evidence_refs") or []
+        ) if reference is not None
+    ]
+    undecided = list(verify_result.get("undecided_claim_indices") or [])
+    verdict = output.get("verdict")
+    claims_verdicts = output.get("claims_verdicts") or []
+    claim_kind_by_index = {
+        claim["index"]: claim.get("kind") for claim in verify_result.get("claims") or []
+    }
+    guard_claim = next(
+        (item for item in claims_verdicts
+         if claim_kind_by_index.get(item.get("index")) == "guard_effective"), None
+    )
+    return {
+        "summary": output.get("summary"),
+        "verdict": verdict,
+        "confidence_tier": output.get("confidence_tier"),
+        "guard_status": "unknown",
+        "evidence_refs": refs,
+        "blocking_gaps": (
+            [{"code": "VERIFY_CLAIMS_UNDECIDED", "critical": True,
+              "message": f"核验预算内未完成全部命题判定（未判定 {len(undecided)} 项）",
+              "evidence_refs": []}]
+            if undecided else []
+        ),
+        "uncertainties": [],
+        "context_requests": [],
+        "flaw_holds": output.get("flaw_holds"),
+        "exploitability": output.get("exploitability"),
+        "harm": {"impact_type": "other", "impact_target": "verify agent 适配默认值（未评估）",
+                 "server_confirmation_required": False},
+        "reachability_class": "local",
+        "impact_vector": {"confidentiality": "none", "integrity": "none",
+                          "availability": "none", "privileges_required": "low",
+                          "attack_complexity": "high", "user_interaction": "none"},
+        "reverse_exclusion": [],
+        "confidence_rationale": (
+            f"verify agent 核验：terminated_by={verify_result.get('terminated_by')}，"
+            f"命题未判定 {len(undecided)} 项"
+            + ("，整体判定经一致性校验降级" if verify_result.get("consistency_downgraded") else "")
+        ),
+        "refutation_basis": output.get("refutation_basis") or [],
+        "analysis_complete": bool(output.get("analysis_complete")),
+        "promotion_recommended": verdict == "supports_candidate" and not undecided,
+        "candidate_verdict": verdict,
+        "analysis_track": "verify",
+        "verified_evidence_refs": refs,
+        "invalid_evidence_refs": [],
+        "verify_agent": {
+            "terminated_by": verify_result.get("terminated_by"),
+            "requests_used": verify_result.get("requests_used"),
+            "read_requests_used": verify_result.get("read_requests_used"),
+            "undecided_claim_indices": undecided,
+            "consistency_downgraded": verify_result.get("consistency_downgraded"),
+            # 评审 R-6：核验已产出的 guard_effective 命题判定（人工视图/审计）
+            "guard_claim_verdict": (
+                {"conclusion": guard_claim.get("conclusion"), "reasoning": guard_claim.get("reasoning")}
+                if guard_claim else None
+            ),
+        },
+    }
+
+
+def evidence_contexts_for(analysis: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """适配 analysis → ai_evidence_contexts 注入体（评审 R-1）。
+
+    聚合层 _ai_evidence_contexts 优先读取 candidate["ai_evidence_contexts"]
+    （evidence.py:669-674）——合成 code_window 上下文使 path#window 引用
+    可回查（否则 slice_refs 恢复通道查不到合成窗口 ID，全量 CONTEXT_ID_NOT_FOUND）。
+    """
+
+    return [
+        {"context_id": ref["context_id"], "kind": "code_window", "path": ref["path"],
+         "start_line": ref["line"], "end_line": ref["end_line"]}
+        for ref in analysis.get("evidence_refs") or []
+        if isinstance(ref, Mapping) and ref.get("context_id")
+    ]

@@ -6,6 +6,8 @@ import asyncio
 import hashlib
 import json
 import logging
+
+LOGGER = logging.getLogger(__name__)
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,6 +78,7 @@ class ScanOrchestrator:
         )
         self.context_budgeter = ContextBudgeter(settings.context_budget)
         self._ai_requests_used = 0
+        self._verify_requests_used = 0
         self._ai_budget_lock = asyncio.Lock()
         self._context_extend_lock = asyncio.Lock()
 
@@ -287,6 +290,7 @@ class ScanOrchestrator:
             source_enabled,
             run_dir,
             ai_enabled=ai_enabled,
+            code_index=code_index,
         )
         propagate_representative_analysis(candidates)
 
@@ -386,6 +390,7 @@ class ScanOrchestrator:
         source_enabled: bool,
         run_dir: Path,
         ai_enabled: bool = True,
+        code_index: dict[str, Any] | None = None,
     ) -> None:
         """执行一次任务级预检、恢复 checkpoint，并有界调度代表候选。
 
@@ -514,11 +519,15 @@ class ScanOrchestrator:
         if hasattr(self.ai, "set_task_circuit"):
             self.ai.set_task_circuit(circuit)
         trace_store = AITraceStore(run_dir / "ai-trace")
+        # T2.12：探索原始候选映射（explorer_candidate_id → ExplorerCandidate）——
+        # 核验分支据此取原始链（hops 供 chain_facts）；缺失/损坏 → 空映射（容错）
+        explorer_candidates_map = self._load_explorer_candidates(run_dir)
+        verify_counts = {"attempted": 0, "completed": 0, "fallback": 0, "failed_no_fallback": 0}
         analyzed_count = 0
         analyzed_lock = asyncio.Lock()
 
         async def analyze_job(job: IndexedJob[dict[str, Any]]) -> dict[str, Any]:
-            nonlocal analyzed_count, circuit_reason
+            nonlocal analyzed_count, circuit_reason, verify_counts
             candidate_index = job.index
             candidate = candidates[candidate_index]
             slice_document = job.value
@@ -526,6 +535,11 @@ class ScanOrchestrator:
                 analyzer_identity = self.ai.checkpoint_identity(candidate, slice_document)
             else:
                 analyzer_identity = {"analyzer": type(self.ai).__name__}
+            verify_path = self._verify_path_for(candidate)
+            if verify_path:
+                # T2.12：核验与单轮 L2 是不同执行路径——identity 附加 verify 标记
+                # 隔离 checkpoint 命名空间（防结果串用）
+                analyzer_identity = {**analyzer_identity, "verify_agent": self.settings.verify.prompt_version}
             input_key = candidate_input_key(candidate, slice_document, analyzer_identity)
             restored = trace_store.completed(candidate_index, input_key)
             if restored is not None:
@@ -535,15 +549,34 @@ class ScanOrchestrator:
 
             async with analyzed_lock:
                 analyzed_count += 1
-            result = await self._analyze_with_expansion(
-                candidate,
-                slice_document,
-                context_builder,
-                run_dir,
-                trace_store=trace_store,
-                candidate_index=candidate_index,
-                input_key=input_key,
-            )
+            verify_result: dict[str, Any] | None = None
+            if verify_path:
+                verify_counts["attempted"] += 1
+                verify_result = await self._verify_candidate(
+                    candidate, slice_document, run_dir, code_index,
+                    explorer_candidates_map, trace_store=trace_store,
+                    candidate_index=candidate_index, input_key=input_key,
+                )
+                if verify_result is not None:
+                    if verify_result.get("status") == "completed":
+                        verify_counts["completed"] += 1
+                    else:
+                        verify_counts["failed_no_fallback"] += 1
+                else:
+                    verify_counts["fallback"] += 1
+            if verify_result is not None:
+                # 核验成功：统一走下方尾部记账（评审 R-4——checkpoint/trace 收尾）
+                result = verify_result
+            else:
+                result = await self._analyze_with_expansion(
+                    candidate,
+                    slice_document,
+                    context_builder,
+                    run_dir,
+                    trace_store=trace_store,
+                    candidate_index=candidate_index,
+                    input_key=input_key,
+                )
             if result.get("circuit_breaking") is True:
                 circuit_reason = result.get("message", "AI 不可恢复错误触发任务级断路")
                 circuit.open(circuit_reason)
@@ -641,6 +674,10 @@ class ScanOrchestrator:
             "requests_used": self._ai_requests_used,
             "explorer_requests_used": explorer_requests_used,
             "ai_stage_requests_used": self._ai_requests_used - explorer_requests_used,
+            # T2.12 第三本账：核验预算独立记账（复核账 =
+            # ai_stage_requests_used + deep_dive_requests_used + verify_requests_used）
+            "verify_requests_used": self._verify_requests_used,
+            "verify_counts": verify_counts,
             **ai_counts,
         }
         if circuit_reason:
@@ -651,6 +688,154 @@ class ScanOrchestrator:
             "partial" if unsuccessful else "completed",
             summary,
         )
+
+    # ------------------------------------------------------------------
+    # 核验分流（T2.12，方案 §2.7 / M0 审查 §4.2——含评审 R-1~R-11 修订）
+    # ------------------------------------------------------------------
+
+    def _verify_path_for(self, candidate: dict[str, Any]) -> bool:
+        """核验分流判定：verify.enabled ∧ L2 候选。
+
+        L1 不进核验（方案 §2.7：L1 攻击面验证为 M4 评估扩展项）；探索
+        validated 归一化候选即 L2——"探索 validated 必进核验"由此覆盖。
+        """
+
+        return bool(self.settings.verify.enabled) and candidate.get("evidence_level") == "L2"
+
+    def _load_explorer_candidates(self, run_dir: Path) -> dict[str, dict[str, Any]]:
+        """探索原始候选映射（candidate_id → ExplorerCandidate）——核验链关联。
+
+        缺失/损坏 → 空映射（容错——verify 走无链事实模式）。
+        """
+
+        path = run_dir / "explorer" / "candidates.json"
+        if not path.is_file():
+            return {}
+        try:
+            loaded = json.loads(path.read_text("utf-8"))
+        except (json.JSONDecodeError, OSError):
+            LOGGER.warning("explorer/candidates.json 读取失败（核验链关联降级为空映射）")
+            return {}
+        if not isinstance(loaded, list):
+            return {}
+        return {
+            str(entry.get("candidate_id")): entry
+            for entry in loaded if isinstance(entry, dict) and entry.get("candidate_id")
+        }
+
+    def _budgeted_protocol_call(
+        self, protocol_call: Any, *, counter_attr: str | None = None
+    ) -> Any:
+        """run 级预算包装工厂（探索/深挖/核验协议调用共用——评审 R-10）。
+
+        检查 + 计费 + 调用（防绕过 max_requests_per_run）；counter_attr 可选
+        分账（如核验的 _verify_requests_used——第三本账）。
+        """
+
+        async def budgeted(model_input: Any) -> dict[str, Any]:
+            async with self._ai_budget_lock:
+                if self._ai_requests_used >= self.settings.context_budget.max_requests_per_run:
+                    return {"status": "skipped", "circuit_breaking": True,
+                            "metadata": {"reason": "run_request_budget_exhausted"}}
+                self._ai_requests_used += 1
+                if counter_attr is not None:
+                    setattr(self, counter_attr, getattr(self, counter_attr) + 1)
+            return await protocol_call(model_input)
+        return budgeted
+
+    async def _verify_candidate(
+        self,
+        candidate: dict[str, Any],
+        slice_document: dict[str, Any],
+        run_dir: Path,
+        code_index: dict[str, Any] | None,
+        explorer_candidates_map: dict[str, dict[str, Any]],
+        *,
+        trace_store: Any,
+        candidate_index: int,
+        input_key: str,
+    ) -> dict[str, Any] | None:
+        """单候选核验 + 适配写入；失败按 fallback_to_single_turn_l2 编排回退。
+
+        返回 None = 回退信号（调用方走原单轮 L2——主链永不阻塞）；
+        返回 dict = verify 终态（已写入候选，统一走 analyze_job 尾部记账——
+        评审 R-4）。整体异常捕获回退（评审 R-5）。
+        """
+
+        from app.analysis.call_tree import CallTreeService
+        from app.analysis.verify_agent import (
+            VerifyAgent,
+            adapt_verify_result,
+            evidence_contexts_for,
+        )
+
+        verify_settings = self.settings.verify
+        database_path = str((code_index or {}).get("database_path") or "")
+        reader = None
+        if database_path and Path(database_path).is_file():
+            reader = SQLiteCodeIndexReader(code_index or {})
+        if reader is None:
+            candidate["verify_fallback_reason"] = "verify_index_unavailable"
+            return None
+        try:
+            # 评审 R-7：call_tree 配置与探索/深挖同源（explorer.call_tree）
+            call_tree = CallTreeService(run_dir, reader, self.settings.explorer.call_tree)
+            budgeted_verify_call = self._budgeted_protocol_call(
+                self.ai.verify_entry, counter_attr="_verify_requests_used"
+            )
+            agent = VerifyAgent(
+                budgeted_verify_call, call_tree, verify_settings, run_dir, reader
+            )
+            explorer_candidate = explorer_candidates_map.get(
+                str(candidate.get("explorer_candidate_id") or "")
+            )
+            verify_result = await agent.verify(candidate, explorer_candidate)
+
+            if verify_result["status"] != "completed":
+                if verify_settings.fallback_to_single_turn_l2:
+                    candidate["verify_fallback_reason"] = (
+                        f"verify_{verify_result['terminated_by']}"
+                    )
+                    return None
+                # 不回退：对齐 _analyze_with_expansion 失败终态语义
+                #（评审 R-11 补 ai_stop_reason/ai_analysis_trace）
+                skipped = verify_result["status"] == "skipped"
+                message = f"verify agent {verify_result['terminated_by']}"
+                candidate["analysis_status"] = "ai_skipped" if skipped else "ai_failed"
+                if skipped:
+                    candidate["ai_skip_reason"] = message
+                candidate["ai_stop_reason"] = message
+                candidate["ai_analysis_trace"] = _verify_round_trace(
+                    verify_result.get("rounds") or []
+                )
+                candidate.setdefault("ai_blocking_gaps", []).append({
+                    "code": "AI_ANALYSIS_SKIPPED" if skipped else "AI_ANALYSIS_FAILED",
+                    "critical": not candidate.get("deterministic_chain_verified", False),
+                    "message": message,
+                    "evidence_refs": [],
+                })
+                return {"status": "skipped" if skipped else "failed",
+                        "stop_reason": message, "trace": [],
+                        "circuit_breaking": False, "message": message}
+
+            # 成功：适配写入（评审 R-1：ai_evidence_contexts 显式注入——聚合层
+            # _ai_evidence_contexts 优先读取，path#window 引用可回查）
+            analysis = adapt_verify_result(verify_result)
+            candidate["ai_evidence_contexts"] = evidence_contexts_for(analysis)
+            candidate["verify_used"] = True
+            trace = _verify_round_trace(verify_result.get("rounds") or [])
+            self._apply_ai_analysis(candidate, analysis, trace, slice_document)
+            return {"status": "completed", "stop_reason": "verify_completed",
+                    "trace": trace, "circuit_breaking": False}
+        except Exception:
+            LOGGER.exception(
+                "核验执行异常（回退单轮 L2——主链不阻塞）",
+                extra={"candidate_id": candidate.get("candidate_id")},
+            )
+            candidate["verify_fallback_reason"] = "verify_error"
+            return None
+        finally:
+            reader.close()
 
     async def _analyze_with_expansion(
         self,
@@ -1383,6 +1568,29 @@ class ScanOrchestrator:
             "funnel": self.settings.funnel.model_dump(mode="json"),
             "context_budget": self.settings.context_budget.model_dump(mode="json"),
         }
+
+
+def _verify_round_trace(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """核验轮记录 → AI trace 元素形状（_ai_runtime_metadata_from_trace 可提取）。
+
+    T2.12：VerifyAgent 的轮审计（round_index/prompt_version/model/status）
+    转换为主链 trace 约定的 {"round": n-1, "result": {"status", "metadata"}}。
+    """
+
+    return [
+        {
+            "round": max(int(record.get("round_index") or 1) - 1, 0),
+            "result": {
+                "status": "completed",
+                "metadata": {
+                    "prompt_version": record.get("prompt_version"),
+                    "model": record.get("model"),
+                    "verify_round_status": record.get("status"),
+                },
+            },
+        }
+        for record in rounds
+    ]
 
 
 def _mark_ai_unavailable(

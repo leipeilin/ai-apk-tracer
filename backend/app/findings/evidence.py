@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from app.analysis.index_store import SQLiteCodeIndexReader
-
 
 _DATAFLOW_RANK = {
     "not_applicable": 0,
@@ -527,7 +527,10 @@ def _required_ai_evidence(
         if verdict in {"exposure_only", "insufficient"}:
             return {"location"}, {"exposure"}, True
         return {"location", "source", "sink"}, {"exposure", "dataflow", "impact"}, False
-    if track == "l2_review" and level in {"L2", "L3"}:
+    if track in {"l2_review", "verify"} and level in {"L2", "L3"}:
+        # verify（核验 agent，T2.12）按 l2_review 语义取证据需求——L2 agent 化
+        # 演进的产物裁决口径与单轮 L2 一致（评审 R-2：不入分支会恒发
+        # AI_EVIDENCE_REQUIREMENTS_UNRESOLVED critical gap，核验轨失效）。
         if verdict == "supports_candidate":
             return {"source", "sink"}, {"authorization", "dataflow", "impact"}, True
         if verdict == "refutes_candidate":
@@ -596,10 +599,12 @@ def _reference_semantics(
                 if line is None:
                     roles.add(role)
                     domains.update(field_domains)
-            elif line is not None and end_line is not None and anchor_end is not None:
-                if line <= anchor_end and anchor_line <= end_line:
-                    roles.add(role)
-                    domains.update(field_domains)
+            elif (
+                line is not None and end_line is not None and anchor_end is not None
+                and line <= anchor_end and anchor_line <= end_line
+            ):
+                roles.add(role)
+                domains.update(field_domains)
     for role in roles:
         if role == "location":
             domains.add("exposure")

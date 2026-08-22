@@ -623,19 +623,20 @@ def test_observation_persisted(tmp_path: Path) -> None:
 
 
 def test_result_contract_complete(tmp_path: Path) -> None:
-    """A-22：返回契约字段齐备（T2.12 消费）。"""
+    """A-22：返回契约字段齐备（T2.12 消费——含 claims 供适配层 join）。"""
 
     fake = FakeVerifyAI([{"verdicts": _verdicts_for(4, 4)}])
     agent, _ = _agent(tmp_path, fake)
     result = asyncio_run(agent.verify(_candidate()))
 
     assert set(result) == {
-        "status", "terminated_by", "output", "rounds",
+        "status", "terminated_by", "output", "claims", "rounds",
         "requests_used", "read_requests_used",
         "undecided_claim_indices", "consistency_downgraded",
     }
     assert result["status"] == "completed"
     assert result["requests_used"] == 1
+    assert [claim["index"] for claim in result["claims"]] == [0, 1, 2, 3]
 
 
 # ---------------------------------------------------------------------------
@@ -733,3 +734,155 @@ def test_repeated_verify_independent(tmp_path: Path) -> None:
     assert first["requests_used"] == 1 and second["requests_used"] == 1
     payload = json.loads((tmp_path / "verify" / "observations.json").read_text("utf-8"))
     assert len(payload["entries"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# T2.12：适配层（adapt_verify_result / _to_evidence_reference）
+# ---------------------------------------------------------------------------
+
+from app.analysis.verify_agent import (
+    adapt_verify_result,
+    evidence_contexts_for,
+)
+
+
+def _verify_result(**overrides: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "status": "completed",
+        "terminated_by": "all_claims_decided",
+        "output": {
+            "summary": "全部命题已判定",
+            "verdict": "supports_candidate",
+            "confidence_tier": "high",
+            "flaw_holds": True,
+            "exploitability": {
+                "entry_reachable": True, "propagation_proven": True, "sink_effective": True,
+                "guard_bypassed": False, "authorization_absent": True,
+                "exfiltration_channel": "unverified",
+            },
+            "claims_verdicts": [
+                {"index": 0, "conclusion": "confirmed", "reasoning": "入口导出",
+                 "evidence": []},
+                {"index": 4, "conclusion": "refuted", "reasoning": "guard 无效",
+                 "evidence": []},
+            ],
+            "evidence_refs": [
+                {"path": "com/example/B.java", "line": 4, "end_line": 4, "claim": None},
+                {"path": "com/example/C.java", "claim": None},
+            ],
+            "refutation_basis": [],
+            "analysis_complete": True,
+        },
+        "claims": [
+            {"index": 0, "kind": "entry_reachable", "statement": "入口可达？"},
+            {"index": 4, "kind": "guard_effective", "statement": "guard 有效？"},
+        ],
+        "rounds": [{"round_index": 1, "model_input_hash": "0" * 64,
+                    "prompt_version": "verify/1.0.0", "model": "test-model",
+                    "status": "completed", "output": {}}],
+        "requests_used": 1,
+        "read_requests_used": 2,
+        "undecided_claim_indices": [],
+        "consistency_downgraded": False,
+    }
+    result.update(overrides)
+    return result
+
+
+def test_adapt_fields_complete() -> None:
+    """A-1：适配层字段补齐（L2 同构 + 确定性默认 + verify 溯源）。"""
+
+    analysis = adapt_verify_result(_verify_result())
+
+    assert analysis["analysis_track"] == "verify"
+    assert analysis["guard_status"] == "unknown"
+    assert analysis["verdict"] == "supports_candidate"
+    assert analysis["promotion_recommended"] is True
+    assert analysis["harm"]["impact_type"] == "other"
+    assert analysis["reachability_class"] == "local"
+    assert analysis["impact_vector"]["confidentiality"] == "none"
+    assert analysis["reverse_exclusion"] == []
+    assert analysis["verified_evidence_refs"] == analysis["evidence_refs"]
+    assert analysis["invalid_evidence_refs"] == []
+    assert analysis["verify_agent"]["terminated_by"] == "all_claims_decided"
+    # 评审 R-6：guard_effective 命题判定进溯源
+    assert analysis["verify_agent"]["guard_claim_verdict"] == {
+        "conclusion": "refuted", "reasoning": "guard 无效"}
+
+
+def test_adapt_evidence_reference_conversion() -> None:
+    """A-2/A-3：context_id=path#window 格式；无 line 证据静默丢弃。"""
+
+    analysis = adapt_verify_result(_verify_result())
+    refs = analysis["evidence_refs"]
+    assert len(refs) == 1  # 无 line 的 C.java 证据被丢弃（D3）
+    assert refs[0]["context_id"] == "com/example/B.java#window:4-4"
+    assert refs[0]["claim"].startswith("verify agent 回查通过")
+    contexts = evidence_contexts_for(analysis)
+    assert contexts == [
+        {"context_id": "com/example/B.java#window:4-4", "kind": "code_window",
+         "path": "com/example/B.java", "start_line": 4, "end_line": 4},
+    ]
+
+
+def test_adapt_undecided_gap_and_consistency_trace() -> None:
+    """A-4/A-5：undecided 缺口物化 + 一致性降级溯源。"""
+
+    undecided = adapt_verify_result(_verify_result(
+        undecided_claim_indices=[1, 2],
+        output={**_verify_result()["output"], "analysis_complete": False},
+    ))
+    assert undecided["blocking_gaps"] == [{
+        "code": "VERIFY_CLAIMS_UNDECIDED", "critical": True,
+        "message": "核验预算内未完成全部命题判定（未判定 2 项）",
+        "evidence_refs": [],
+    }]
+    assert undecided["promotion_recommended"] is False
+    assert undecided["analysis_complete"] is False
+
+    downgraded = adapt_verify_result(_verify_result(consistency_downgraded=True))
+    assert "一致性校验降级" in downgraded["confidence_rationale"]
+    assert downgraded["verify_agent"]["consistency_downgraded"] is True
+
+
+def test_adapted_analysis_end_to_end_production_path(tmp_path: Path) -> None:
+    """A-6（评审 R-3）：生产路径端到端——verify_candidate → DecisionEngine.decide。
+
+    断言 invalid_evidence_refs 为空（R-1 的 ai_evidence_contexts 注入生效）、
+    无 AI_EVIDENCE_REQUIREMENTS_UNRESOLVED（R-2 的 track 识别生效）、
+    evidence_decision 不因证据校验失败而拦截。
+    """
+
+    from app.findings.decision import DecisionEngine
+    from app.findings.evidence import verify_candidate
+
+    reader = _reader(tmp_path)
+    code_index = json.loads(
+        (tmp_path / "index" / "code-index.json").read_text("utf-8")
+    )
+    candidate = _candidate(candidate_id="cand_e2e_0001")
+    candidate.update({
+        "scope_key": "scope_x", "chain_key": "chain_x",
+        "deterministic_fact_hash": "facts_x",
+        "entry_points": ["com.example.A"],
+        "ai_evidence_contexts": None,
+    })
+
+    analysis = adapt_verify_result(_verify_result())
+    candidate["ai_analysis"] = analysis
+    candidate["ai_evidence_contexts"] = evidence_contexts_for(analysis)
+    candidate["analysis_track"] = "verify"
+    candidate["candidate_verdict"] = analysis["verdict"]
+    candidate["confidence_tier"] = analysis["confidence_tier"]
+
+    evidence = verify_candidate(candidate, code_index, reader)
+    gap_codes = [gap.get("code") for gap in evidence.get("ai_evidence_blocking_gaps") or []]
+    assert evidence["invalid_evidence_refs"] == []
+    assert "AI_EVIDENCE_REQUIREMENTS_UNRESOLVED" not in gap_codes
+    assert "AI_EVIDENCE_REF_INVALID" not in gap_codes
+
+    decided = DecisionEngine().decide(dict(candidate))
+    assert decided["evidence_decision"] in {
+        "supported", "ai_likely_supported", "unresolved", "pending_manual",
+        "blocked",
+    }
