@@ -7,12 +7,12 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Iterable, TypeAlias
+from typing import Any
 
-Candidate: TypeAlias = Mapping[str, Any]
+type Candidate = Mapping[str, Any]
 CANDIDATE_KEY_SCHEMA = "candidate-funnel-exact-v1"
 
 
@@ -133,6 +133,10 @@ _TOP_LEVEL_MUTABLE_FIELDS = frozenset({
     "severity_version",
     "slice_id",
     "slice_refs",
+    # T2.7（2026-08-22）：funnel 后写回的关联字段与探索产物回溯 ID（见
+    # _PIPELINE_IDENTITY_EXCLUDED_FIELDS 同名注释）。
+    "related_candidate_ids",
+    "explorer_candidate_id",
 })
 _RECURSIVE_RUNTIME_FIELDS = frozenset({
     "elapsed_ms",
@@ -324,7 +328,28 @@ DISPOSITIONS = {
     "deterministically_promoted_l2",
     "high_risk_uncertain",
     "coverage_insufficient",
+    # 探索轨三分流（T2.7，方案 §2.6）：validated→promoted 进 L2 同等路由；
+    # partial 待 T2.8 deep_dive；unverified 留人工队列——后两者不送 L2 AI。
+    "explorer_promoted",
+    "explorer_partial",
+    "explorer_unverified",
 }
+
+# 探索候选三分流映射（explorer_validation_status → disposition）；
+# pending/未知/缺失保守落 explorer_unverified（不送 AI）。
+_EXPLORER_DISPOSITION_BY_STATUS = {
+    "validated": "explorer_promoted",
+    "partially_validated": "explorer_partial",
+    "unverified": "explorer_unverified",
+    "pending": "explorer_unverified",
+}
+
+
+def _explorer_disposition(candidate: Mapping[str, Any]) -> str:
+    """探索候选三分流 disposition（方案 §2.6）；档位未知时保守 unverified。"""
+
+    status = candidate.get("explorer_validation_status")
+    return _EXPLORER_DISPOSITION_BY_STATUS.get(str(status or ""), "explorer_unverified")
 _PIPELINE_HIGH_VALUE_TERMS = (
     "remote_binder", "remote binder", "binder_sensitive", "ontransact",
     "openfile", "file_mutation", "file_delete", "file_write",
@@ -349,6 +374,13 @@ _PIPELINE_IDENTITY_EXCLUDED_FIELDS = {
     "evidence_variants", "is_ai_representative", "funnel_disposition",
     "scope_key", "chain_key", "deterministic_fact_hash",
     "chain_id", "entry_method_id", "path_model", "flow_kind",
+    # T2.7（2026-08-22）：funnel 后回填的同链关联字段（link_related_candidates）
+    # 与探索产物回溯 ID——写回/追溯字段不参与身份，否则 recompute 校验
+    # （_pipeline_identity_compatible）会因写回前后字段集合不同而误判不一致。
+    # 注意 candidate_source / explorer_validation_status 不在此列：它们参与
+    # facts 投影 → deterministic_fact_hash 分源（方案 §2.6 identity 含
+    # candidate_source，探索候选与规则候选不跨源合并）。
+    "related_candidate_ids", "explorer_candidate_id",
     # funnel 自身写回的分级结果：由候选事实推导而来，不得反过来参与身份计算，
     # 否则同一候选在开关开/关两种配置下会得到不同 candidate_id。
     "demotion_reason", "flow_evidence_tier",
@@ -471,9 +503,15 @@ class CandidateFunnel:
                     }),
                 }
             candidate["candidate_id"] = _pipeline_candidate_id(candidate, identity)
-            candidate["funnel_disposition"] = deterministic_precheck(
-                candidate, self.min_l1_risk_score
-            )
+            if candidate.get("candidate_source") == "explorer":
+                # T2.7（方案 §2.6）：探索候选三分流 disposition 覆盖默认
+                # deterministic_precheck（后者对无确定性链验证的 L2 候选恒
+                # coverage_insufficient，不承载探索档位语义）。
+                candidate["funnel_disposition"] = _explorer_disposition(candidate)
+            else:
+                candidate["funnel_disposition"] = deterministic_precheck(
+                    candidate, self.min_l1_risk_score
+                )
             candidate["risk_score"] = candidate_risk_score(candidate)
             demotion_reason = unproven_flow_demotion_reason(candidate)
             candidate["demotion_reason"] = demotion_reason
@@ -484,14 +522,24 @@ class CandidateFunnel:
                 candidate["ai_required"] = False
             else:
                 candidate["flow_evidence_tier"] = "candidate"
-                candidate["ai_required"] = _pipeline_requires_ai(candidate)
                 if (
-                    self.l2_ai_undecidable_route
-                    and candidate["ai_required"]
-                    and _pipeline_l2_ai_undecidable(candidate)
+                    candidate.get("candidate_source") == "explorer"
+                    and candidate.get("funnel_disposition") != "explorer_promoted"
                 ):
+                    # T2.7 探索三分流（方案 §2.6）：explorer_partial 待 T2.8
+                    # deep_dive、explorer_unverified 留人工队列——均不送 L2 AI
+                    # （不占 AI 预算，M2 验收 4.3.2）。explorer_promoted 走
+                    # 与规则 L2 候选同等的路由（含 guard_blocked 短路）。
                     candidate["ai_required"] = False
-                    candidate["ai_routing"] = "undecidable_gap"
+                else:
+                    candidate["ai_required"] = _pipeline_requires_ai(candidate)
+                    if (
+                        self.l2_ai_undecidable_route
+                        and candidate["ai_required"]
+                        and _pipeline_l2_ai_undecidable(candidate)
+                    ):
+                        candidate["ai_required"] = False
+                        candidate["ai_routing"] = "undecidable_gap"
             candidate["ai_eligible"] = False
             candidate["ai_budget_deferred"] = False
             groups.setdefault(
@@ -784,8 +832,7 @@ def _pipeline_registration_owner(candidate: Mapping[str, Any]) -> str:
 
     registration = (candidate.get("receiver_binding") or {}).get("registration") or {}
     path = str(registration.get("path") or candidate.get("component_name") or "")
-    if path.startswith("dynamic:"):
-        path = path[len("dynamic:"):]
+    path = path.removeprefix("dynamic:")
     parts = [part for part in path.split("/") if part]
     return "/".join(parts[:3]) if len(parts) >= 3 else (path or "owner_unknown")
 
@@ -891,9 +938,7 @@ def _l1_skip_ai(candidate: Mapping[str, Any]) -> bool:
         return False
     if candidate.get("receiver_flag_tier") == "confirmed_exported_clean":
         return False
-    if candidate.get("funnel_disposition") in {"exposure_only", "high_risk_uncertain"}:
-        return False
-    return True
+    return candidate.get("funnel_disposition") not in {"exposure_only", "high_risk_uncertain"}
 
 
 def deterministic_precheck(candidate: Mapping[str, Any], min_l1_risk_score: int = 80) -> str:
@@ -1013,15 +1058,13 @@ def _pipeline_l2_ai_undecidable(candidate: Mapping[str, Any]) -> bool:
         or candidate.get("propagation_paths")
     ):
         return False
-    if any(
+    return not any(
         candidate.get(field) is not None
         for field in (
             "call_site_exists", "sink_argument_constant",
             "sender_reachable", "value_flow_reaches_sink_argument",
         )
-    ):
-        return False
-    return True
+    )
 
 
 def _sink_is_local_broadcast(candidate: Mapping[str, Any]) -> bool:

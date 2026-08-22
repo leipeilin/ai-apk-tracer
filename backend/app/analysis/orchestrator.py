@@ -31,6 +31,7 @@ from app.analysis.context_builder import (
 )
 from app.analysis.coverage import finalize_run_coverage
 from app.analysis.decompiler import JadxAdapter
+from app.analysis.explorer_normalization import link_related_candidates
 from app.analysis.guard_verifier import apply_guard_verification
 from app.analysis.index_store import SQLiteCodeIndexReader
 from app.analysis.indexer import build_code_index
@@ -213,9 +214,24 @@ class ScanOrchestrator:
             # 四组件攻击面（T2.3）：依赖 api_entry_table（refs）——同门禁
             await self._generate_attack_surfaces(run_id, run_dir, manifest, candidates)
 
+        # 探索轨（T2.7，方案 §2.5 合流图）：前移至 funnel 前——检索循环 →
+        # 三档校验（T2.6）→ validated 归一化为正式 Candidate 并入主链（与
+        # 规则候选同 funnel 路由 L2 复核）；partial/unverified 留在
+        # explorer/candidates.json（M2 验收 4.3.2：未通过校验的探索候选
+        # 0 条进入正式 finding）。默认关闭。
+        if self.settings.explorer.enabled:
+            self._stage(run_id, "explorer")
+            normalized_explorer = await self._run_explorer_stage(run_id, run_dir, manifest, code_index)
+            candidates.extend(normalized_explorer)
+
         self._stage(run_id, "candidate_funnel")
         funnel_result = CandidateFunnel(self.settings.funnel).process(candidates)
         candidates = funnel_result.candidates
+        # T2.7：funnel 后回填同链关联（candidate_id 已生成；related 字段已
+        # 加入 identity 排除列表，写回不影响三重身份 recompute）
+        related_counts = link_related_candidates(candidates)
+        if related_counts["pair_count"]:
+            funnel_result.summary.update(related_counts)
         self._record_stage(run_id, "candidate_funnel", "completed", funnel_result.summary)
 
         self._stage(run_id, "code_slicing")
@@ -273,12 +289,6 @@ class ScanOrchestrator:
             ai_enabled=ai_enabled,
         )
         propagate_representative_analysis(candidates)
-
-        # 探索轨（T2.5b，方案 §2.4）：AI 阶段后独立运行——候选只落盘
-        # run_dir/explorer/（T2.7 归一化后入 funnel）；默认关闭
-        if self.settings.explorer.enabled:
-            self._stage(run_id, "explorer")
-            await self._run_explorer_stage(run_id, run_dir, manifest, code_index)
 
         if context_builder:
             context_builder.close()
@@ -384,6 +394,11 @@ class ScanOrchestrator:
         分析完成后再由三重身份校验传播给同组成员。
         """
 
+        # T2.7（评审 R-1）：run 级 AI 计数不再在本阶段重置——探索轨已前移到
+        # funnel 前，探索与规则 AI 共享同一预算池（ScanOrchestrator 每 run 新建
+        # 实例，__init__ 归零已保证隔离）。此快照 = 进入 AI 阶段时的探索消耗。
+        explorer_requests_used = self._ai_requests_used
+
         # Include both L1 (for triage) and L2 (for review) candidates
         ai_candidate_indexes = [
             index for index, candidate in enumerate(candidates)
@@ -408,7 +423,11 @@ class ScanOrchestrator:
                 "preflight": preflight,
                 "circuit_open": False,
                 "analyzed": 0,
-                "requests_used": 0,
+                # run 级 AI 请求数（T1.3：batch 预算计数事实源）——run 累计口径
+                # （T2.7：含探索轨前移后的探索消耗，评审 R-1）
+                "requests_used": explorer_requests_used,
+                "explorer_requests_used": explorer_requests_used,
+                "ai_stage_requests_used": 0,
                 "completed": 0,
                 "failed": 0,
                 "skipped": len(ai_candidate_indexes),
@@ -435,8 +454,11 @@ class ScanOrchestrator:
                 "preflight": preflight,
                 "circuit_open": False,
                 "analyzed": 0,
-                # run 级 AI 请求数（T1.3：batch 预算计数事实源；跳过路径=0）
-                "requests_used": 0,
+                # run 级 AI 请求数（T1.3：batch 预算计数事实源）——run 累计口径
+                # （T2.7：含探索轨前移后的探索消耗，评审 R-1）
+                "requests_used": explorer_requests_used,
+                "explorer_requests_used": explorer_requests_used,
+                "ai_stage_requests_used": 0,
                 "completed": 0,
                 "failed": 0,
                 "skipped": len(ai_candidate_indexes),
@@ -472,8 +494,11 @@ class ScanOrchestrator:
                 "preflight": preflight,
                 "circuit_open": True,
                 "analyzed": 0,
-                # run 级 AI 请求数（T1.3：batch 预算计数的持久化事实源；早退路径=0）
-                "requests_used": 0,
+                # run 级 AI 请求数（T1.3：batch 预算计数的持久化事实源）——run 累计口径
+                # （T2.7：含探索轨前移后的探索消耗，评审 R-1；早退路径 AI 阶段=0）
+                "requests_used": explorer_requests_used,
+                "explorer_requests_used": explorer_requests_used,
+                "ai_stage_requests_used": 0,
                 "completed": 0,
                 "failed": len(circuit_indexes) if recoverable else 0,
                 "skipped": 0 if recoverable else len(circuit_indexes),
@@ -481,7 +506,10 @@ class ScanOrchestrator:
             })
             return
 
-        self._ai_requests_used = 0
+        # T2.7（评审 R-1）：原此处 `self._ai_requests_used = 0` 重置（AI 阶段独立
+        # 计费）已删除——探索轨前移至 funnel 前后，重置会使探索与规则 AI 各享
+        # 一份全额预算（run 总量上限≈2×max_requests_per_run）；两阶段现在共享
+        # 同一 run 级预算池（探索优先消耗）。
         circuit = TaskCircuit()
         if hasattr(self.ai, "set_task_circuit"):
             self.ai.set_task_circuit(circuit)
@@ -590,7 +618,7 @@ class ScanOrchestrator:
         legacy_results.chmod(0o600)
         try:
             manifest = self.storage.read_manifest(run_id)
-        except Exception:
+        except (AppError, OSError, ValueError):
             manifest = None
         if manifest is not None:
             manifest.setdefault("artifacts", []).append({
@@ -608,8 +636,11 @@ class ScanOrchestrator:
             "circuit_open": circuit_open,
             "analyzed": analyzed_count,
             "peak_concurrent": scheduled.stats.peak_active,
-            # run 级 AI 请求数（T1.3：batch 预算计数的持久化事实源）
+            # run 级 AI 请求数（T1.3：batch 预算计数的持久化事实源）——run 累计口径
+            # （T2.7 评审 R-1：= 探索消耗 + AI 阶段消耗，两阶段共享同一预算池）
             "requests_used": self._ai_requests_used,
+            "explorer_requests_used": explorer_requests_used,
+            "ai_stage_requests_used": self._ai_requests_used - explorer_requests_used,
             **ai_counts,
         }
         if circuit_reason:
@@ -887,8 +918,9 @@ class ScanOrchestrator:
 
     async def _run_explorer_stage(
         self, run_id: str, run_dir: Path, manifest: dict[str, Any], code_index: dict[str, Any] | None
-    ) -> None:
-        """探索轨阶段（T2.5b）：入口遍历 → 受控检索循环 → 候选落盘。
+    ) -> list[dict[str, Any]]:
+        """探索轨阶段（T2.5b/T2.7）：入口遍历 → 受控检索循环 → 三档校验 →
+        validated 归一化（返回归一化候选，由调用方并入主链 candidates）。
 
         ai_call 回调经 run 级 AI 预算包装（评审 R-1：直调 analyzer 会绕过
         max_requests_per_run 计费）；stage summary 分记 ai_requests_used /
@@ -922,7 +954,12 @@ class ScanOrchestrator:
                 budgeted_ai_call, call_tree, explorer_settings, run_dir
             )
             candidates = await orchestrator.explore_all(effective)
-            # 三档校验（T2.6）：reader 存活期内回查（跳/methods/call_sites）
+            # 三档校验（T2.6）：reader 存活期内回查（跳/methods/call_sites）；
+            # T2.7 归一化：validated → 正式 Candidate 形状（T0.6 映射表），
+            # partial/unverified/other 不产出（留 explorer/candidates.json）。
+            from app.analysis.explorer_normalization import (
+                normalize_explorer_candidates,
+            )
             from app.analysis.explorer_validation import validate_explorer_candidates
 
             validation_counts = validate_explorer_candidates(
@@ -935,6 +972,7 @@ class ScanOrchestrator:
                 },
             )
             orchestrator.save_candidates(candidates)
+            normalized_candidates, normalization_counts = normalize_explorer_candidates(candidates)
         finally:
             if reader is not None:
                 reader.close()
@@ -952,8 +990,10 @@ class ScanOrchestrator:
             "ai_requests_used": orchestrator.ai_requests_used,
             "read_requests_used": orchestrator.read_requests_used,
             "validation_counts": validation_counts,
+            "normalization_counts": normalization_counts,
             "degraded_entry_table": degraded,
         })
+        return normalized_candidates
 
     async def _budgeted_ai_call(
         self,
@@ -1136,7 +1176,7 @@ class ScanOrchestrator:
                         {k: schema[k] for k in sorted(schema)}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
                     )
                     schema_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-                except Exception:
+                except (TypeError, ValueError):
                     schema_hash = None
             return {
                 "prompt_id": metadata.get("prompt_id"),
@@ -1386,9 +1426,7 @@ def _should_build_slice(candidate: dict[str, Any]) -> bool:
         return False
     if candidate.get("authorization_status") in {"strongly_protected", "protected"}:
         return False
-    if not candidate.get("component_name"):
-        return False
-    return True
+    return bool(candidate.get("component_name"))
 
 
 def _candidate_depends_on_skipped_files(

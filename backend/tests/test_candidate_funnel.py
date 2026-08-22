@@ -5,8 +5,10 @@ import copy
 import pytest
 
 from app.analysis.candidate_funnel import (
+    CandidateFunnel,
     CandidateReason,
     CandidateRoute,
+    build_candidate_identity,
     build_candidate_routing_plan,
     candidate_precheck,
     deduplicate_exact_candidates,
@@ -506,3 +508,145 @@ def test_identity_preserves_propagation_order_without_method_id() -> None:
 
     assert build_candidate_identity(base).chain_key != build_candidate_identity(reversed_path).chain_key, \
         "调用顺序是链语义的一部分，无标识节点必须回退到节点内容而非丢弃"
+
+
+# ---------------------------------------------------------------------------
+# T2.7（2026-08-22）：探索候选 candidate_source 三分流与 identity 分源
+# ---------------------------------------------------------------------------
+
+
+def _explorer_candidate(**values) -> dict:
+    """归一化形状的探索候选（explorer_normalization 产物最小形状）。"""
+
+    candidate = {
+        "rule_id": "EXPLORER_AGENT",
+        "rule_version": "explorer/1.0.0",
+        "evidence_level": "L2",
+        "component": "activity",
+        "component_name": "com.example.ExportedActivity",
+        "entry_points": ["com.example.ExportedActivity"],
+        "entry_method_id": "onCreate",
+        "locations": [{"artifact": "code", "path": "Example.java", "line": 10}],
+        "sources": [{"path": "Example.java", "line": 10, "kind": "source_expression", "status": "fact"}],
+        "sinks": [{"path": "Example.java", "line": 20, "kind": "sink_call", "status": "fact"}],
+        "blocking_gaps": [],
+        "severity_hint": "medium",
+        "confidence_tier": "high",
+        "authorization_status": "unknown",
+        "guard_status": "unknown",
+        "dataflow_status": "not_proven",
+        "reachability_status": "reachable",
+        "deterministic_chain_verified": False,
+        "candidate_source": "explorer",
+        "explorer_candidate_id": "expl_aaaaaaaaaaaaaaaaaaaa",
+        "explorer_validation_status": "validated",
+    }
+    candidate.update(values)
+    return candidate
+
+
+def test_explorer_three_way_disposition_routing() -> None:
+    """A-10/A-14/N-2：promoted 进 L2 路由送 AI；partial/unverified 不送 AI。"""
+
+    candidates = [
+        _explorer_candidate(explorer_candidate_id="expl_promoted00000000000"),
+        _explorer_candidate(
+            explorer_candidate_id="expl_partial000000000000",
+            explorer_validation_status="partially_validated",
+            confidence_tier="medium",
+        ),
+        _explorer_candidate(
+            explorer_candidate_id="expl_unverified0000000000",
+            explorer_validation_status="unverified",
+            confidence_tier="low",
+        ),
+        _explorer_candidate(
+            explorer_candidate_id="expl_weird0000000000000",
+            explorer_validation_status="weird",  # N-2：未知档位保守 unverified
+        ),
+    ]
+    result = CandidateFunnel().process(candidates)
+
+    dispositions = [c["funnel_disposition"] for c in result.candidates]
+    assert dispositions == [
+        "explorer_promoted",
+        "explorer_partial",
+        "explorer_unverified",
+        "explorer_unverified",
+    ]
+    # promoted 与规则 L2 候选同等路由（deterministic_chain_verified≠True → 送 AI）
+    assert result.candidates[0]["ai_required"] is True
+    assert result.candidates[0]["ai_eligible"] is True
+    assert 0 in result.representative_indexes
+    # partial / unverified 不送 AI（不占 AI 预算）
+    for index in (1, 2, 3):
+        assert result.candidates[index]["ai_required"] is False
+        assert result.candidates[index]["ai_eligible"] is False
+        assert index not in result.representative_indexes
+    # A-14：summary 三档计数
+    assert result.summary["explorer_promoted"] == 1
+    assert result.summary["explorer_partial"] == 1
+    assert result.summary["explorer_unverified"] == 2
+
+
+def test_explorer_promoted_guard_blocked_skips_ai() -> None:
+    """A-7（funnel 侧）：guard_blocked 优先短路——确定性阻断不送 AI。"""
+
+    candidates = [_explorer_candidate(
+        explorer_candidate_id="expl_guard0000000000000",
+        guard_blocked=True,
+        guard_blocks=[{"type": "debuggable", "path": "Example.java", "line": 10, "method": "onCreate"}],
+    )]
+    result = CandidateFunnel().process(candidates)
+    assert result.candidates[0]["funnel_disposition"] == "explorer_promoted"
+    assert result.candidates[0]["ai_required"] is False
+    assert result.representative_indexes == []
+
+
+def test_identity_includes_candidate_source_no_cross_source_merge() -> None:
+    """A-11：candidate_source 进 facts 投影——探索候选与规则候选不跨源合并。"""
+
+    rule = _flow_candidate("dfc_aaaa")
+    explorer = _flow_candidate("dfc_aaaa")
+    explorer["candidate_source"] = "explorer"
+
+    rule_identity = build_candidate_identity(rule)
+    explorer_identity = build_candidate_identity(explorer)
+    assert rule_identity.deterministic_fact_hash != explorer_identity.deterministic_fact_hash, (
+        "candidate_source 必须参与 facts 投影（方案 §2.6 identity 含 source），"
+        "否则探索候选与规则候选错误共享 AI 复用结果"
+    )
+
+    result = CandidateFunnel().process([copy.deepcopy(rule), copy.deepcopy(explorer)])
+    assert result.summary["identity_group_count"] == 2
+
+
+def test_unknown_candidate_source_falls_back_to_rule_path() -> None:
+    """N-3：candidate_source 未知值走规则候选默认路径（deterministic_precheck）。"""
+
+    candidate = _explorer_candidate(
+        explorer_candidate_id="expl_unknownsrc000000000",
+        candidate_source="unknown",
+        explorer_validation_status=None,
+    )
+    # 规则路径：L2 + deterministic_chain_verified≠True → coverage_insufficient
+    result = CandidateFunnel().process([candidate])
+    assert result.candidates[0]["funnel_disposition"] == "coverage_insufficient"
+
+
+def test_related_candidate_ids_and_explorer_id_excluded_from_identity() -> None:
+    """A-12（identity 安全）：关联回填字段不参与身份——写回后 recompute 一致。"""
+
+    base = _flow_candidate("dfc_aaaa")
+    identity_before = build_candidate_identity(base)
+
+    written_back = copy.deepcopy(base)
+    written_back["related_candidate_ids"] = ["candidate_xxxxxxxxxxxxxxxxxx"]
+    written_back["explorer_candidate_id"] = "expl_bbbbbbbbbbbbbbbbbbbb"
+
+    identity_after = build_candidate_identity(written_back)
+    assert identity_after == identity_before, (
+        "related_candidate_ids / explorer_candidate_id 是 funnel 后写回的关联字段，"
+        "参与身份会导致 recompute 校验（_pipeline_identity_compatible）误判不一致，"
+        "阻断 AI 结果向组内成员传播"
+    )

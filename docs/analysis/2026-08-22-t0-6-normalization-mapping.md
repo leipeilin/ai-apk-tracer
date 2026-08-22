@@ -28,7 +28,7 @@
 
 ## 3. 非 required 字段
 
-- `title`：`"Explorer Candidate"`；`description`：`impact_proposal` 直通；`component_name`：`component.name`；
+- `title`：`"Explorer Candidate"`；`description`：**不写（留空）**——T2.7 评审 R-2 修订：切片 `_candidate_summary` 白名单含 description（context_builder.py:944），impact_proposal 直通会锚定 L2 复核（违背大纲 §2.5"独立裁决"）；归一化候选与规则候选同构留空，AI 完成后由 `_apply_ai_analysis` 回填 summary；`component_name`：`component.name`；
 - `entry_points`：`[component.name]`；`entry_method_id`：`component.entry_method`；
 - `authorization_status`：`"unknown"`；`dataflow_status`：`"not_proven"`；`guard_status`：`"unknown"`；`reachability_status`：`exported=True→reachable`、`False→conditional`；
 - `analysis_status`：`"explorer_only"`；`deterministic_chain_verified`：`False`；
@@ -39,7 +39,7 @@
 
 | 条件 | 产物 gap |
 |---|---|
-| `validation.notes` 非空 | `{"code":"EXPLORER_CHAIN_INCOMPLETE","message":notes,"critical":false,"evidence_refs":[]}` |
+| `validation.notes` 非空**且非纯成功摘要**（T2.7 评审 R-4 修订：T2.6 实现中 validated 候选 notes 恒非空（"N/N 跳回查通过"），纯成功摘要不产 gap；仅 status != validated 的缺口说明或 notes 含异常语义时产出） | `{"code":"EXPLORER_CHAIN_INCOMPLETE","message":notes,"critical":false,"evidence_refs":[]}` |
 | `failed_hop_indices` 每条 i | `{"code":"EXPLORER_HOP_UNVERIFIED","message":"第 i 跳未通过 call_sites 回查","critical":false,"evidence_refs":[]}` |
 | `custom_sink_proposal=True` | `{"code":"CUSTOM_SINK_PROPOSAL","message":"sink 未命中 taxonomy，待人工确认","critical":false,"evidence_refs":[]}` |
 | `blocked_by_guard=True` | `{"code":"EXPLORER_GUARD_BLOCKED","message":"被 Guard/授权确定性阻断","critical":true,"evidence_refs":[]}` |

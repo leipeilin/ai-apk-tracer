@@ -285,7 +285,7 @@ class MainActivity {
 def test_broadcast_sender_sdk_dead_code_refuted(tmp_path: Path) -> None:
     """S2：SDK 包发送方无 manifest 入口可达 → sender_reachable=False + sdk_dead_code，funnel 反证。"""
 
-    from app.analysis.candidate_funnel import CandidateFunnel, deterministic_precheck
+    from app.analysis.candidate_funnel import CandidateFunnel
 
     activity = _component("activity", "com.example.MainActivity")
     descriptor, payload = _indexed_payload(tmp_path, {

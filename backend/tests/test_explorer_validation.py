@@ -128,7 +128,6 @@ def test_validated_full_hops(tmp_path: Path) -> None:
     ids = _method_ids(reader)
     a = ids[("com.example.A", "entry")]
     b = ids[("com.example.B", "run")]
-    c = ids[("com.example.C", "write")]
     ab_to, ab_line = _call_site(reader, a)
     bc_to, bc_line = _call_site(reader, b)
 

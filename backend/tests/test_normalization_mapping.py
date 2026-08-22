@@ -1,8 +1,9 @@
 """ExplorerCandidate → Candidate 归一化映射表可执行断言（T0.6）。
 
 映射表规范见 docs/analysis/2026-08-22-t0-6-normalization-mapping.md；
-本文件固化 MAPPING / SEVERITY_KEYWORDS 作为可执行契约（防双源漂移），
-T2.7 归一化实现须满足这些断言。
+本文件固化 MAPPING 作为可执行契约（防双源漂移），T2.7 归一化实现须满足
+这些断言。SEVERITY_KEYWORDS 单一事实源在生产模块 explorer_normalization
+（T2.7 评审 R-5：生产代码不得 import 测试模块——依赖方向为测试→生产）。
 """
 
 import json
@@ -14,6 +15,10 @@ from app.analysis.ai_models import (
     ExplorerCandidate,
     ExplorerCandidateComponent,
     ExplorerCandidateValidation,
+)
+from app.analysis.explorer_normalization import (
+    SEVERITY_KEYWORDS,
+    severity_hint_for_impact,
 )
 
 SCHEMAS_DIR = Path(__file__).resolve().parents[2] / "schemas"
@@ -55,11 +60,19 @@ MAPPING: dict[str, dict] = {
     },
 }
 
-SEVERITY_KEYWORDS: list[tuple[list[str], str]] = [
-    (["任意", "远程", "执行", "泄露", "敏感", "提权", "注入"], "high"),
-    (["拒绝服务", "越权", "绕过", "数据"], "medium"),
-    (["信息", "提示", "低风险", "暴露"], "low"),
-]
+def _severity_for_impact(impact_proposal: str) -> str:
+    """关键词启发式（映射表 §5）——直通生产实现（单一事实源，评审 R-5）。"""
+    return severity_hint_for_impact(impact_proposal)
+
+
+def test_severity_keywords_single_source() -> None:
+    # 评审 R-5：常量事实源在生产模块；本断言固化文档 §5 表与生产常量一致
+    # （防文档/生产双源漂移；本测试文件不得再定义同名常量）。
+    assert SEVERITY_KEYWORDS == [
+        (["任意", "远程", "执行", "泄露", "敏感", "提权", "注入"], "high"),
+        (["拒绝服务", "越权", "绕过", "数据"], "medium"),
+        (["信息", "提示", "低风险", "暴露"], "low"),
+    ]
 
 _NESTED_MODELS = {
     "chain_proposal": ChainProposal,
@@ -71,15 +84,6 @@ _NESTED_MODELS = {
 def _load_candidate_schema() -> dict:
     with (SCHEMAS_DIR / "candidate.schema.json").open(encoding="utf-8") as fp:
         return json.load(fp)
-
-
-def _severity_for_impact(impact_proposal: str) -> str:
-    """关键词启发式（映射表 §5）：按行序首个命中返回；未命中默认 medium；初始档封顶 high。"""
-    text = impact_proposal.lower()
-    for keywords, level in SEVERITY_KEYWORDS:
-        if any(keyword in text for keyword in keywords):
-            return level
-    return "medium"
 
 
 def _method_id_parts(method_id: str) -> tuple[str, str | None]:

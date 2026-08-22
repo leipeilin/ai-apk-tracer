@@ -40,7 +40,11 @@
     "sources": {"type": "array"},
     "sinks": {"type": "array"},
     "blocking_gaps": {"type": "array"},
-    "auxiliary": {"type": "boolean"}
+    "auxiliary": {"type": "boolean"},
+    "candidate_source": {
+      "enum": ["rule", "explorer", "manual"],
+      "description": "候选来源：rule=规则引擎（默认，缺省等价）、explorer=探索轨（T2.7 归一化）、manual=人工导入（预留）"
+    }
   },
   "additionalProperties": true
 }
