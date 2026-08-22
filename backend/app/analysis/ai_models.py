@@ -555,7 +555,7 @@ class VerifyOutput(StrictAIModel):
 class RepairInput(StrictAIModel):
     """只携带无效输出与校验错误的格式修复输入。"""
 
-    target_output_model: Literal["PreflightOutput", "L1TriageOutput", "L2ReviewOutput", "FinalizationOutput"] = Field(description="必须恢复到的严格输出模型名称")
+    target_output_model: Literal["PreflightOutput", "L1TriageOutput", "L2ReviewOutput", "FinalizationOutput", "DeepDiveOutput", "ExplorerObservation", "VerifyOutput"] = Field(description="必须恢复到的严格输出模型名称")
     invalid_output: JsonValue = Field(description="待做格式修复的原始解析结果；不得据此重新分析事实")
     validation_errors: list[LongText] = Field(min_length=1, max_length=64, description="目标模型校验失败的精简错误列表")
     output_schema_sha256: Sha256 = Field(description="目标输出 Schema 原始字节的 SHA-256")
@@ -669,6 +669,7 @@ AI_OUTPUT_MODEL_REGISTRY: dict[str, type[StrictAIModel]] = {
         RepairOutput,
         FinalizationOutput,
         DeepDiveOutput,
+        ExplorerObservation,
         VerifyOutput,
     )
 }

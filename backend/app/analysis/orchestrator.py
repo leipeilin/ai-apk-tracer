@@ -274,6 +274,12 @@ class ScanOrchestrator:
         )
         propagate_representative_analysis(candidates)
 
+        # 探索轨（T2.5b，方案 §2.4）：AI 阶段后独立运行——候选只落盘
+        # run_dir/explorer/（T2.7 归一化后入 funnel）；默认关闭
+        if self.settings.explorer.enabled:
+            self._stage(run_id, "explorer")
+            await self._run_explorer_stage(run_id, run_dir, code_index)
+
         if context_builder:
             context_builder.close()
         coverage_gaps = _finalize_run_coverage(
@@ -878,6 +884,62 @@ class ScanOrchestrator:
                 }
             previous_analysis = analysis
             current_slice = expanded_slice
+
+    async def _run_explorer_stage(
+        self, run_id: str, run_dir: Path, code_index: dict[str, Any] | None
+    ) -> None:
+        """探索轨阶段（T2.5b）：入口遍历 → 受控检索循环 → 候选落盘。
+
+        ai_call 回调经 run 级 AI 预算包装（评审 R-1：直调 analyzer 会绕过
+        max_requests_per_run 计费）；stage summary 分记 ai_requests_used /
+        read_requests_used（与 ai_analysis 的 requests_used 区分语义）。
+        """
+
+        from app.analysis.call_tree import CallTreeService
+        from app.analysis.explorer import ExplorerOrchestrator
+
+        budget = self.settings.context_budget
+        explorer_settings = self.settings.explorer
+
+        async def budgeted_ai_call(model_input: Any) -> dict[str, Any]:
+            async with self._ai_budget_lock:
+                if self._ai_requests_used >= budget.max_requests_per_run:
+                    return {"status": "skipped", "circuit_breaking": True,
+                            "metadata": {"reason": "run_request_budget_exhausted"}}
+                self._ai_requests_used += 1
+            return await self.ai.explore_entry(model_input)
+
+        reader = None
+        database_path = str((code_index or {}).get("database_path") or "")
+        if database_path and Path(database_path).is_file():
+            reader = SQLiteCodeIndexReader(code_index or {})
+        try:
+            call_tree = CallTreeService(run_dir, reader, explorer_settings.call_tree)
+            entries = call_tree.get_entry_points()
+            effective = [entry for entry in entries if entry.get("method_id")]
+            degraded = bool(entries) and not effective and entries[0].get("degraded")
+            orchestrator = ExplorerOrchestrator(
+                budgeted_ai_call, call_tree, explorer_settings, run_dir
+            )
+            candidates = await orchestrator.explore_all(effective)
+        finally:
+            if reader is not None:
+                reader.close()
+
+        run_manifest = self.storage.read_manifest(run_id)
+        run_manifest.setdefault("artifacts", []).append({
+            "type": "explorer_candidates",
+            "path": "explorer/candidates.json",
+            "candidate_count": len(candidates),
+        })
+        self.storage.write_manifest(run_id, run_manifest)
+        self._record_stage(run_id, "explorer", "completed", {
+            "entry_count": len(effective),
+            "candidate_count": len(candidates),
+            "ai_requests_used": orchestrator.ai_requests_used,
+            "read_requests_used": orchestrator.read_requests_used,
+            "degraded_entry_table": degraded,
+        })
 
     async def _budgeted_ai_call(
         self,

@@ -21,7 +21,10 @@
         "PreflightOutput",
         "L1TriageOutput",
         "L2ReviewOutput",
-        "FinalizationOutput"
+        "FinalizationOutput",
+        "DeepDiveOutput",
+        "ExplorerObservation",
+        "VerifyOutput"
       ],
       "title": "Target Output Model",
       "type": "string"

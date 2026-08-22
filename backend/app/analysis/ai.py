@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
+import asyncio  # noqa: F401 - 测试 monkeypatch 挂载点（ai_module.asyncio.sleep）
 import hashlib
 import json
 import os
-import random
+import random  # noqa: F401 - 测试 monkeypatch 挂载点（ai_module.random.uniform）
 import time
 from typing import Any
 
@@ -17,6 +17,8 @@ from app.analysis.ai_cache import AICacheStore, build_cache_descriptor, build_ca
 from app.analysis.ai_models import (
     AI_OUTPUT_MODEL_VERSIONS,
     DeterministicSemanticBundle,
+    ExplorerInput,
+    ExplorerObservation,
     FinalizationInput,
     FinalizationOutput,
     L1TriageInput,
@@ -30,9 +32,16 @@ from app.analysis.ai_models import (
     StrictAIModel,
 )
 from app.analysis.ai_scheduler import TaskCircuit
-from app.analysis.ai_transport import AITransport, AITransportResult, retry_after_seconds
-from app.analysis.prompt_registry import PromptRegistry, PromptRegistryError, RenderedPrompt
-
+from app.analysis.ai_transport import (
+    AITransport,
+    AITransportResult,
+    retry_after_seconds,
+)
+from app.analysis.prompt_registry import (
+    PromptRegistry,
+    PromptRegistryError,
+    RenderedPrompt,
+)
 
 _DEFAULT_MAX_REQUEST_BYTES = 524288  # 512 KiB
 _DEFAULT_PROVIDER_MAX_IN_FLIGHT = 4
@@ -418,6 +427,26 @@ class OpenAICompatibleAnalyzer:
                 L2ReviewOutput.model_validate(result["analysis"])
             )
         return result
+
+    async def explore_entry(self, model_input: ExplorerInput) -> dict[str, Any]:
+        """使用严格 ExplorerInput/ExplorerObservation 执行单轮探索（T2.5b）。
+
+        model_input 由驱动层（ExplorerOrchestrator）构造——上下文累积是驱动
+        职责；本方法只执行协议（复用 render→cache→budget→transport→
+        strict-parse→repair 状态机；评审 R-3：ExplorerObservation 无
+        analysis_complete/evidence_refs——缓存判据恒 no-op，属预期放弃缓存）。
+        """
+
+        unavailable = self._analysis_unavailable_result()
+        if unavailable is not None:
+            return unavailable
+        return await self._invoke_prompt(
+            "explorer",
+            "1.0.0",
+            model_input,
+            ExplorerObservation,
+            "explorer",
+        )
 
     async def _invoke_prompt(
         self,
