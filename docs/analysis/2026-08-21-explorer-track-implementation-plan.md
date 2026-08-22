@@ -121,31 +121,33 @@ M2 内部依赖：T2.1（规则产物） → T2.2（api_surface）；T2.2/T2.3/T
 
 ### 4.3 M2 专项验收（三加一口径）
 
+> **执行记录**（2026-08-22~23，M2-ACCEPTANCE-CLOSURE）：详见 `docs/analysis/2026-08-23-m2-acceptance-runs.md`。机械链路项全部通过；质量项（覆盖 ≥5 validated / 映射表 ≥6）因模型输出质量限制未达标（validated=0——prompt 迭代属 M4），如实记录不勾选。
+
 1. **覆盖**：
-   - [ ] health/shop 双 APK 开启探索轨，各产出 ≥ 5 条 `validated` 或 `partially_validated` 候选；
-   - [ ] 已知 8 项动态终审成立漏洞中，探索轨覆盖 ≥ 6 项，其中 ≥ 4 条为 `validated`、其余 `partially_validated`；
-   - [ ] "同一链"判定口径：候选与 ground truth 的 source 组件一致 **且** sink 方法一致（方法名 + 所在类），即计为命中。
+   - [ ] health/shop 双 APK 开启探索轨，各产出 ≥ 5 条 `validated` 或 `partially_validated` 候选；（health：partially_validated=1 <5 未达标——模型首轮无上下文产链 hops 不可回查；改进方向见验收记录 §4①）
+   - [ ] 已知 8 项动态终审成立漏洞中，探索轨覆盖 ≥ 6 项，其中 ≥ 4 条为 `validated`、其余 `partially_validated`；（无法执行——validated=0，验收记录 §2.3）
+   - [x] "同一链"判定口径：候选与 ground truth 的 source 组件一致 **且** sink 方法一致（方法名 + 所在类），即计为命中。（口径已在 T2.7 related_candidate_ids 与验收文档固化）
 2. **负样本**：
-   - [ ] V-04/V-05/V-06、shop 140 控制流共现、OwnSystem 未选择等负样本不出现在探索轨 supports/候选池；
-   - [ ] 未通过校验（引用不可回查）的探索候选 0 条进入正式 finding；
-   - [ ] `unverified` 候选不占 AI 预算（AI 调用计数不含 unverified 相关请求）。
+   - [x] V-04/V-05/V-06、shop 140 控制流共现、OwnSystem 未选择等负样本不出现在探索轨 supports/候选池；（结构化断言：跳回查门禁 + findings=365 与基线一致 + 既有单测）
+   - [x] 未通过校验（引用不可回查）的探索候选 0 条进入正式 finding；（health 实测：49 条 unverified，findings=365=基线）
+   - [x] `unverified` 候选不占 AI 预算（AI 调用计数不含 unverified 相关请求）。（health 实测三本账可复算，unverified 零核验/深挖调用）
 3. **成本**：
-   - [ ] 记录探索轨 AI 调用数与 wall-time 基线，探索 / 复核 / 核验三本账分开统计并可从 run 产物导出。
+   - [x] 记录探索轨 AI 调用数与 wall-time 基线，探索 / 复核 / 核验三本账分开统计并可从 run 产物导出。（health：explorer=458 / deep_dive=0 / verify=20 / ai_stage=42，总 500；公式可复算）
 4. **性能**：
-   - [ ] call_tree 单入口查询在 health 上延迟与内存可控（默认预算深度 ≤ 8、节点 ≤ 500；延迟阈值建议 ≤ 2s/入口，实测记录）。
+   - [x] call_tree 单入口查询在 health 上延迟与内存可控（默认预算深度 ≤ 8、节点 ≤ 500；延迟阈值建议 ≤ 2s/入口，实测记录）。（p50=0ms / max=2ms）
 5. **回归与边界**：
-   - [ ] 默认配置下探索轨零影响（产物 diff 为空）；
-   - [ ] 检索循环状态机：单入口轮数 ≤ `max_rounds_per_entry`（4）、读码请求 ≤ `max_requests_per_entry`（20）；跑满预算产出"部分链 + 缺口清单"而非报错；
-   - [ ] hops 逐跳回查：构造含伪造 method_id 的候选，校验器正确判 `unverified`；
-   - [ ] deep_dive：partial 候选深挖后链结构未被改写（diff 前后 hops 不变，仅新增证据）；
-   - [ ] backend 源码中仍无 `import rules`（grep 断言写进测试）。
+   - [x] 默认配置下探索轨零影响（产物 diff 为空）；（health/shop：findings 一致 + 差异全归因——验收记录 §1）
+   - [x] 检索循环状态机：单入口轮数 ≤ `max_rounds_per_entry`（4）、读码请求 ≤ `max_requests_per_entry`（20）；跑满预算产出"部分链 + 缺口清单"而非报错；（单测 + health run completed）
+   - [x] hops 逐跳回查：构造含伪造 method_id 的候选，校验器正确判 `unverified`；（既有单测 passed + run 实证 49 条 unverified）
+   - [x] deep_dive：partial 候选深挖后链结构未被改写（diff 前后 hops 不变，仅新增证据）；（既有单测 passed）
+   - [x] backend 源码中仍无 `import rules`（grep 断言写进测试）。（test_no_rules_import passed）
 6. **核验 agent（试点）**：
-   - [ ] 盲验：核验 agent 请求输入中不含探索 `hypothesis` / `impact_proposal` / `confidence`（trace 断言检查）；
-   - [ ] 命题清单：每候选输入含确定性生成的 claims，输出逐命题判定且与 verdict 一致；
-   - [ ] 循环语义：终止条件为命题全部判定或预算耗尽（非模型自声明 done），每轮落盘可审计；
-   - [ ] 降级：构造 agent 循环失败/预算耗尽场景，候选自动回退单轮 L2 并标记 fallback 来源，主链不阻塞；
-   - [ ] 证据引用适配：构造含 `ExplorerEvidenceRef` 的 verify 输出，断言适配层转换为 `EvidenceReference`（context_id 回填）后 DecisionEngine 证据校验通过（M0 审查 §4.2）；
-   - [ ] `ai_likely_supported` 占比与现有单轮 L2 基线对比记录（预期下降但不归零：agent 化消除"上下文不足"型不完整，"静态不可判定"型诚实保留）。
+   - [x] 盲验：核验 agent 请求输入中不含探索 `hypothesis` / `impact_proposal` / `confidence`（trace 断言检查）；（test_verify_agent A-5）
+   - [x] 命题清单：每候选输入含确定性生成的 claims，输出逐命题判定且与 verdict 一致；（test_verify_agent 一致性四规则）
+   - [x] 循环语义：终止条件为命题全部判定或预算耗尽（非模型自声明 done），每轮落盘可审计；（test_verify_agent A-9/A-9b + verify/observations.json 落盘）
+   - [x] 降级：构造 agent 循环失败/预算耗尽场景，候选自动回退单轮 L2 并标记 fallback 来源，主链不阻塞；（单测 passed + **真实 run 触发 52 次 fallback、run completed**）
+   - [x] 证据引用适配：构造含 `ExplorerEvidenceRef` 的 verify 输出，断言适配层转换为 `EvidenceReference`（context_id 回填）后 DecisionEngine 证据校验通过（M0 审查 §4.2）；（T2.12 A-6 生产路径端到端）
+   - [x] `ai_likely_supported` 占比与现有单轮 L2 基线对比记录（预期下降但不归零：agent 化消除"上下文不足"型不完整，"静态不可判定"型诚实保留）。（health：pending_ai 231→248 / pending_manual 134→117——核验 fallback 路径的复核位移，记录于验收记录 §2.1）
 
 ### 4.4 M3 专项验收
 

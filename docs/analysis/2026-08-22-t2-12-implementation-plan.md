@@ -248,4 +248,4 @@ async def _verify_candidate(candidate, slice_document, run_dir, code_index,
 ## 4. 依赖
 
 - 前置任务：T2.11（VerifyAgent/adapt 输入）、T2.7（预算共享池/归一化候选）、M0 审查 §4.2（适配层需求）
-- 交接 M2 验收：探索轨三加一验收（§4.3 全量）含核验 agent 四条试点验收点（盲验 trace 断言/命题一致性/循环语义/降级回退——T2.11 已实测前三，本任务实测降级回退）
+- 交接 M2 验收：探索轨三加一验收（§4.3 全量）含核验 agent 四条试点验收点（盲验 trace 断言/命题一致性/循环语义/降级回退——T2.11 已实测前三，本任务实测降级回退）——**已由 M2-ACCEPTANCE-CLOSURE 执行**（2026-08-23，见 `2026-08-23-m2-acceptance-runs.md`：降级回退真实 run 触发 52 次 fallback 主链不阻塞 ✓；R-5 的 fallback 成功率实测 = 0%（52/52 fallback——模型输出合规率问题，移交 M4 prompt 迭代））
