@@ -399,11 +399,21 @@ public class C {
 
 
 class FakeExploreAI:
-    """explore_entry 协议替身：按轮次弹出 Observation（done/proposals 可控）。"""
+    """explore_entry 协议替身：按轮次弹出 Observation（done/proposals 可控）。
 
-    def __init__(self, rounds: list[dict[str, Any]] | None = None, proposal: dict[str, Any] | None = None):
+    T2.8：兼作 deep_dive_entry 替身（dive_rounds 队列——集成测试用）。
+    """
+
+    def __init__(
+        self,
+        rounds: list[dict[str, Any]] | None = None,
+        proposal: dict[str, Any] | None = None,
+        dive_rounds: list[dict[str, Any]] | None = None,
+    ):
         self._rounds = list(rounds or [{"done": True, "proposals": [proposal] if proposal else []}])
+        self._dive_rounds = list(dive_rounds or [{"complete": True, "facts": []}])
         self.calls = 0
+        self.dive_calls = 0
 
     async def explore_entry(self, model_input: Any) -> dict[str, Any]:
         self.calls += 1
@@ -418,6 +428,24 @@ class FakeExploreAI:
                     "exported": True, "summary": "入口 Activity 分发处理",
                 },
                 "loop": {"done": spec.get("done", True), "reason": "测试"},
+            },
+            "metadata": {"prompt_version": "1.0.0", "model": "test-model"},
+        }
+
+    async def deep_dive_entry(self, model_input: Any) -> dict[str, Any]:
+        self.dive_calls += 1
+        spec = self._dive_rounds.pop(0) if self._dive_rounds else {"complete": True, "facts": []}
+        if spec.get("fail"):
+            return {"status": spec["fail"], "circuit_breaking": spec.get("circuit", False),
+                    "metadata": {}}
+        return {
+            "status": "completed",
+            "analysis": {
+                "summary": spec.get("summary", "深挖完成"),
+                "resolved_facts": spec.get("facts", []),
+                "evidence_refs": spec.get("evidence", []),
+                "remaining_gaps": spec.get("gaps", []),
+                "analysis_complete": spec.get("complete", True),
             },
             "metadata": {"prompt_version": "1.0.0", "model": "test-model"},
         }
@@ -542,6 +570,57 @@ def test_explorer_stage_normalizes_validated_into_main_candidates(tmp_path: Path
     assert summary["ai_requests_used"] == 1
 
 
+def _real_partial_proposal(descriptor: dict[str, Any]) -> dict[str, Any]:
+    """partial 链提案：第二跳行号 99（回查必失败）→ partially_validated。"""
+
+    proposal = _real_proposal(descriptor)
+    proposal["hops"][1]["call_site_line"] = 99
+    return proposal
+
+
+def test_explorer_stage_deep_dive_integration(tmp_path: Path) -> None:
+    """A-13~A-15：阶段集成——深挖计数/链不变/归一化隔离/预算分账。"""
+
+    orchestrator, storage, run_id, run_dir, descriptor = _instance_orchestrator(tmp_path)
+    orchestrator.ai = FakeExploreAI(
+        proposal=_real_partial_proposal(descriptor),
+        dive_rounds=[{
+            "complete": True,
+            "facts": [{"claim_index": 0, "conclusion": "confirmed",
+                       "reasoning": "调用边存在",
+                       "evidence": [{"path": "com/example/B.java", "line": 4}]}],
+            "evidence": [{"path": "com/example/B.java", "line": 4}],
+        }],
+    )
+
+    normalized = asyncio_run(
+        orchestrator._run_explorer_stage(
+            run_id, run_dir, {"debuggable": False, "target_sdk": 36}, descriptor
+        )
+    )
+
+    # A-14（D1）：深挖 completed 也不升级不归一化——partial 不进主链
+    assert normalized == []
+    manifest = storage.read_manifest(run_id)
+    stage = next(s for s in manifest["stages"] if s["name"] == "explorer")
+    summary = stage["summary"]
+    # A-13：validation_counts 不因深挖变化（三档是跳回查确定性结论）
+    assert summary["validation_counts"] == {
+        "validated": 0, "partially_validated": 1, "unverified": 0,
+    }
+    assert summary["deep_dive_counts"]["partial_total"] == 1
+    assert summary["deep_dive_counts"]["completed"] == 1
+    assert summary["deep_dive_requests_used"] == 1
+    # A-13：candidates.json 原始形状含 deep_dive；validation 保持 partial
+    raw = json.loads((run_dir / "explorer" / "candidates.json").read_text("utf-8"))
+    assert raw[0]["validation"]["status"] == "partially_validated"
+    assert raw[0]["deep_dive"]["status"] == "completed"
+    assert raw[0]["deep_dive"]["resolved_facts"][0]["conclusion"] == "confirmed"
+    assert raw[0]["chain_proposal"]["hops"][1]["call_site_line"] == 99  # 链不可变
+    # A-15：run 级共享池——探索 1 + 深挖 1
+    assert orchestrator._ai_requests_used == 2
+
+
 def test_explorer_stage_budget_shared_with_ai_stage(tmp_path: Path) -> None:
     """A-18（评审 R-1）：探索与规则 AI 共享同一 run 级预算池——AI 阶段早退
     summary 的 requests_used 为 run 累计口径（探索消耗不因阶段切换归零）。"""
@@ -590,3 +669,522 @@ def test_explorer_stage_budget_cap_rejects_beyond_limit(tmp_path: Path) -> None:
     manifest = storage.read_manifest(run_id)
     stage = next(s for s in manifest["stages"] if s["name"] == "explorer")
     assert stage["summary"]["candidate_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# T2.8：explorer_deep_dive（partial 候选深挖——补齐事实，禁止改写链）
+# ---------------------------------------------------------------------------
+
+
+def _index_reader(tmp_path: Path) -> SQLiteCodeIndexReader:
+    source_root = tmp_path / "sources"
+    for relative, content in _CHAIN_SOURCE.items():
+        path = source_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, "utf-8")
+    descriptor = build_code_index(source_root, tmp_path / "index" / "code-index.json")
+    return SQLiteCodeIndexReader(descriptor)
+
+
+def _real_hops(call_tree: CallTreeService) -> list[dict[str, Any]]:
+    """A.entry → B.run（真实行号）+ B.run → C.write（行号 99——回查必失败）。"""
+
+    a = _method_id(call_tree, "com.example.A", "entry")
+    b = _method_id(call_tree, "com.example.B", "run")
+    c = _method_id(call_tree, "com.example.C", "write")
+    row = call_tree._reader.db.execute(
+        "SELECT start_line FROM call_sites WHERE method_id = ? AND resolve_status = 'resolved' LIMIT 1",
+        (a,),
+    ).fetchone()
+    assert row is not None
+    return [
+        {"from_method_id": a, "to_method_id": b, "call_site_line": int(row["start_line"]),
+         "resolved_via": "direct_call"},
+        {"from_method_id": b, "to_method_id": c, "call_site_line": 99,
+         "resolved_via": "direct_call"},
+    ]
+
+
+def _partial_candidate(
+    hops: list[dict[str, Any]], *, candidate_id: str = "expl_" + "b" * 20,
+    evidence_refs: list[dict] | None = None,
+    validation: dict | None | str = "__default__",
+) -> dict[str, Any]:
+    resolved_validation: dict | None
+    if validation == "__default__":
+        resolved_validation = {
+            "status": "partially_validated", "verified_hop_count": 1,
+            "failed_hop_indices": [1], "blocked_by_guard": False,
+            "custom_sink_proposal": False, "notes": "1/2 跳回查通过；失败跳 [1]",
+        }
+    else:
+        resolved_validation = validation  # type: ignore[assignment]
+    return {
+        "schema_version": "1.0.0",
+        "candidate_id": candidate_id,
+        "source": "explorer_agent",
+        "prompt_version": "explorer/1.0.0",
+        "model": "test-model",
+        "component": {"kind": "activity", "name": "com.example.A", "exported": True,
+                      "entry_method": "entry"},
+        "api_entry_ref": "act_com_example_A_entry",
+        "chain_proposal": {
+            "source": "A.entry(input)", "sink": "C.write(value)", "hops": hops,
+            "confidence": "medium", "hypothesis": "possible",
+            "impact_proposal": "外部输入流向写入", "reasoning": "调用链",
+            "evidence_refs": evidence_refs or [],
+        },
+        "validation": resolved_validation,
+        "deep_dive": None,
+    }
+
+
+class FakeDeepDiveAI:
+    """deep_dive_entry 协议替身：按轮次弹出 DeepDiveOutput spec（捕获输入）。"""
+
+    def __init__(self, rounds: list[dict[str, Any]] | None = None):
+        self._rounds = list(rounds or [{"complete": True, "facts": []}])
+        self.inputs: list[Any] = []
+        self.calls = 0
+
+    async def __call__(self, model_input: Any) -> dict[str, Any]:
+        self.calls += 1
+        self.inputs.append(model_input)
+        spec = self._rounds.pop(0) if self._rounds else {"complete": True, "facts": []}
+        if spec.get("fail"):
+            return {
+                "status": spec["fail"],
+                "circuit_breaking": spec.get("circuit", False),
+                "metadata": {},
+            }
+        return {
+            "status": "completed",
+            "analysis": {
+                "summary": spec.get("summary", "深挖一轮"),
+                "resolved_facts": spec.get("facts", []),
+                "evidence_refs": spec.get("evidence", []),
+                "remaining_gaps": spec.get("gaps", []),
+                "analysis_complete": spec.get("complete", True),
+            },
+            "metadata": {"prompt_version": "1.0.0", "model": "test-model"},
+        }
+
+
+def _dive_orchestrator(
+    tmp_path: Path, fake: FakeDeepDiveAI, **settings: Any
+) -> tuple[ExplorerOrchestrator, SQLiteCodeIndexReader]:
+    call_tree = _service(tmp_path)
+    reader = _index_reader(tmp_path)
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(**settings), tmp_path, deep_dive_call=fake
+    )
+    return orchestrator, reader
+
+
+def _evidence_key(ref: dict[str, Any]) -> tuple:
+    return (ref.get("path"), ref.get("line"), ref.get("end_line"))
+
+
+def test_deep_dive_entry_invokes_prompt(tmp_path: Path) -> None:
+    """A-1：协议入口以 (explorer-deep-dive, 1.0.0, DeepDiveInput, DeepDiveOutput) 调状态机。"""
+
+    from unittest.mock import AsyncMock, patch
+
+    from app.analysis.ai_models import DeepDiveInput
+    from app.analysis.ai_runtime import AIRuntime
+    from app.config import AISettings
+
+    analyzer = AIRuntime(AISettings()).create_analyzer(
+        cache_dir=tmp_path, max_output_tokens=100, budget_policy={}
+    )
+    model_input = DeepDiveInput.model_validate({
+        "candidate_id": "expl_" + "c" * 20,
+        "chain_proposal": _proposal(),
+    })
+    invoke = AsyncMock(return_value={"status": "completed", "analysis": {
+        "summary": "s", "analysis_complete": True}})
+    with (
+        patch.object(analyzer, "_analysis_unavailable_result", return_value=None),
+        patch.object(analyzer, "_invoke_prompt", invoke),
+    ):
+        result = asyncio_run(analyzer.deep_dive_entry(model_input))
+    assert result["status"] == "completed"
+    invoke.assert_awaited_once()
+    args = invoke.await_args.args
+    assert args[0] == "explorer-deep-dive"
+    assert args[1] == "1.0.0"
+    assert args[2] is model_input
+    assert args[3].__name__ == "DeepDiveOutput"
+    assert args[4] == "explorer-deep-dive"
+
+
+def test_deep_dive_only_partials(tmp_path: Path) -> None:
+    """A-2：仅 partially_validated 候选送深挖。"""
+
+    call_tree = _service(tmp_path)
+    hops = _real_hops(call_tree)
+    fake = FakeDeepDiveAI([{"complete": True, "facts": []}])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+    candidates = [
+        _partial_candidate(hops, candidate_id="expl_" + "p" * 20),
+        _partial_candidate(hops, candidate_id="expl_" + "v" * 20, validation={
+            "status": "validated", "verified_hop_count": 2, "failed_hop_indices": [],
+            "blocked_by_guard": False, "custom_sink_proposal": False, "notes": "2/2"}),
+        _partial_candidate(hops, candidate_id="expl_" + "u" * 20, validation={
+            "status": "unverified", "verified_hop_count": 0, "failed_hop_indices": [0, 1],
+            "blocked_by_guard": False, "custom_sink_proposal": False, "notes": "跳均不可回查"}),
+        _partial_candidate(hops, candidate_id="expl_" + "n" * 20, validation=None),
+    ]
+
+    counts = asyncio_run(orchestrator.deep_dive_partials(candidates, reader))
+
+    assert counts["partial_total"] == 1
+    assert counts["attempted"] is True
+    assert candidates[0]["deep_dive"]["status"] == "completed"
+    assert candidates[1]["deep_dive"] is None
+    assert candidates[2]["deep_dive"] is None
+    assert candidates[3]["deep_dive"] is None
+    assert fake.calls == 1
+
+
+def test_deep_dive_preserves_chain_and_validation(tmp_path: Path) -> None:
+    """A-3（M2 验收 4.3-5.4）：深挖后链与三档逐字节不变，仅新增 deep_dive。"""
+
+    call_tree = _service(tmp_path)
+    hops = _real_hops(call_tree)
+    candidate = _partial_candidate(hops)
+    before_chain = json.dumps(candidate["chain_proposal"], sort_keys=True)
+    before_validation = json.dumps(candidate["validation"], sort_keys=True)
+    fake = FakeDeepDiveAI([{
+        "complete": True,
+        "facts": [{"claim_index": 0, "conclusion": "confirmed", "reasoning": "调用边存在",
+                   "evidence": [{"path": "com/example/B.java", "line": 4}]}],
+        "evidence": [{"path": "com/example/B.java", "line": 4}],
+    }])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    assert json.dumps(candidate["chain_proposal"], sort_keys=True) == before_chain
+    assert json.dumps(candidate["validation"], sort_keys=True) == before_validation
+    assert candidate["deep_dive"] is not None  # 仅新增 deep_dive 字段
+
+
+def test_deep_dive_missing_facts_deterministic(tmp_path: Path) -> None:
+    """A-4/N-2：missing_facts 从校验缺口确定性生成；越界索引不生成。"""
+
+    call_tree = _service(tmp_path)
+    hops = _real_hops(call_tree)
+    candidate = _partial_candidate(hops)
+    candidate["validation"]["failed_hop_indices"] = [1, 7]  # 7 越界
+    candidate["validation"]["blocked_by_guard"] = True
+    fake = FakeDeepDiveAI([{"complete": True, "facts": []}])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    facts = fake.inputs[0].missing_facts
+    assert len(facts) == 2
+    assert "第 1 跳调用关系待证实" in facts[0]
+    assert hops[1]["to_method_id"] in facts[0]
+    assert "debuggable guard" in facts[1]
+
+
+def test_deep_dive_code_context_and_gate(tmp_path: Path) -> None:
+    """A-5/N-7：失败跳方法体进入 context；门禁关闭不外发；缺失方法体跳过。"""
+
+    call_tree = _service(tmp_path)
+    hops = _real_hops(call_tree)
+    hops[1]["to_method_id"] = "sources/com/example/Missing.java#gone:1"  # N-7 缺失
+    candidate = _partial_candidate(hops)
+    fake = FakeDeepDiveAI([{"complete": True, "facts": []}])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    context = fake.inputs[0].code_context
+    assert context is not None
+    # 失败跳（index=1）的 from 方法体（com.example.B.run）；to=Missing 跳过（N-7）
+    assert "com.example.B" in context
+    assert "com.example.Missing" not in context
+    assert len(context) <= 9500
+
+    # 门禁：allow_external_code=False → code_context=None（评审 R-4）
+    candidate2 = _partial_candidate(_real_hops(call_tree), candidate_id="expl_" + "g" * 20)
+    fake2 = FakeDeepDiveAI([{"complete": True, "facts": []}])
+    orchestrator2, reader2 = _dive_orchestrator(tmp_path, fake2, allow_external_code=False)
+    asyncio_run(orchestrator2.deep_dive_partials([candidate2], reader2))
+    assert fake2.inputs[0].code_context is None
+
+
+def test_deep_dive_evidence_verification(tmp_path: Path) -> None:
+    """A-6/N-5：证据回查过滤——不可回查丢弃计数；前缀剥离命中；倒序区间拒。"""
+
+    call_tree = _service(tmp_path)
+    hops = _real_hops(call_tree)
+    candidate = _partial_candidate(hops)
+    fake = FakeDeepDiveAI([{
+        "complete": True, "facts": [],
+        "evidence": [
+            {"path": "com/example/B.java", "line": 4},              # 可回查
+            {"path": "com/example/Nope.java", "line": 1},           # 文件不存在
+            {"path": "com/example/B.java", "line": 9999},           # 行越界
+            {"path": "sources/com/example/B.java", "line": 4},      # 前缀剥离后命中
+            {"path": "com/example/B.java", "line": 4, "end_line": 2},  # N-5 倒序区间
+            {"path": "com/example/B.java"},                          # 无行号：文件存在即过
+        ],
+    }])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    counts = asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    dive = candidate["deep_dive"]
+    kept_keys = [_evidence_key(ref) for ref in dive["evidence_refs"]]
+    assert ("com/example/B.java", 4, None) in kept_keys          # 原样
+    assert ("sources/com/example/B.java", 4, None) in kept_keys  # 前缀形态保留原文
+    assert ("com/example/B.java", None, None) in kept_keys       # 无行号
+    assert dive["unverifiable_evidence_count"] == 3
+    assert counts["unverifiable_evidence_dropped"] == 3
+
+
+def test_deep_dive_initial_evidence_pool_filtered(tmp_path: Path) -> None:
+    """A-18（评审 R-9）：初始池=chain_proposal.evidence_refs 过滤存活项。"""
+
+    call_tree = _service(tmp_path)
+    hops = _real_hops(call_tree)
+    candidate = _partial_candidate(hops, evidence_refs=[
+        {"path": "com/example/A.java", "line": 3},        # 存活
+        {"path": "com/example/X.java", "line": 1},        # 丢弃
+    ])
+    fake = FakeDeepDiveAI([{"complete": True, "facts": []}])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    initial = fake.inputs[0].existing_evidence_refs
+    assert [ref.line for ref in initial] == [3]
+    assert candidate["deep_dive"]["unverifiable_evidence_count"] == 1
+
+
+def test_deep_dive_fact_merge_across_rounds(tmp_path: Path) -> None:
+    """A-7：后轮同 claim_index 覆盖前轮；轮记录含当轮全量 output。"""
+
+    call_tree = _service(tmp_path)
+    hops = _real_hops(call_tree)
+    candidate = _partial_candidate(hops)
+    fake = FakeDeepDiveAI([
+        {"complete": False, "facts": [
+            {"claim_index": 0, "conclusion": "still_unknown", "reasoning": "证据不足"}]},
+        {"complete": True, "facts": [
+            {"claim_index": 0, "conclusion": "confirmed", "reasoning": "调用边存在",
+             "evidence": [{"path": "com/example/B.java", "line": 4}]}]},
+    ])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    dive = candidate["deep_dive"]
+    assert dive["status"] == "completed"
+    assert dive["resolved_facts"][0]["conclusion"] == "confirmed"
+    assert len(dive["rounds"]) == 2
+    assert dive["rounds"][0]["output"]["resolved_facts"][0]["conclusion"] == "still_unknown"
+    assert dive["rounds"][1]["output"]["resolved_facts"][0]["conclusion"] == "confirmed"
+    assert dive["requests_used"] == 2
+
+
+def test_deep_dive_terminates_on_complete(tmp_path: Path) -> None:
+    """A-8①：analysis_complete=True 首轮即止。"""
+
+    call_tree = _service(tmp_path)
+    candidate = _partial_candidate(_real_hops(call_tree))
+    fake = FakeDeepDiveAI([{"complete": True, "facts": []}] * 4)
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+    assert candidate["deep_dive"]["status"] == "completed"
+    assert candidate["deep_dive"]["requests_used"] == 1
+
+
+def test_deep_dive_stagnation_after_two_rounds(tmp_path: Path) -> None:
+    """A-8②（评审 R-2）：首轮不判停滞；连续两轮无新增判定才终止。"""
+
+    call_tree = _service(tmp_path)
+    candidate = _partial_candidate(_real_hops(call_tree))
+    unknown = [{"claim_index": 0, "conclusion": "still_unknown", "reasoning": "证据不足"}]
+    fake = FakeDeepDiveAI([
+        {"complete": False, "facts": unknown},   # 轮 1：无进展（不终止）
+        {"complete": False, "facts": unknown},   # 轮 2：连续第二无进展 → 停滞
+        {"complete": True, "facts": []},         # 不应到达
+    ])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+    assert candidate["deep_dive"]["status"] == "incomplete"
+    assert candidate["deep_dive"]["requests_used"] == 2
+    assert fake.calls == 2
+
+
+def test_deep_dive_budget_exhaustion(tmp_path: Path) -> None:
+    """A-8③：跑满轮数预算 → incomplete（每轮新增 confirmed 判定，不停滞）。"""
+
+    call_tree = _service(tmp_path)
+    candidate = _partial_candidate(_real_hops(call_tree))
+    fake = FakeDeepDiveAI([
+        {"complete": False, "facts": [
+            {"claim_index": index, "conclusion": "confirmed", "reasoning": "逐项证实"}
+            for index in range(round_index + 1)
+        ]}
+        for round_index in range(4)
+    ])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+    dive = candidate["deep_dive"]
+    assert dive["status"] == "incomplete"
+    assert dive["requests_used"] == 4
+    assert len(dive["rounds"]) == 4
+
+
+def test_deep_dive_ai_failure_tolerated(tmp_path: Path) -> None:
+    """A-9：AI 失败（非熔断）→ failed；批次不中断。"""
+
+    call_tree = _service(tmp_path)
+    hops = _real_hops(call_tree)
+    first = _partial_candidate(hops, candidate_id="expl_" + "f" * 20)
+    second = _partial_candidate(hops, candidate_id="expl_" + "s" * 20)
+    fake = FakeDeepDiveAI([
+        {"fail": "error"},
+        {"complete": True, "facts": []},
+    ])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    counts = asyncio_run(orchestrator.deep_dive_partials([first, second], reader))
+
+    assert counts["failed"] == 1
+    assert counts["completed"] == 1
+    assert first["deep_dive"]["status"] == "failed"
+    assert second["deep_dive"]["status"] == "completed"
+
+
+def test_deep_dive_run_budget_exhausted_skips(tmp_path: Path) -> None:
+    """A-10：熔断类结果（预算耗尽包装）→ skipped。"""
+
+    call_tree = _service(tmp_path)
+    candidate = _partial_candidate(_real_hops(call_tree))
+    fake = FakeDeepDiveAI([{"fail": "skipped", "circuit": True}])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    counts = asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    assert counts["skipped"] == 1
+    assert candidate["deep_dive"]["status"] == "skipped"
+
+
+def test_deep_dive_not_injected_all_skipped(tmp_path: Path) -> None:
+    """A-11：deep_dive_call 未注入 → 全体 skipped（不抛）。"""
+
+    call_tree = _service(tmp_path)
+    reader = _index_reader(tmp_path)
+    orchestrator = ExplorerOrchestrator(None, call_tree, ExplorerSettings(), tmp_path)  # type: ignore[arg-type]
+    candidate = _partial_candidate(_real_hops(call_tree))
+
+    counts = asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    assert counts == {
+        "partial_total": 1, "attempted": 0, "completed": 0, "incomplete": 0,
+        "failed": 0, "skipped": 1, "requests_used": 0,
+        "unverifiable_evidence_dropped": 0,
+    }
+    assert candidate["deep_dive"]["status"] == "skipped"
+
+
+def test_deep_dive_batch_short_circuit(tmp_path: Path) -> None:
+    """A-17（评审 R-5）：首个熔断后剩余候选批量 skipped（零 AI 调用）。"""
+
+    call_tree = _service(tmp_path)
+    hops = _real_hops(call_tree)
+    first = _partial_candidate(hops, candidate_id="expl_" + "x" * 20)
+    second = _partial_candidate(hops, candidate_id="expl_" + "y" * 20)
+    fake = FakeDeepDiveAI([{"fail": "circuit_open", "circuit": True}])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    counts = asyncio_run(orchestrator.deep_dive_partials([first, second], reader))
+
+    assert counts["skipped"] == 2
+    assert fake.calls == 1  # 第二候选零调用（短路）
+    assert second["deep_dive"]["status"] == "skipped"
+    assert second["deep_dive"]["requests_used"] == 0
+
+
+def test_deep_dive_no_hops_skipped(tmp_path: Path) -> None:
+    """N-1：hops 缺失的 partial → 跳过（无可锚定链事实）。"""
+
+    candidate = _partial_candidate([])
+    fake = FakeDeepDiveAI([{"complete": True, "facts": []}])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    counts = asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    assert counts["skipped"] == 1
+    assert fake.calls == 0
+
+
+def test_candidate_with_deep_dive_schema_valid(tmp_path: Path) -> None:
+    """A-12：含 deep_dive 字段的候选经 explorer_candidate.schema.json 校验合法。"""
+
+    with (SCHEMAS_DIR / "explorer_candidate.schema.json").open(encoding="utf-8") as fp:
+        schema = json.load(fp)
+    call_tree = _service(tmp_path)
+    candidate = _partial_candidate(_real_hops(call_tree))
+    fake = FakeDeepDiveAI([{
+        "complete": True,
+        "facts": [{"claim_index": 0, "conclusion": "confirmed", "reasoning": "调用边存在",
+                   "evidence": [{"path": "com/example/B.java", "line": 4}]}],
+        "evidence": [{"path": "com/example/B.java", "line": 4}],
+    }])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+    jsonschema.validate(candidate, schema)
+
+
+def test_deep_dive_missing_facts_truncated(tmp_path: Path) -> None:
+    """N-3：missing_facts 超 32（32 跳 + guard 命题 = 33）截断 + gaps 首项说明。"""
+
+    hops = [
+        {"from_method_id": f"m{index}", "to_method_id": f"m{index + 1}",
+         "call_site_line": index + 1, "resolved_via": "direct_call"}
+        for index in range(32)
+    ]
+    candidate = _partial_candidate(hops)
+    candidate["validation"]["failed_hop_indices"] = list(range(32))
+    candidate["validation"]["blocked_by_guard"] = True
+    fake = FakeDeepDiveAI([{"complete": True, "facts": []}])
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    assert len(fake.inputs[0].missing_facts) == 32  # schema 上界（33 条被截断）
+    assert "截断" in candidate["deep_dive"]["remaining_gaps"][0]
+
+
+def test_deep_dive_output_invalid_fails(tmp_path: Path) -> None:
+    """N-4：模型输出违反 schema（缺 required）→ failed + 轮记录 output_invalid。"""
+
+    call_tree = _service(tmp_path)
+    candidate = _partial_candidate(_real_hops(call_tree))
+
+    class BadOutputAI(FakeDeepDiveAI):
+        async def __call__(self, model_input: Any) -> dict[str, Any]:
+            self.calls += 1
+            self.inputs.append(model_input)
+            return {"status": "completed", "analysis": {"summary": "缺 analysis_complete"},
+                    "metadata": {"prompt_version": "1.0.0", "model": "test-model"}}
+
+    fake = BadOutputAI()
+    orchestrator, reader = _dive_orchestrator(tmp_path, fake)
+
+    counts = asyncio_run(orchestrator.deep_dive_partials([candidate], reader))
+
+    assert counts["failed"] == 1
+    assert candidate["deep_dive"]["status"] == "failed"
+    assert candidate["deep_dive"]["rounds"][0]["status"] == "output_invalid"

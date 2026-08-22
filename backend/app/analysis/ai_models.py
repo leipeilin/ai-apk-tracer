@@ -401,6 +401,7 @@ class ExplorerCandidate(StrictAIModel):
     api_entry_ref: Identifier = Field(description="关联的 API 入口表条目 ID（如 act_..._onCreate）")
     chain_proposal: ChainProposal = Field(description="候选链（复用 T0.1 ChainProposal，低信任建议）")
     validation: ExplorerCandidateValidation | None = Field(default=None, description="三档校验结果；生成时为空占位")
+    deep_dive: ExplorerCandidateDeepDive | None = Field(default=None, description="T2.8 深挖结果（仅 partially_validated 候选；未深挖为 None；前向引用——见 DeepDiveOutput 后 model_rebuild）")
 
 
 class ExplorerInput(StrictAIModel):
@@ -456,6 +457,42 @@ class DeepDiveOutput(StrictAIModel):
     evidence_refs: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=64, description="本轮新增的可回查证据引用")
     remaining_gaps: list[LongText] = Field(default_factory=list, max_length=32, description="仍未解决的缺口（T2.6 据此再决策）")
     analysis_complete: bool = Field(description="深挖是否已完整结束；不得掩盖 remaining_gaps")
+
+
+class DeepDiveRoundRecord(StrictAIModel):
+    """深挖轮审计记录（T2.8，对齐 T2.5b 轮审计模式：输入哈希锚定可复现）。"""
+
+    round_index: int = Field(ge=1, description="轮次（从 1 起）")
+    model_input_hash: Sha256 = Field(description="轮输入 SHA-256（可审计复现锚点）")
+    prompt_version: ShortText = Field(description="深挖协议版本（如 explorer-deep-dive/1.0.0）")
+    model: ShortText = Field(description="执行模型标识")
+    status: Literal["completed", "error", "skipped", "output_invalid"] = Field(description="该轮协议执行状态")
+    output: DeepDiveOutput | None = Field(default=None, description="该轮全量输出（审计；失败轮为 None）")
+
+
+class ExplorerCandidateDeepDive(StrictAIModel):
+    """深挖结果（T2.8）：回查后的证据与事实判定。
+
+    铁律：不改变 chain_proposal（含 hops）与 validation 三档（M2 验收
+    4.3-5.4：深挖后 hops 不变，仅新增证据）；深挖产物留人工队列（T2.10），
+    不进 funnel 主链（L2 复核独立裁决不受影响）；不自动升级档位（D1——
+    AI 判定不得改写确定性门禁结论）。
+    """
+
+    status: Literal["completed", "incomplete", "failed", "skipped"] = Field(description="深挖终态：completed/incomplete（预算尽或停滞）/failed（AI 失败）/skipped（未注入或批次短路）")
+    prompt_version: ShortText = Field(description="深挖协议版本")
+    model: ShortText = Field(description="执行模型标识")
+    requests_used: int = Field(ge=0, description="该候选消耗的深挖 AI 请求数")
+    resolved_facts: list[ResolvedFact] = Field(default_factory=list, max_length=32, description="逐项事实判定（后轮覆盖前轮同 claim_index；evidence 已回查过滤）")
+    evidence_refs: list[ExplorerEvidenceRef] = Field(default_factory=list, max_length=64, description="跨轮累积的可回查证据（(path,line,end_line) 去重）")
+    remaining_gaps: list[LongText] = Field(default_factory=list, max_length=32, description="仍未解决的缺口")
+    unverifiable_evidence_count: int = Field(default=0, ge=0, description="不可回查被丢弃的证据计数（含初始池过滤）")
+    evidence_truncated_count: int = Field(default=0, ge=0, description="跨轮累积超出 schema 上界被截断的证据数（评审 R-3）")
+    rounds: list[DeepDiveRoundRecord] = Field(default_factory=list, max_length=16, description="轮审计记录（上限 16，循环轮数已钳制）")
+
+
+# 前向引用闭合：ExplorerCandidate.deep_dive（定义先于本节）
+ExplorerCandidate.model_rebuild()
 
 
 class VerifyFact(StrictAIModel):

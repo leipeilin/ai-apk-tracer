@@ -941,6 +941,17 @@ class ScanOrchestrator:
                 self._ai_requests_used += 1
             return await self.ai.explore_entry(model_input)
 
+        async def budgeted_deep_dive_call(model_input: Any) -> dict[str, Any]:
+            # T2.8（评审 R-1/T2.7 模式）：深挖调用计入 run 级共享预算池；
+            # 深挖账本 = explorer stage 的 deep_dive_requests_used（复核账
+            # 组成部分——三本账公式见任务方案 §3.3）
+            async with self._ai_budget_lock:
+                if self._ai_requests_used >= budget.max_requests_per_run:
+                    return {"status": "skipped", "circuit_breaking": True,
+                            "metadata": {"reason": "run_request_budget_exhausted"}}
+                self._ai_requests_used += 1
+            return await self.ai.deep_dive_entry(model_input)
+
         reader = None
         database_path = str((code_index or {}).get("database_path") or "")
         if database_path and Path(database_path).is_file():
@@ -951,12 +962,14 @@ class ScanOrchestrator:
             effective = [entry for entry in entries if entry.get("method_id")]
             degraded = bool(entries) and not effective and entries[0].get("degraded")
             orchestrator = ExplorerOrchestrator(
-                budgeted_ai_call, call_tree, explorer_settings, run_dir
+                budgeted_ai_call, call_tree, explorer_settings, run_dir, budgeted_deep_dive_call
             )
             candidates = await orchestrator.explore_all(effective)
             # 三档校验（T2.6）：reader 存活期内回查（跳/methods/call_sites）；
-            # T2.7 归一化：validated → 正式 Candidate 形状（T0.6 映射表），
-            # partial/unverified/other 不产出（留 explorer/candidates.json）。
+            # T2.8 深挖：partial 候选补齐可回查证据（不改链不升级，留人工
+            # 队列——L2 复核独立裁决不受影响）；T2.7 归一化：validated →
+            # 正式 Candidate 形状（T0.6 映射表），partial/unverified/other
+            # 不产出（留 explorer/candidates.json）。
             from app.analysis.explorer_normalization import (
                 normalize_explorer_candidates,
             )
@@ -971,6 +984,7 @@ class ScanOrchestrator:
                     "target_sdk": manifest.get("target_sdk"),
                 },
             )
+            deep_dive_counts = await orchestrator.deep_dive_partials(candidates, reader)
             orchestrator.save_candidates(candidates)
             normalized_candidates, normalization_counts = normalize_explorer_candidates(candidates)
         finally:
@@ -989,7 +1003,9 @@ class ScanOrchestrator:
             "candidate_count": len(candidates),
             "ai_requests_used": orchestrator.ai_requests_used,
             "read_requests_used": orchestrator.read_requests_used,
+            "deep_dive_requests_used": orchestrator.deep_dive_requests_used,
             "validation_counts": validation_counts,
+            "deep_dive_counts": deep_dive_counts,
             "normalization_counts": normalization_counts,
             "degraded_entry_table": degraded,
         })

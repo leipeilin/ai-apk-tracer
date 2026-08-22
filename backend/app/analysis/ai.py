@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio  # noqa: F401 - 测试 monkeypatch 挂载点（ai_module.asyncio.sleep）
 import hashlib
 import json
+import logging
 import os
 import random  # noqa: F401 - 测试 monkeypatch 挂载点（ai_module.random.uniform）
 import time
@@ -16,6 +17,8 @@ from pydantic import ValidationError
 from app.analysis.ai_cache import AICacheStore, build_cache_descriptor, build_cache_key
 from app.analysis.ai_models import (
     AI_OUTPUT_MODEL_VERSIONS,
+    DeepDiveInput,
+    DeepDiveOutput,
     DeterministicSemanticBundle,
     ExplorerInput,
     ExplorerObservation,
@@ -50,6 +53,7 @@ _DEFAULT_RETRY_COUNT = 1
 _DEFAULT_RETRY_BASE_SECONDS = 0.05
 _DEFAULT_RETRY_MAX_SECONDS = 30.0
 _DEFAULT_RETRY_JITTER_SECONDS = 0.05
+LOGGER = logging.getLogger(__name__)
 _PROMPT_VERSIONS = {
     "preflight": "1.0.1",
     "l1-triage": "2.0.4",
@@ -196,7 +200,7 @@ class OpenAICompatibleAnalyzer:
             finalization_identity = _checkpoint_prompt_identity(
                 finalization_rendered, FinalizationOutput
             )
-        except Exception:
+        except (ValidationError, PromptRegistryError, TypeError, ValueError):
             prompt_identity = {"prompt_id": prompt_id, "version": _PROMPT_VERSIONS[prompt_id]}
             finalization_identity = {
                 "prompt_id": "finalization",
@@ -448,6 +452,26 @@ class OpenAICompatibleAnalyzer:
             "explorer",
         )
 
+    async def deep_dive_entry(self, model_input: DeepDiveInput) -> dict[str, Any]:
+        """单轮深挖协议执行（T2.8）：partial 候选补齐事实（禁止改写链）。
+
+        与 explore_entry 同模式复用状态机；prompt_version 沿先例硬编码
+        "1.0.0"（registry 哈希门禁 + test_config 注册对齐护栏兜底；config
+        的 deep_dive_prompt_version 为声明性字段）。缓存判据同 explorer 轨
+        no-op 放弃（DeepDiveOutput.evidence_refs 对无切片校验恒不通过）。
+        """
+
+        unavailable = self._analysis_unavailable_result()
+        if unavailable is not None:
+            return unavailable
+        return await self._invoke_prompt(
+            "explorer-deep-dive",
+            "1.0.0",
+            model_input,
+            DeepDiveOutput,
+            "explorer-deep-dive",
+        )
+
     async def _invoke_prompt(
         self,
         prompt_id: str,
@@ -553,7 +577,7 @@ class OpenAICompatibleAnalyzer:
                 cache_key = build_cache_key(cache_descriptor)
                 metadata["cache_key"] = cache_key
                 cached_output = self._cache_store.load(cache_descriptor, key=cache_key)
-            except Exception:
+            except (OSError, ValueError, TypeError, KeyError):
                 cache_descriptor = None
                 cache_key = None
                 metadata["cache_error"] = "descriptor_or_read_failed"
@@ -636,8 +660,8 @@ class OpenAICompatibleAnalyzer:
                     metadata["completion_tokens"] = usage.get("completion_tokens")
                     details = usage.get("completion_tokens_details") or {}
                     metadata["reasoning_tokens"] = details.get("reasoning_tokens")
-                except Exception:
-                    pass
+                except (ValueError, KeyError, TypeError, IndexError):
+                    LOGGER.debug("空响应诊断字段解析失败（忽略）")
             parsed, relaxation = _parse_structured_response_details(
                 content,
                 allow_relaxed=not preflight_strict_only,
@@ -749,7 +773,7 @@ class OpenAICompatibleAnalyzer:
             return
         try:
             result = self._cache_store.save(descriptor, output, key=cache_key)
-        except Exception:
+        except (OSError, ValueError, TypeError, KeyError):
             metadata["cache_written"] = False
             metadata["cache_error"] = "write_failed"
             return
@@ -1095,7 +1119,7 @@ def _loads_unique_json_object(content: str) -> dict[str, Any]:
         parse_constant=_reject_json_constant,
     )
     if not isinstance(parsed, dict):
-        raise ValueError("JSON 根值必须是对象")
+        raise TypeError("JSON 根值必须是对象")
     return parsed
 
 

@@ -101,6 +101,123 @@
       "title": "ChainProposal",
       "type": "object"
     },
+    "DeepDiveOutput": {
+      "additionalProperties": false,
+      "description": "深挖阶段输出：只补充可回查证据与事实判定，不输出/改写链（与 L2 裁决职责分离）。",
+      "properties": {
+        "analysis_complete": {
+          "description": "深挖是否已完整结束；不得掩盖 remaining_gaps",
+          "title": "Analysis Complete",
+          "type": "boolean"
+        },
+        "evidence_refs": {
+          "description": "本轮新增的可回查证据引用",
+          "items": {
+            "$ref": "#/$defs/ExplorerEvidenceRef"
+          },
+          "maxItems": 64,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "remaining_gaps": {
+          "description": "仍未解决的缺口（T2.6 据此再决策）",
+          "items": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Remaining Gaps",
+          "type": "array"
+        },
+        "resolved_facts": {
+          "description": "逐项事实判定",
+          "items": {
+            "$ref": "#/$defs/ResolvedFact"
+          },
+          "maxItems": 32,
+          "title": "Resolved Facts",
+          "type": "array"
+        },
+        "summary": {
+          "description": "本轮深挖摘要",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary",
+        "analysis_complete"
+      ],
+      "title": "DeepDiveOutput",
+      "type": "object"
+    },
+    "DeepDiveRoundRecord": {
+      "additionalProperties": false,
+      "description": "深挖轮审计记录（T2.8，对齐 T2.5b 轮审计模式：输入哈希锚定可复现）。",
+      "properties": {
+        "model": {
+          "description": "执行模型标识",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "model_input_hash": {
+          "description": "轮输入 SHA-256（可审计复现锚点）",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Input Hash",
+          "type": "string"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeepDiveOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "该轮全量输出（审计；失败轮为 None）"
+        },
+        "prompt_version": {
+          "description": "深挖协议版本（如 explorer-deep-dive/1.0.0）",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "round_index": {
+          "description": "轮次（从 1 起）",
+          "minimum": 1,
+          "title": "Round Index",
+          "type": "integer"
+        },
+        "status": {
+          "description": "该轮协议执行状态",
+          "enum": [
+            "completed",
+            "error",
+            "skipped",
+            "output_invalid"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "round_index",
+        "model_input_hash",
+        "prompt_version",
+        "model",
+        "status"
+      ],
+      "title": "DeepDiveRoundRecord",
+      "type": "object"
+    },
     "ExplorerCandidateComponent": {
       "additionalProperties": false,
       "description": "探索候选的入口组件信息（大纲 §5.3 草案；entry_method 供归一化 locations）。",
@@ -144,6 +261,103 @@
         "entry_method"
       ],
       "title": "ExplorerCandidateComponent",
+      "type": "object"
+    },
+    "ExplorerCandidateDeepDive": {
+      "additionalProperties": false,
+      "description": "深挖结果（T2.8）：回查后的证据与事实判定。\n\n铁律：不改变 chain_proposal（含 hops）与 validation 三档（M2 验收\n4.3-5.4：深挖后 hops 不变，仅新增证据）；深挖产物留人工队列（T2.10），\n不进 funnel 主链（L2 复核独立裁决不受影响）；不自动升级档位（D1——\nAI 判定不得改写确定性门禁结论）。",
+      "properties": {
+        "evidence_refs": {
+          "description": "跨轮累积的可回查证据（(path,line,end_line) 去重）",
+          "items": {
+            "$ref": "#/$defs/ExplorerEvidenceRef"
+          },
+          "maxItems": 64,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "evidence_truncated_count": {
+          "default": 0,
+          "description": "跨轮累积超出 schema 上界被截断的证据数（评审 R-3）",
+          "minimum": 0,
+          "title": "Evidence Truncated Count",
+          "type": "integer"
+        },
+        "model": {
+          "description": "执行模型标识",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "prompt_version": {
+          "description": "深挖协议版本",
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "remaining_gaps": {
+          "description": "仍未解决的缺口",
+          "items": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Remaining Gaps",
+          "type": "array"
+        },
+        "requests_used": {
+          "description": "该候选消耗的深挖 AI 请求数",
+          "minimum": 0,
+          "title": "Requests Used",
+          "type": "integer"
+        },
+        "resolved_facts": {
+          "description": "逐项事实判定（后轮覆盖前轮同 claim_index；evidence 已回查过滤）",
+          "items": {
+            "$ref": "#/$defs/ResolvedFact"
+          },
+          "maxItems": 32,
+          "title": "Resolved Facts",
+          "type": "array"
+        },
+        "rounds": {
+          "description": "轮审计记录（上限 16，循环轮数已钳制）",
+          "items": {
+            "$ref": "#/$defs/DeepDiveRoundRecord"
+          },
+          "maxItems": 16,
+          "title": "Rounds",
+          "type": "array"
+        },
+        "status": {
+          "description": "深挖终态：completed/incomplete（预算尽或停滞）/failed（AI 失败）/skipped（未注入或批次短路）",
+          "enum": [
+            "completed",
+            "incomplete",
+            "failed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "unverifiable_evidence_count": {
+          "default": 0,
+          "description": "不可回查被丢弃的证据计数（含初始池过滤）",
+          "minimum": 0,
+          "title": "Unverifiable Evidence Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "status",
+        "prompt_version",
+        "model",
+        "requests_used"
+      ],
+      "title": "ExplorerCandidateDeepDive",
       "type": "object"
     },
     "ExplorerCandidateValidation": {
@@ -338,6 +552,51 @@
       ],
       "title": "Hop",
       "type": "object"
+    },
+    "ResolvedFact": {
+      "additionalProperties": false,
+      "description": "对缺失事实清单中一项的深挖结论。",
+      "properties": {
+        "claim_index": {
+          "description": "对应 missing_facts 的索引（从 0 起）",
+          "minimum": 0,
+          "title": "Claim Index",
+          "type": "integer"
+        },
+        "conclusion": {
+          "description": "该项事实的深挖结论",
+          "enum": [
+            "confirmed",
+            "refuted",
+            "still_unknown"
+          ],
+          "title": "Conclusion",
+          "type": "string"
+        },
+        "evidence": {
+          "description": "支撑该结论的可回查证据",
+          "items": {
+            "$ref": "#/$defs/ExplorerEvidenceRef"
+          },
+          "maxItems": 32,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "reasoning": {
+          "description": "结论依据",
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Reasoning",
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim_index",
+        "conclusion",
+        "reasoning"
+      ],
+      "title": "ResolvedFact",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -364,6 +623,18 @@
     "component": {
       "$ref": "#/$defs/ExplorerCandidateComponent",
       "description": "入口组件信息"
+    },
+    "deep_dive": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExplorerCandidateDeepDive"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "T2.8 深挖结果（仅 partially_validated 候选；未深挖为 None；前向引用——见 DeepDiveOutput 后 model_rebuild）"
     },
     "model": {
       "description": "产生该候选的模型标识",
