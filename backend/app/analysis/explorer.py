@@ -245,6 +245,11 @@ class ExplorerOrchestrator:
             validation = candidate.get("validation") or {}
             if validation.get("status") != "partially_validated":
                 continue
+            # T2.9 评审 R-3：custom sink 压档候选不深挖——custom 是 taxonomy
+            # 缺口非证据缺口（深挖补证据无法解除压档，纯耗预算）；留人工队列
+            # 走升级闭环（promote → 重校验升档）
+            if validation.get("custom_sink_proposal"):
+                continue
             counts["partial_total"] += 1
             if short_circuit:
                 self._write_dive_skipped(candidate)

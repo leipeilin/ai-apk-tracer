@@ -1159,6 +1159,17 @@ class ScanOrchestrator:
                 normalize_explorer_candidates,
             )
             from app.analysis.explorer_validation import validate_explorer_candidates
+            from app.analysis.sink_taxonomy import load_sink_taxonomy
+            from app.config import WORKSPACE_ROOT as _WORKSPACE_ROOT
+
+            # T2.9：sink taxonomy 版本化文件（custom_sink_proposal 判定数据源）
+            # ——配置路径或默认位置；缺失/损坏 → [] 禁用（兼容保守行为）
+            taxonomy_path = (
+                explorer_settings.custom_sink_taxonomy_path
+                if explorer_settings.custom_sink_taxonomy_path is not None
+                else _WORKSPACE_ROOT / "rules" / "sink_taxonomy" / "versions.yaml"
+            )
+            taxonomy_entries = load_sink_taxonomy(Path(taxonomy_path))
 
             validation_counts = validate_explorer_candidates(
                 candidates,
@@ -1168,6 +1179,7 @@ class ScanOrchestrator:
                     "debuggable": manifest.get("debuggable"),
                     "target_sdk": manifest.get("target_sdk"),
                 },
+                taxonomy_entries=taxonomy_entries,
             )
             deep_dive_counts = await orchestrator.deep_dive_partials(candidates, reader)
             orchestrator.save_candidates(candidates)

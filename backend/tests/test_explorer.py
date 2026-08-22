@@ -458,7 +458,13 @@ def _instance_orchestrator(
         database_path=tmp_path / "tracer.sqlite3",
         storage=StorageSettings(data_root=tmp_path / "data"),
         source_analysis=SourceAnalysisSettings(enabled=False),
-        explorer=ExplorerSettings(enabled=True),
+        # T2.9 评审 R-8：集成测试链尾 C.write 与种子 write 条目碰撞
+        # （receiver com.example.C 失配 → custom 压档）——显式禁用 taxonomy
+        # 隔离既有断言；taxonomy 接线行为由 test_sink_taxonomy.py 专用覆盖
+        explorer=ExplorerSettings(
+            enabled=True,
+            custom_sink_taxonomy_path=tmp_path / "absent-taxonomy.yaml",
+        ),
         context_budget=ContextBudgetSettings(max_requests_per_run=max_requests_per_run),
     )
     repository = SQLiteRepository(settings.resolved_database_path())

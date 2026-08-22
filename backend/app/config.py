@@ -190,6 +190,15 @@ class ExplorerSettings(BaseModel):
     max_requests_per_entry: int = Field(default=20, ge=1, description="单入口读码请求总数上限（评审 §4.3）")
     max_requests_per_candidate: int = Field(default=4, ge=1, description="单探索候选的 AI 请求上限")
     deep_dive_prompt_version: str = Field(default="explorer-deep-dive/1.0.0", description="partial 候选深挖协议版本（T0.3 已注册）")
+    custom_sink_taxonomy_path: Path | None = Field(
+        default=None,
+        description=(
+            "sink taxonomy 版本化文件路径（T2.9）；None=自动发现 "
+            "rules/sink_taxonomy/versions.yaml（存在即启用判定——文件缺失/"
+            "损坏/路径不存在即禁用，兼容保守行为）。关闭=删除文件或将路径"
+            "指向不存在的位置"
+        ),
+    )
     call_tree: CallTreeSettings = CallTreeSettings()
 
 
