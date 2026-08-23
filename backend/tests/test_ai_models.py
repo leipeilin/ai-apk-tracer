@@ -811,3 +811,42 @@ def test_verify_prompt_variable_matches_registry_convention() -> None:
     from app.analysis.ai import _prompt_variable
 
     assert _prompt_variable("verify") == "verify_input_json"
+
+
+def test_verify_prompt_declares_strict_output_contract() -> None:
+    """verify prompt 严格输出契约声明（M2 收尾-2：schema_invalid 根因修复）。
+
+    根因（定向探针 initial_validation_errors）：模型输出契约外字段
+    claims_verdicts.N.kind/verdict（extra_forbidden）、缺 conclusion/
+    summary/confidence_tier、exploitability 给标量（要求嵌套对象）——
+    旧 prompt 完全没有输出契约区，字段名只能靠模型猜。
+    """
+    from pathlib import Path
+
+    system_path = (
+        Path(__file__).resolve().parents[2] / "prompts" / "verify" / "1.0.0" / "system.md"
+    )
+    system = system_path.read_text("utf-8")
+
+    # 严格 JSON 输出与字段名禁令（直击 extra_forbidden 根因）
+    assert "只输出一个 JSON 对象" in system, "verify prompt 缺少'只输出一个 JSON 对象'约束"
+    assert "严格按此字段名" in system, "verify prompt 缺少输出契约字段名声明标题"
+    assert "不得输出 kind、verdict" in system, "verify prompt 缺少契约外字段名禁令（kind/verdict）"
+    # claims_verdicts 四字段逐字点名（直击 conclusion missing / kind verdict extra 根因）
+    assert "index / conclusion / evidence / reasoning" in system, \
+        "verify prompt 缺少 claims_verdicts 元素四字段声明"
+    # 顶层必填字段清单（直击 summary/confidence_tier missing 根因）
+    assert "顶层必填字段：summary、verdict、confidence_tier、flaw_holds、exploitability、loop、analysis_complete" in system, \
+        "verify prompt 缺少顶层必填字段清单"
+    # exploitability 嵌套对象声明（直击 model_type 根因）
+    assert "嵌套 JSON 对象" in system, "verify prompt 缺少 exploitability 嵌套对象声明"
+    for sub in ("entry_reachable", "propagation_proven", "sink_effective",
+                "guard_bypassed", "authorization_absent", "exfiltration_channel"):
+        assert sub in system, f"verify prompt 缺少 exploitability 子字段声明: {sub}"
+    # conclusion 三值枚举与 refutation_basis 枚举
+    assert '"confirmed" / "refuted" / "still_unknown"' in system, \
+        "verify prompt 缺少 conclusion 枚举声明"
+    assert "guard_fail_closed" in system, "verify prompt 缺少 refutation_basis 枚举声明"
+    # done 与 claims_verdicts 的强制关系（schema model_validator 对齐）
+    assert "loop.done=true 必须伴随至少一条 claims_verdicts" in system, \
+        "verify prompt 缺少 done-verdicts 强制关系声明"

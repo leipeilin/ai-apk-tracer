@@ -10,6 +10,12 @@
 > - §4.1 `probe_explorer_entry.py` ✅ 已落地并真实探针（shop 6 入口 117s）：**D-3 行为级验证通过**（18 个无上下文轮零产链）；validated=0/partial=2/unverified=1（差 1 达门槛）；**新发现：4 个 service/receiver 入口空转**（read_req=0、零候选、4 轮耗尽——模型既不读码也不产链，全量跑不可见的模式，prompt 下一迭代点：每轮必须 read_requests 或 done）；
 > - §4.2 `probe_verify_entry.py` ✅ 已落地并真实探针（shop 3 L2 候选）：**根因精确定位**——3/3 `schema_invalid` 同源确认，`initial_validation_errors`：`claims_verdicts.N.kind/verdict: extra_forbidden`（模型输出被禁字段）+ `conclusion: missing`（schema 要求字段缺失）+ 顶层 `summary/confidence_tier/exploitability/refutation_basis` 缺失——修复路径 = EXPLORER-PROMPT-FIX 同款 verify prompt 严格契约重写（M2 收尾-2 输入就绪）；
 > - §6 M3 调研 ✅ 方案就绪（字段设计/落点 `backend/app/reporting/`/provider 抽象取舍/2 个真实 confirmed finding 路径已核实）——实施待续。
+>
+> **执行进展（2026-08-23 第二轮回填——M2 收尾-2/空转修复）**：
+> - **M2 收尾-2 verify prompt 严格契约重写 ✅ 行为级验证通过**：探针 v2 **PASS**（3/3 completed、fallback 3→0、schema_invalid 清零、聚合层证据回查通过、58s）——52+29 全 fallback 根因彻底修复；
+> - explorer 空转修复（硬约束 11）**未达预期，按 §9 预案上升用户决策**：三轮探针产链 3→0→1 波动（v1 无约束 3 链/v2 done-链绑定 0 链/v3 松绑 1 链），门槛（≥3）未达，4 入口空转依旧；D-3 三轮全部 100% 遵守；
+> - **意外收获——驱动层真实缺陷修复**：探针 v3 触发 `code_context` 跨轮累积超 ExplorerInput LongText 10000 上限（ExplorerInput 构造直接 ValidationError 崩溃——deep_dive 有 9500 上限先例而 explore 无防御）——已加 `_MAX_EXPLORE_CONTEXT_CHARS=9500` 保头部截断；
+> - M3-1 方案落盘 ✅（`2026-08-23-m3-report-poc-implementation-plan.md`——子 agent 调研蓝图完整固化）——实施待执行。
 
 ---
 

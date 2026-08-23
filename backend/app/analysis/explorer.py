@@ -46,6 +46,11 @@ LOGGER = logging.getLogger(__name__)
 # 单次读码结果的上下文注入上限（评审 R-1 风险对策：轮间累积膨胀控制）
 _MAX_CONTEXT_BYTES_PER_REQUEST = 8 * 1024
 
+# code_context 跨轮累积总上限（ExplorerInput.code_context 为 LongText max 10000；
+# 探针 v3 实测多轮累积可超限致 ExplorerInput 构造 ValidationError——驱动层防御，
+# 保头部（入口方法体优先），尾部截断并标注）
+_MAX_EXPLORE_CONTEXT_CHARS = 9500
+
 # 深挖 code_context 总量上限（schema LongText max 10_000 留余量）
 _MAX_DEEP_DIVE_CONTEXT_CHARS = 9500
 
@@ -151,6 +156,12 @@ class ExplorerOrchestrator:
 
         for round_index in range(1, self._settings.max_rounds_per_entry + 1):
             requests_budget = self._settings.max_requests_per_entry - self._read_requests_used
+            joined_context = "\n---\n".join(code_context) if code_context else None
+            if joined_context is not None and len(joined_context) > _MAX_EXPLORE_CONTEXT_CHARS:
+                joined_context = (
+                    joined_context[:_MAX_EXPLORE_CONTEXT_CHARS]
+                    + "\n…(earlier context retained, later context truncated)"
+                )
             model_input = ExplorerInput.model_validate({
                 "round_index": round_index,
                 "rounds_budget": self._settings.max_rounds_per_entry,
@@ -158,7 +169,7 @@ class ExplorerOrchestrator:
                 "entry_json": json.dumps(entry, ensure_ascii=False),
                 "attack_surface_json": None,  # 由调用方扩展点注入（攻击面上下文）
                 "prior_observations": prior_summary,
-                "code_context": "\n---\n".join(code_context) if code_context else None,
+                "code_context": joined_context,
             })
             result = await self._ai_call(model_input)
             self._ai_requests_used += 1

@@ -365,7 +365,7 @@ prompts:
   input_schema_file: ai_explorer_input.schema.json
   output_schema_file: ai_explorer_observation.schema.json
   template_sha256:
-    system: f1ec45ececfba392d145edceb5a7235d748d899cb93b52a5e1141f1e9471687e
+    system: a189e256b06eb2a6aaba71ba4a1dcaf267fc6bdad47ab94fb026219680f1180d
     user: 85ec035cb2ea03c955c124e388af360be38d32e884b596edbc60f65b6c676f66
   schema_sha256:
     input: 5bd047454557183d54172379150bc8867f239cb3c73724cf71886adcd2a17a77
@@ -397,7 +397,7 @@ prompts:
   input_schema_file: ai_verify_input.schema.json
   output_schema_file: ai_verify_output.schema.json
   template_sha256:
-    system: a8d8939f5f99d668c3e23c1a63932cc55d82b20739ac0d5d359c8e172d7a4dc0
+    system: 7ec6c3795ffddd2d42a2aa435739efada69b0763592eb37b040ac59e6901717e
     user: 55dd1888bb824946405b427ff2dbad3106d83191bd8b421af1262ec185f28c29
   schema_sha256:
     input: 21608b57507d5a42615e817f24638c5d24910f5f3c09db029a3221d715ee8b79

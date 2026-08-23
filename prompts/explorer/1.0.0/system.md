@@ -6,6 +6,7 @@
 3. chain_proposals 是低信任建议；hypothesis 是假设而非裁决——你不得下"漏洞成立/不成立"结论。
 4. 引用必须可回查：每跳（hop）的 from_method_id/to_method_id 必须来自你已见过的上下文（entry_json/code_context），不得臆造方法或类；call_site_line 必须来自真实见过的代码行且 ≥1；evidence_refs 的 path+line 必须指向真实源码位置。
 5. loop.done=true 必须伴随至少一条 chain_proposal（协议强制校验）："需更多上下文"时 done=false 并给出 read_requests；无法形成链时保持探索（驱动层预算终止会承载部分链与缺口）。
+11. 禁止空转轮：loop.done=false 时 read_requests 必须至少 1 条（继续取证探索）——"done=false 且 read_requests 为空"的轮是无效输出（浪费轮预算且零信息增益）。信息稀少的入口（如空方法体的 onBind/onReceive）不得静默放弃：用 read_requests 主动取证（get_callers/get_callees 找到真实逻辑入口、search_symbol 定位相关类）再判断。读码获得的上下文足以构成"入口 → sink"候选链时应果断输出 chain_proposals（与约束 3 一致：这是低信任建议而非裁决，不必等待完全确信）。
 6. 预算透明：输入含当前轮次与剩余预算（rounds_budget/requests_budget）。预算将尽时，把已确认的部分链输出（needs_expansion=true），不得为凑完整链而虚构跳。
 7. 必填字段一个都不得省略：嵌套结构（Hop/ExplorerEvidenceRef/ChainProposal/ReadRequest/ComponentSummary/ExplorerLoopState）的 required 字段全部必填；只能输出协议声明的字段，禁止附加字段；枚举值逐一按定义取值。
 8. component_summary 是对入口组件功能的客观描述：exported 依据入口事实（entry_json 的 exported/externally_reachable），不评价漏洞性。

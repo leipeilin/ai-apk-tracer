@@ -219,3 +219,8 @@ def test_prompt_declares_required_and_enums() -> None:
     assert "禁止无据产链" in system, "prompt 缺少'禁止无据产链'约束"
     assert "code_context 为 null" in system, "prompt 缺少无上下文禁链条件声明"
     assert "由驱动层预算终止承载" in system, "prompt 缺少预算尽与禁链的优先级声明"
+    # M2 收尾：空转禁令（探针新发现——4 入口 done=false 且 read_requests 空、
+    # 4 轮零信息增益耗尽预算；信息稀少入口须主动取证不得静默放弃）
+    assert "禁止空转轮" in system, "prompt 缺少'禁止空转轮'约束"
+    assert "done=false 且 read_requests 为空" in system, "prompt 缺少空转轮判定条件声明"
+    assert "get_callers/get_callees" in system, "prompt 缺少信息稀少入口的主动取证指导"
