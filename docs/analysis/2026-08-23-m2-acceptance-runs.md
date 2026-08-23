@@ -53,7 +53,27 @@
 
 ### 2.2 shop 完整 run（run_id：20260822T210017Z_1c55d3fb9f95_dc24a077）
 
-（待 run 完成后回填——撰写本文时仍在 explorer 阶段推进中）
+**执行环境**：与 §2.1 同（真实 uvicorn + 探索/核验轨开启 + token-plan AI）；后台运行于 M2 验收期间，此处按 run manifest 回填（2026-08-23，指引 §3.1 零成本项）。
+
+| 指标 | 实测 | 判定 |
+|---|---|---|
+| run status | **completed** | ✓ |
+| 反编译 | partial（JADX 退出码 3，24908 源文件，181 错误——JADX_PARTIAL_DECOMPILATION 覆盖缺口） | ✓ 与 M1 基线口径一致 |
+| 规则预扫候选 | 193 | ✓ |
+| 探索入口 | 198 | ✓ |
+| 探索候选 | 50（= max_candidates_per_run 上限） | ✓ 机械链路 |
+| AI 请求（探索检索） | 424 | 预算内 |
+| 读码请求 | 20 | ✓ |
+| 三档校验 | validated=0 / partially_validated=4 / unverified=46 | **validated ≥5 未达标**（见 §4 已知限制） |
+| 深挖 | deep_dive_counts.partial_total=0（custom 压档排除生效） | ✓ |
+| 归一化 funnel | normalized=0 / partial_kept=4 / unverified_kept=46 / component_other_dropped=0 / errors=0 | ✓ |
+| **findings 总数** | **151（= M1 基线 = M2 默认）** | ✓ **未通过校验 0 条进 finding**（validated=0 → 0 条注入） |
+| **三本账分列** | explorer=424 / deep_dive=0 / ai_analysis 总=486（explorer 424 + ai_stage 62，其中 verify=29） | ✓ 公式可复算（424+62=486） |
+| 核验分流 | attempted=29 / completed=0 / **fallback=29** | ✓ 降级回退主链不阻塞（run completed）；核验失败归因见 §4 |
+| 证据完整性 | locations 240/240、sources 125/125、sinks 66/66 verified；finding_slice_mismatches=0 | ✓ |
+| 产物注册 | explorer/{candidates,observations}.json 落盘 | ✓（T2.10） |
+
+（与 health run 同构结论：机械链路全通、质量项 validated=0 未达标——两 APK 一致暴露探索/核验 prompt 质量问题，根因与修复见 §4。）
 
 ### 2.3 已知 8 项覆盖映射表
 
