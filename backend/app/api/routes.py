@@ -285,6 +285,25 @@ def finding_report(finding_id: str, request: Request) -> PlainTextResponse:
     return PlainTextResponse(markdown, media_type="text/markdown; charset=utf-8")
 
 
+@router.post("/api/findings/{finding_id}/report-draft")
+async def generate_finding_report_draft(finding_id: str, request: Request) -> dict:
+    """生成报告草稿 + PoC 骨架 + 修复建议（M3-1——AI 草稿与确定性证据分离）。
+
+    门禁：仅 confirmed finding（L1 拒绝）；allow_executable_poc 必须 false
+    （零可执行产物）。落盘 run_dir/reports/drafts/{finding_id}.json。
+    """
+    from app.config import get_settings
+    from app.reporting.generator import generate_report_document, save_report_document
+
+    repository = request.app.state.repository
+    finding = repository.get_finding(finding_id)
+    document = await generate_report_document(
+        finding, settings=get_settings().report)
+    run_dir = request.app.state.storage.run_dir(finding["run_id"])
+    save_report_document(document, run_dir)
+    return document.model_dump(mode="json")
+
+
 @router.post("/api/runs/{run_id}/cleanup")
 def cleanup_run(run_id: str, body: CleanupRequest, request: Request) -> dict:
     """执行任务数据清理，并同步移除不再有效的数据库记录。
