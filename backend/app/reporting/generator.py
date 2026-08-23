@@ -16,6 +16,7 @@ ReportDocument 结构零改动。
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,9 @@ from app.shared.errors import ConflictError, ValidationError
 
 LOGGER = logging.getLogger(__name__)
 
+# finding_id 落盘文件名字符白名单（评审 R-5：防路径注入）
+_FINDING_ID_PATTERN = re.compile(r"[A-Za-z0-9_.\-]+")
+
 # finding → ReportDraft（M3-2 接入真实 prompt 协议时替换此实现）
 ReportDraftProvider = Callable[[dict[str, Any]], Awaitable[ReportDraft]]
 
@@ -44,7 +48,7 @@ _DETERMINISTIC_FIELDS = (
     "entry_method_id", "entry_points", "guard_status", "authorization_status",
     "dynamic_validation_status", "binder_transactions", "flow_kind",
     "attacker_prerequisites", "sanitizers_or_guards", "manifest_facts",
-    "title", "description",
+    "title", "description", "app",
 )
 
 
@@ -90,7 +94,7 @@ async def project_draft_from_l2_review(finding: dict[str, Any]) -> ReportDraft:
 
     summary = (
         f"{component} 存在 {title}（L2 复核裁决：{verdict}，置信 {confidence}）。"
-        f"{description[:300]}"
+        f"{description[:300]}{'…' if len(description) > 300 else ''}"
     ).strip()
     narrative = (
         f"规则 {finding.get('rule_id')} 在 {component} 上命中；"
@@ -132,8 +136,20 @@ async def generate_report_document(
             f"报告草稿仅对 confirmed finding 生成（当前 {finding.get('review_status')}）",
             "REPORT_DRAFT_REQUIRES_CONFIRMED",
         )
-    if finding.get("evidence_level") == "L1":
+    # L1 拒绝双条件（评审 R-2：对齐 report.py:360 先例——informational
+    # severity 同样不进正式报告，仅查 evidence_level 会放行绕过）
+    if finding.get("evidence_level") == "L1" or finding.get("severity") == "informational":
         raise ConflictError("L1 提示项不进入正式漏洞报告", "L1_REPORT_FORBIDDEN")
+
+    finding_id = str(finding.get("id") or finding.get("finding_id") or "")
+    if not finding_id:
+        raise ValidationError(
+            "finding 缺少稳定 ID，无法生成报告草稿（防 unknown 兜底多 finding 覆盖）",
+            "FINDING_ID_MISSING",
+        )
+    if not _FINDING_ID_PATTERN.fullmatch(finding_id):
+        raise ValidationError(
+            f"finding ID 含非法字符: {finding_id!r}", "FINDING_ID_INVALID")
 
     draft_provider = provider or project_draft_from_l2_review
     draft = await draft_provider(finding)
@@ -142,8 +158,8 @@ async def generate_report_document(
         else "rule_candidate"
     )
     return ReportDocument(
-        finding_id=str(finding.get("id") or finding.get("finding_id") or "unknown"),
-        run_id=str(finding.get("run_id") or "unknown"),
+        finding_id=finding_id,
+        run_id=str(finding.get("run_id") or ""),
         evidence_source=evidence_source,
         explorer_caveat=EXPLORER_CAVEAT if evidence_source == "explorer_candidate" else None,
         deterministic=_deterministic_projection(finding),
@@ -163,10 +179,17 @@ async def generate_report_document(
 
 
 def save_report_document(document: ReportDocument, run_dir: Path) -> Path:
-    """落盘 run_dir/reports/drafts/{finding_id}.json（0o700——沿报告先例）。"""
+    """落盘 run_dir/reports/drafts/{finding_id}.json（0o700——沿报告先例）。
+
+    symlink 防护（评审 R-5：预置 symlink 可写穿——沿 _existing_or_scoped_path
+    精神，写前拒绝非常规路径）。
+    """
 
     drafts_dir = run_dir / "reports" / "drafts"
     drafts_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = drafts_dir / f"{document.finding_id}.json"
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise ValidationError(
+            f"报告草稿落盘路径异常（symlink/非常规文件）: {path}", "REPORT_DRAFT_PATH_UNSAFE")
     path.write_text(document.model_dump_json(indent=2), "utf-8")
     return path

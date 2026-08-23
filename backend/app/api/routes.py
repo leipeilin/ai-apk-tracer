@@ -13,6 +13,7 @@ from fastapi.responses import PlainTextResponse
 from app.analysis.orchestrator import ScanOrchestrator
 from app.api.models import BatchCreateRequest, CleanupRequest, ReviewRequest
 from app.findings.report import build_report_payload, render_markdown
+from app.reporting.generator import generate_report_document, save_report_document
 from app.runs.cleanup import CleanupService
 from app.runs.run_config import build_run_config
 from app.shared.errors import AppError, NotFoundError, ValidationError
@@ -289,16 +290,16 @@ def finding_report(finding_id: str, request: Request) -> PlainTextResponse:
 async def generate_finding_report_draft(finding_id: str, request: Request) -> dict:
     """生成报告草稿 + PoC 骨架 + 修复建议（M3-1——AI 草稿与确定性证据分离）。
 
-    门禁：仅 confirmed finding（L1 拒绝）；allow_executable_poc 必须 false
-    （零可执行产物）。落盘 run_dir/reports/drafts/{finding_id}.json。
-    """
-    from app.config import get_settings
-    from app.reporting.generator import generate_report_document, save_report_document
+    门禁：仅 confirmed finding（L1/informational 拒绝）；allow_executable_poc
+    必须 false（零可执行产物）。落盘 run_dir/reports/drafts/{finding_id}.json。
 
+    async：为 M3-2 真 prompt 协议的 async provider 铺路（评审 R-9——当前
+    repository/落盘为同步 IO，事件循环阻塞可接受，届时统一异步化）。
+    """
     repository = request.app.state.repository
     finding = repository.get_finding(finding_id)
     document = await generate_report_document(
-        finding, settings=get_settings().report)
+        finding, settings=request.app.state.settings.report)
     run_dir = request.app.state.storage.run_dir(finding["run_id"])
     save_report_document(document, run_dir)
     return document.model_dump(mode="json")

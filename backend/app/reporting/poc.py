@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.reporting.models import PoCSkeleton
+from app.reporting.models import PocKind, PoCSkeleton
 
 # rule_id 关键词 → 骨架类型（确定性映射；未命中按组件类型兜底）
 _RULE_KIND_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -26,7 +26,7 @@ _NON_EXECUTABLE_NOTES = [
 ]
 
 
-def _skeleton_kind(finding: dict[str, Any]) -> str:
+def _skeleton_kind(finding: dict[str, Any]) -> PocKind:
     rule_id = str(finding.get("rule_id") or "")
     for keywords, kind in _RULE_KIND_HINTS:
         if any(keyword in rule_id.upper() for keyword in keywords):
@@ -63,12 +63,12 @@ def build_poc_skeleton(finding: dict[str, Any]) -> PoCSkeleton:
         ]
         notes = ["Binder 调用需要客户端代码承载——ADB 仅能用于组件触发类验证（沿确定性报告先例）", *_NON_EXECUTABLE_NOTES]
     elif kind == "provider_query":
-        authorities = finding.get("authorities") or "<AUTHORITY>"
+        # 评审 R-10：authorities 占位符化——骨架命令不得混入真实可执行值
         steps = [
             "确认 provider exported 且未受签名级权限保护",
-            f"以外部应用身份 query {authorities}（构造 content URI）",
+            "以外部应用身份 query 目标 provider（构造 content URI——authority 见报告 deterministic 投影）",
         ]
-        commands = [f"adb shell content query --uri content://{authorities}/<PATH>"]
+        commands = ["adb shell content query --uri content://<AUTHORITY>/<PATH>"]
         notes = list(_NON_EXECUTABLE_NOTES)
     elif kind == "broadcast":
         steps = [
@@ -101,7 +101,7 @@ def build_poc_skeleton(finding: dict[str, Any]) -> PoCSkeleton:
 
     return PoCSkeleton(
         component_kind=component,
-        kind=kind,  # type: ignore[arg-type]
+        kind=kind,
         steps=steps,
         command_skeleton=commands,
         notes=notes,

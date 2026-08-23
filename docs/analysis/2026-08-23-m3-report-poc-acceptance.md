@@ -3,7 +3,9 @@
 > **任务编号**：M3-1
 > **日期**：2026-08-23
 > **依据方案**：`2026-08-23-m3-report-poc-implementation-plan.md`
-> **验收方式**：pytest 专项（17 用例）+ 真实 V-01/V-02 finding 端到端 + 全量回归
+> **验收方式**：pytest 专项（25 用例）+ 真实 V-01/V-02 finding 端到端 + 全量回归
+>
+> **流程偏差与补正（2026-08-23）**：本任务实施时跳过了前置评审阶段（违反 plan-driven-implementation 六阶段），事后补评审发现 11 项问题（R-1~R-11，含 3 项高严重度）并全部闭合修订——详见 `2026-08-23-m3-report-poc-review.md`。修订后专项 25 用例（+8 评审闭合）、全量 1203 passed。§2 四点自查②的引用回查已按 R-1 强化为逐条全量断言。
 
 ## 1. 交付清单
 
@@ -21,7 +23,7 @@
 | 检查点 | 结果 | 证据 |
 |---|---|---|
 | ① 字段完整 | **通过** | `test_document_fields_complete`：ReportDocument 全字段模型校验（pydantic 必填强制）；V-01 端到端 deterministic 26 键投影完整 |
-| ② 引用可回查 | **通过** | `test_real_findings_evidence_path_exists`：V-01/V-02 的 sources/sinks path 在反编译源码树真实存在（`decompile/sources/` 命中断言）；`test_projected_draft_reference_alignment`：投影 evidence_refs 与 finding 的 sources/sinks 逐条对齐且 line ≥1 |
+| ② 引用可回查 | **通过（评审 R-1 强化后）** | `test_real_findings_evidence_path_exists`：V-01/V-02 的**全部** sources/sinks path 逐条断言存在于反编译源码树（弱断言 checked>0 已废弃）；`test_projected_draft_reference_alignment`：投影 evidence_refs 与 finding 的 sources/sinks 逐条对齐且 line ≥1 |
 | ③ AI 草稿与确定性证据分离 | **通过** | `test_ai_and_deterministic_separated`：ai_draft 与 deterministic 键结构性分离 + `provenance="projected_from_l2_review"` 诚实标注；`test_explorer_source_caveat_injected`：explorer 来源注入 caveat |
 | ④ 零可执行产物 | **通过** | `test_zero_executable_artifacts` + `test_save_creates_file_with_no_executables`：`executable_files_created == []` 恒空 + 落盘目录无 .py/.sh/.apk/.jar/.dex 文件扫描 + 命令骨架全占位符断言 |
 
@@ -60,6 +62,10 @@ M3-1 验收结论**独立于 M2 质量验收**（指引 §6.2/§6.3）：本任�
 
 ## 8. 回归
 
-- 专项：**17 passed**（tests/test_report_poc.py）；
-- 全量：**1195 passed / 0 failed**（基线 1178 + 17）；
+- 专项：**25 passed**（tests/test_report_poc.py——17 + 8 评审闭合用例）；
+- 全量：**1203 passed / 0 failed**（基线 1178 + 25）；
 - ruff：reporting/ + routes.py + 测试零错误。
+
+## 9. 评审闭合修订（事后补评审 R-1~R-11）
+
+R-2 L1 双条件（informational 分支）/ R-4 配置统一 app.state.settings / R-5 symlink+finding_id 白名单+缺 id 拒绝 / R-6 schema 级零可执行强制 / R-7 API TestClient 集成（409/200/404 映射实测）/ R-8 import 顶层 / R-9 async 铺路注释 / R-10 authorities 占位符化 + PocKind 返回类型 / R-11 截断标记 + deterministic 补 app 字段。R-3（探索假设种子）记录性处置归 M3-2（大纲 T3.2 回写义务一并移交）。

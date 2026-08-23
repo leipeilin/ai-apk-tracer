@@ -21,7 +21,7 @@ from app.reporting.generator import (
     project_draft_from_l2_review,
     save_report_document,
 )
-from app.reporting.models import ReportDraft
+from app.reporting.models import PoCSkeleton, ReportDraft
 from app.reporting.poc import build_poc_skeleton
 from app.reporting.repair import build_repair_draft
 from app.shared.errors import ConflictError, ValidationError
@@ -216,20 +216,129 @@ class TestRealFindingsEndToEnd:
         assert document.repair.deterministic_recommendations
 
     def test_real_findings_evidence_path_exists(self) -> None:
-        """四点自查②（引用回查）：V-01/V-02 的 path 在反编译源码树真实存在。"""
+        """四点自查②（引用回查——评审 R-1 强化）：V-01/V-02 的全部
+        sources/sinks path 在反编译源码树逐条存在（弱断言 checked>0 已废弃）。"""
         decompile_root = (
             _WORKSPACE / ".ai-apk-tracer" / "runs" / _HEALTH_RUN / "decompile" / "sources"
         )
         if not decompile_root.is_dir():
             pytest.skip("反编译产物缺失")
-        checked = 0
+        total = 0
         for key in ("V-01", "V-02"):
             finding = _load_real_finding(key)
             document = run(generate_report_document(finding))
             for bucket in ("sources", "sinks"):
                 for item in document.deterministic.get(bucket) or []:
-                    if isinstance(item, dict) and item.get("path") and (
-                        decompile_root / str(item["path"])
-                    ).exists():
-                        checked += 1
-        assert checked > 0  # 至少一条真实引用命中源码树
+                    if isinstance(item, dict) and item.get("path"):
+                        total += 1
+                        assert (decompile_root / str(item["path"])).exists(), (
+                            f"{key} 的 {bucket} 引用不可回查: {item['path']}")
+        assert total > 0
+
+
+# ---------------------------------------------------------------------------
+# 事后评审闭合（2026-08-23 review R-1/R-2/R-5/R-6/R-7——见 m3-report-poc-review.md）
+# ---------------------------------------------------------------------------
+
+
+class TestReviewClosure:
+    def test_informational_severity_rejected(self) -> None:
+        """R-2：L1 拒绝双条件——severity=informational 同样拦截（对齐 report.py 先例）。"""
+        with pytest.raises(ConflictError) as exc_info:
+            run(generate_report_document(
+                _confirmed_finding(severity="informational")))
+        assert exc_info.value.code == "L1_REPORT_FORBIDDEN"
+
+    def test_missing_finding_id_rejected(self) -> None:
+        """R-5：缺 id 拒绝（防 unknown 兜底多 finding 覆盖）。"""
+        finding = _confirmed_finding()
+        finding.pop("id")
+        with pytest.raises(ValidationError) as exc_info:
+            run(generate_report_document(finding))
+        assert exc_info.value.code == "FINDING_ID_MISSING"
+
+    def test_invalid_finding_id_characters_rejected(self) -> None:
+        """R-5：finding_id 路径注入防护（字符白名单）。"""
+        with pytest.raises(ValidationError) as exc_info:
+            run(generate_report_document(_confirmed_finding(id="../escape")))
+        assert exc_info.value.code == "FINDING_ID_INVALID"
+
+    def test_symlink_save_rejected(self, tmp_path: Path) -> None:
+        """R-5：预置 symlink 写穿防护。"""
+        document = run(generate_report_document(_confirmed_finding()))
+        drafts_dir = tmp_path / "reports" / "drafts"
+        drafts_dir.mkdir(parents=True)
+        target = tmp_path / "outside.json"
+        target.write_text("x", "utf-8")
+        (drafts_dir / f"{document.finding_id}.json").symlink_to(target)
+        with pytest.raises(ValidationError) as exc_info:
+            save_report_document(document, tmp_path)
+        assert exc_info.value.code == "REPORT_DRAFT_PATH_UNSAFE"
+
+    def test_executable_files_schema_enforced(self) -> None:
+        """R-6：executable_files_created 恒空由 schema 强制（M3-2 provider 无法绕过）。"""
+        with pytest.raises(Exception, match="executable_files_created"):
+            PoCSkeleton(
+                component_kind="service", kind="binder_transaction",
+                steps=[], command_skeleton=[], notes=[],
+                executable_files_created=["evil.py"])
+
+
+class TestReportDraftApi:
+    """R-7：API 层集成——三拒绝路径 HTTP 映射 + 正向 200 落盘。"""
+
+    def _client(self, tmp_path: Path, finding: dict[str, Any]):
+        from fastapi.testclient import TestClient
+
+        from app.config import Settings
+        from app.main import create_app
+
+        class _Repo:
+            def get_finding(self, finding_id: str) -> dict[str, Any]:
+                if finding.get("id") != finding_id:
+                    from app.shared.errors import NotFoundError
+                    raise NotFoundError("finding 不存在", "FINDING_NOT_FOUND")
+                return finding
+
+        class _Storage:
+            def run_dir(self, run_id: str) -> Path:
+                return tmp_path / "runs" / run_id
+
+        settings = Settings(
+            database_path=tmp_path / "tracer.sqlite3",
+        )
+        app = create_app(settings)
+        app.state.repository = _Repo()
+        app.state.storage = _Storage()
+        return TestClient(app)
+
+    def test_api_rejection_paths(self, tmp_path: Path) -> None:
+        cases = [
+            (_confirmed_finding(review_status="pending_manual"), 409),
+            (_confirmed_finding(severity="informational"), 409),
+            (_confirmed_finding(), 200),
+        ]
+        for finding, expected in cases:
+            with self._client(tmp_path, finding) as client:
+                response = client.post(
+                    f"/api/findings/{finding['id']}/report-draft")
+                assert response.status_code == expected, (
+                    finding.get("review_status"), finding.get("severity"), response.text[:200])
+                if expected == 200:
+                    data = response.json()
+                    assert data["finding_id"] == finding["id"]
+                    assert data["poc_skeleton"]["executable_files_created"] == []
+
+    def test_api_not_found(self, tmp_path: Path) -> None:
+        with self._client(tmp_path, _confirmed_finding()) as client:
+            response = client.post("/api/findings/no-such/report-draft")
+            assert response.status_code == 404
+
+    def test_api_persists_draft(self, tmp_path: Path) -> None:
+        finding = _confirmed_finding()
+        with self._client(tmp_path, finding) as client:
+            assert client.post(
+                f"/api/findings/{finding['id']}/report-draft").status_code == 200
+        saved = tmp_path / "runs" / "run_test" / "reports" / "drafts" / f"{finding['id']}.json"
+        assert saved.is_file()
+        assert json.loads(saved.read_text("utf-8"))["finding_id"] == finding["id"]

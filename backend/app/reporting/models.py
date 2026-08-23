@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 EvidenceSource = Literal["rule_candidate", "explorer_candidate"]
 DraftProvenance = Literal["projected_from_l2_review", "ai_report_protocol"]
@@ -62,6 +62,16 @@ class PoCSkeleton(BaseModel):
         default_factory=list,
         description="生成的可执行文件清单（恒空——allow_executable_poc=False 的机器断言锚点）",
     )
+
+    @field_validator("executable_files_created")
+    @classmethod
+    def _must_stay_empty(cls, value: list[str]) -> list[str]:
+        """schema 级强制（评审 R-6）：恒空不能只靠生成器约定——M3-2 换
+        provider 后 AI 输出直接构造 PoCSkeleton 也无法绕过。"""
+        if value:
+            raise ValueError(
+                "零可执行产物承诺：executable_files_created 必须为空列表")
+        return value
 
 
 class RepairDraft(BaseModel):
