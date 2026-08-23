@@ -1,0 +1,51 @@
+{
+  "additionalProperties": false,
+  "description": "报告草稿输出（M3-2 严格契约——字段名逐字，禁止附加字段）。",
+  "properties": {
+    "analysis_complete": {
+      "description": "分析是否完整",
+      "title": "Analysis Complete",
+      "type": "boolean"
+    },
+    "confidence_tier": {
+      "description": "置信等级",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence Tier",
+      "type": "string"
+    },
+    "exploit_scenario": {
+      "description": "利用场景描述",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Exploit Scenario",
+      "type": "string"
+    },
+    "summary": {
+      "description": "报告摘要（基于输入确定性事实）",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "vulnerability_narrative": {
+      "description": "漏洞叙述",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Vulnerability Narrative",
+      "type": "string"
+    }
+  },
+  "required": [
+    "summary",
+    "vulnerability_narrative",
+    "exploit_scenario",
+    "confidence_tier",
+    "analysis_complete"
+  ],
+  "title": "ReportDraftOutput",
+  "type": "object"
+}

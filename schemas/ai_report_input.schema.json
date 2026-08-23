@@ -1,0 +1,241 @@
+{
+  "$defs": {
+    "ReportEvidenceRef": {
+      "additionalProperties": false,
+      "description": "报告协议证据引用（M3-2——轻量，与 reporting.EvidencePointer 形状对齐）。",
+      "properties": {
+        "end_line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "结束行",
+          "title": "End Line"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "起始行",
+          "title": "Line"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "该引用支撑的事实摘要",
+          "title": "Note"
+        },
+        "path": {
+          "description": "工作区相对路径",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ReportEvidenceRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "报告草稿输入（M3-2：confirmed finding 的确定性投影 + 探索假设种子接口）。\n\n探索种子三字段（大纲 T3.2）：归一化层当前不透传假设层原文（评审 R-1\n实证）——接口就绪、数据缓期：字段存在时透传（规则轨 finding 为 None）。",
+  "properties": {
+    "component_name": {
+      "description": "组件名",
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Component Name",
+      "type": "string"
+    },
+    "deterministic_summary": {
+      "description": "确定性事实摘要（sources/sinks/guard/authorization 等——可信任，不含 AI 文本）",
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Deterministic Summary",
+      "type": "string"
+    },
+    "evidence_refs": {
+      "description": "确定性证据引用（可回查）",
+      "items": {
+        "$ref": "#/$defs/ReportEvidenceRef"
+      },
+      "maxItems": 64,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "explorer_component_summary": {
+      "anyOf": [
+        {
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "探索组件摘要（低信任）",
+      "title": "Explorer Component Summary"
+    },
+    "explorer_hypothesis": {
+      "anyOf": [
+        {
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "探索假设种子（低信任——仅 explorer 来源且有数据时）",
+      "title": "Explorer Hypothesis"
+    },
+    "explorer_impact_proposal": {
+      "anyOf": [
+        {
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "探索影响假设（低信任）",
+      "title": "Explorer Impact Proposal"
+    },
+    "finding_id": {
+      "description": "finding 稳定 ID",
+      "maxLength": 160,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#@+\\-]*$",
+      "title": "Finding Id",
+      "type": "string"
+    },
+    "l2_confidence_tier": {
+      "anyOf": [
+        {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "L2 复核置信等级",
+      "title": "L2 Confidence Tier"
+    },
+    "l2_flaw_holds": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "L2 复核缺陷成立判定",
+      "title": "L2 Flaw Holds"
+    },
+    "l2_harm_impact_target": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "L2 危害目标",
+      "title": "L2 Harm Impact Target"
+    },
+    "l2_harm_impact_type": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "L2 危害类型",
+      "title": "L2 Harm Impact Type"
+    },
+    "l2_verdict": {
+      "anyOf": [
+        {
+          "enum": [
+            "supports_candidate",
+            "refutes_candidate",
+            "unresolved"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "L2 复核独立裁决（候选级）",
+      "title": "L2 Verdict"
+    },
+    "rule_id": {
+      "description": "命中规则 ID",
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Rule Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "finding_id",
+    "rule_id",
+    "component_name",
+    "deterministic_summary"
+  ],
+  "title": "ReportInput",
+  "type": "object"
+}

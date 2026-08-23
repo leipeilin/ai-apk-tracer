@@ -612,10 +612,56 @@ class VerifyOutput(StrictAIModel):
         return self
 
 
+class ReportEvidenceRef(StrictAIModel):
+    """报告协议证据引用（M3-2——轻量，与 reporting.EvidencePointer 形状对齐）。"""
+
+    path: RelativePath = Field(description="工作区相对路径")
+    line: int | None = Field(default=None, ge=1, le=10_000_000, description="起始行")
+    end_line: int | None = Field(default=None, ge=1, le=10_000_000, description="结束行")
+    note: ShortText | None = Field(default=None, description="该引用支撑的事实摘要")
+
+
+class ReportInput(StrictAIModel):
+    """报告草稿输入（M3-2：confirmed finding 的确定性投影 + 探索假设种子接口）。
+
+    探索种子三字段（大纲 T3.2）：归一化层当前不透传假设层原文（评审 R-1
+    实证）——接口就绪、数据缓期：字段存在时透传（规则轨 finding 为 None）。
+    """
+
+    finding_id: Identifier = Field(description="finding 稳定 ID")
+    rule_id: ShortText = Field(description="命中规则 ID")
+    component_name: ShortText = Field(description="组件名")
+    deterministic_summary: LongText = Field(
+        description="确定性事实摘要（sources/sinks/guard/authorization 等——可信任，不含 AI 文本）")
+    explorer_hypothesis: LongText | None = Field(
+        default=None, description="探索假设种子（低信任——仅 explorer 来源且有数据时）")
+    explorer_impact_proposal: LongText | None = Field(default=None, description="探索影响假设（低信任）")
+    explorer_component_summary: LongText | None = Field(default=None, description="探索组件摘要（低信任）")
+    evidence_refs: list[ReportEvidenceRef] = Field(
+        default_factory=list, max_length=64, description="确定性证据引用（可回查）")
+    l2_verdict: Literal["supports_candidate", "refutes_candidate", "unresolved"] | None = Field(
+        default=None, description="L2 复核独立裁决（候选级）")
+    l2_confidence_tier: Literal["low", "medium", "high"] | None = Field(
+        default=None, description="L2 复核置信等级")
+    l2_flaw_holds: bool | None = Field(default=None, description="L2 复核缺陷成立判定")
+    l2_harm_impact_type: ShortText | None = Field(default=None, description="L2 危害类型")
+    l2_harm_impact_target: ShortText | None = Field(default=None, description="L2 危害目标")
+
+
+class ReportDraftOutput(StrictAIModel):
+    """报告草稿输出（M3-2 严格契约——字段名逐字，禁止附加字段）。"""
+
+    summary: LongText = Field(description="报告摘要（基于输入确定性事实）")
+    vulnerability_narrative: LongText = Field(description="漏洞叙述")
+    exploit_scenario: LongText = Field(description="利用场景描述")
+    confidence_tier: Literal["low", "medium", "high"] = Field(description="置信等级")
+    analysis_complete: bool = Field(description="分析是否完整")
+
+
 class RepairInput(StrictAIModel):
     """只携带无效输出与校验错误的格式修复输入。"""
 
-    target_output_model: Literal["PreflightOutput", "L1TriageOutput", "L2ReviewOutput", "FinalizationOutput", "DeepDiveOutput", "ExplorerObservation", "VerifyOutput"] = Field(description="必须恢复到的严格输出模型名称")
+    target_output_model: Literal["PreflightOutput", "L1TriageOutput", "L2ReviewOutput", "FinalizationOutput", "DeepDiveOutput", "ExplorerObservation", "VerifyOutput", "ReportDraftOutput"] = Field(description="必须恢复到的严格输出模型名称")
     invalid_output: JsonValue = Field(description="待做格式修复的原始解析结果；不得据此重新分析事实")
     validation_errors: list[LongText] = Field(min_length=1, max_length=64, description="目标模型校验失败的精简错误列表")
     output_schema_sha256: Sha256 = Field(description="目标输出 Schema 原始字节的 SHA-256")
@@ -731,6 +777,7 @@ AI_OUTPUT_MODEL_REGISTRY: dict[str, type[StrictAIModel]] = {
         DeepDiveOutput,
         ExplorerObservation,
         VerifyOutput,
+        ReportDraftOutput,
     )
 }
 AI_OUTPUT_MODEL_VERSIONS: dict[str, str] = {
@@ -767,6 +814,8 @@ AI_MODEL_REGISTRY: dict[str, type[StrictAIModel]] = {
         ExplorerObservation,
         VerifyInput,
         VerifyOutput,
+        ReportInput,
+        ReportDraftOutput,
     )
 }
 
@@ -784,6 +833,8 @@ AI_SCHEMA_MODELS: dict[str, type[StrictAIModel]] = {
     "ai_explorer_deep_dive_output.schema.json": DeepDiveOutput,
     "ai_verify_input.schema.json": VerifyInput,
     "ai_verify_output.schema.json": VerifyOutput,
+    "ai_report_input.schema.json": ReportInput,
+    "ai_report_draft_output.schema.json": ReportDraftOutput,
     "ai_repair_input.schema.json": RepairInput,
     "ai_repair_output.schema.json": RepairOutput,
     "ai_finalization_input.schema.json": FinalizationInput,

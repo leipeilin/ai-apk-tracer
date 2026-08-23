@@ -32,6 +32,8 @@ from app.analysis.ai_models import (
     PreflightOutput,
     RepairInput,
     RepairOutput,
+    ReportDraftOutput,
+    ReportInput,
     StrictAIModel,
     VerifyInput,
     VerifyOutput,
@@ -492,6 +494,27 @@ class OpenAICompatibleAnalyzer:
             model_input,
             VerifyOutput,
             "verify",
+        )
+
+    async def report_entry(self, model_input: ReportInput) -> dict[str, Any]:
+        """报告草稿协议执行（M3-2）：confirmed finding → AI 报告草稿。
+
+        与 verify_entry 同模式复用状态机（analysis_track="report" 自由字符串
+        ——仅入 metadata/缓存描述符）。缓存判据沿 verify_entry 先例 no-op 放弃
+        （ReportDraftOutput 无 evidence_refs——_cacheable_output 恒 False，读写
+        皆弃，评审 R-10c）。AI 失败由调用方（generator provider）降级回投影——
+        本方法不降级（协议层语义纯净）。
+        """
+
+        unavailable = self._analysis_unavailable_result()
+        if unavailable is not None:
+            return unavailable
+        return await self._invoke_prompt(
+            "report",
+            "1.0.0",
+            model_input,
+            ReportDraftOutput,
+            "report",
         )
 
     async def _invoke_prompt(

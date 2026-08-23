@@ -105,12 +105,12 @@ context_budget:
 ai:
   enabled: true
   # 例如 http://127.0.0.1:11434/v1；使用外部地址前需确认代码处理边界。
-  base_url: https://api.deepseek.com
+  base_url: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   # 这里只填写保存密钥的环境变量名，禁止填写真实密钥、Token 或 Cookie。
   # export AI_APK_TRACER_OPENAI_API_KEY="你的实际密钥"设置在环境变量中
   api_key_env: AI_APK_TRACER_OPENAI_API_KEY
   # OpenAI-compatible 服务端可识别的模型 ID；未配置时跳过 AI 阶段。
-  model: deepseek-v4-flash
+  model: deepseek-v4-pro-0813  # token-plan 订阅包含的快照 ID（裸 deepseek-v4-flash 不在订阅内，会 AccessDenied.Unpurchased）
   # 全局代码外发开关，默认 true；设为 false 会跳过 AI，且不存在额外的逐任务授权步骤。
   allow_external_code: true
   # 旧 timeout_seconds 仅在未显式配置 read_timeout_seconds 时作为读取超时回退。
@@ -213,3 +213,5 @@ report:
   allow_executable_poc: false
   # 仅已确认 finding 可触发报告生成。
   require_confirmed_finding: true
+  # 报告协议版本（M3-2：prompts/report/1.0.0——先声明后注册）。
+  prompt_version: report/1.0.0

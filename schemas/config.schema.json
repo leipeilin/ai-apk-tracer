@@ -185,7 +185,8 @@
       "required": ["allow_executable_poc", "require_confirmed_finding"],
       "properties": {
         "allow_executable_poc": {"type": "boolean", "default": false, "description": "是否允许生成可执行 PoC；默认禁止。"},
-        "require_confirmed_finding": {"type": "boolean", "default": true, "description": "仅已确认 finding 可触发报告生成。"}
+        "require_confirmed_finding": {"type": "boolean", "default": true, "description": "仅已确认 finding 可触发报告生成。"},
+        "prompt_version": {"type": "string", "default": "report/1.0.0", "description": "报告协议版本；先声明后注册（T0.9）。"}
       },
       "additionalProperties": true
     }

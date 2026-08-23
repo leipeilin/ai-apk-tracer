@@ -298,8 +298,11 @@ async def generate_finding_report_draft(finding_id: str, request: Request) -> di
     """
     repository = request.app.state.repository
     finding = repository.get_finding(finding_id)
+    # M3-2（评审 R-4）：真协议接线——共享 runtime transport；AI 失败由
+    # generator 降级回投影（报告永不因 AI 阻塞）
+    analyzer = request.app.state.ai_runtime.create_analyzer()
     document = await generate_report_document(
-        finding, settings=request.app.state.settings.report)
+        finding, settings=request.app.state.settings.report, analyzer=analyzer)
     run_dir = request.app.state.storage.run_dir(finding["run_id"])
     save_report_document(document, run_dir)
     return document.model_dump(mode="json")

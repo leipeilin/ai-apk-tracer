@@ -304,12 +304,23 @@ class TestReportDraftApi:
             def run_dir(self, run_id: str) -> Path:
                 return tmp_path / "runs" / run_id
 
+        class _FakeRuntime:
+            """M3-2：create_analyzer 返回 None-analyzer（投影模式——不调 AI）。"""
+
+            def create_analyzer(self, **kwargs: Any):
+                class _NoAnalyzer:
+                    async def report_entry(self, model_input: Any) -> dict[str, Any]:
+                        return {"status": "skipped", "metadata": {"reason": "test-no-ai"}}
+
+                return _NoAnalyzer()
+
         settings = Settings(
             database_path=tmp_path / "tracer.sqlite3",
         )
         app = create_app(settings)
         app.state.repository = _Repo()
         app.state.storage = _Storage()
+        app.state.ai_runtime = _FakeRuntime()
         return TestClient(app)
 
     def test_api_rejection_paths(self, tmp_path: Path) -> None:
@@ -342,3 +353,114 @@ class TestReportDraftApi:
         saved = tmp_path / "runs" / "run_test" / "reports" / "drafts" / f"{finding['id']}.json"
         assert saved.is_file()
         assert json.loads(saved.read_text("utf-8"))["finding_id"] == finding["id"]
+
+
+# ---------------------------------------------------------------------------
+# M3-2：report prompt 协议（真协议 + 降级 + provenance 分支）
+# ---------------------------------------------------------------------------
+
+
+class TestM32Protocol:
+    def test_models_registered_in_three_dicts(self) -> None:
+        """A-1（评审 R-3 扩展）：三个注册表均在册。"""
+        from app.analysis.ai_models import (
+            AI_MODEL_REGISTRY,
+            AI_OUTPUT_MODEL_REGISTRY,
+            AI_SCHEMA_MODELS,
+            ReportDraftOutput,
+            ReportInput,
+        )
+
+        assert AI_MODEL_REGISTRY["ReportInput"] is ReportInput
+        assert AI_MODEL_REGISTRY["ReportDraftOutput"] is ReportDraftOutput
+        assert AI_OUTPUT_MODEL_REGISTRY["ReportDraftOutput"] is ReportDraftOutput
+        assert AI_SCHEMA_MODELS["ai_report_input.schema.json"] is ReportInput
+        assert AI_SCHEMA_MODELS["ai_report_draft_output.schema.json"] is ReportDraftOutput
+
+    def test_report_prompt_strict_contract(self) -> None:
+        """A-3：严格契约断言（verify 重写模式）+ explorer 种子低信任声明。"""
+        from pathlib import Path
+
+        system = (
+            Path(__file__).resolve().parents[2]
+            / "prompts" / "report" / "1.0.0" / "system.md"
+        ).read_text("utf-8")
+        assert "只输出一个 JSON 对象" in system
+        assert "严格按此字段名" in system
+        assert "叙述必须基于输入事实" in system
+        assert "低信任探索假设种子" in system
+        assert "不得虚构" in system
+        assert "顶层必填字段：summary、vulnerability_narrative、exploit_scenario、confidence_tier、analysis_complete" in system
+
+    def test_prompt_variable_convention(self) -> None:
+        """A-3 补（评审 R-10b）：占位符惯例。"""
+        from app.analysis.ai import _prompt_variable
+
+        assert _prompt_variable("report") == "report_input_json"
+
+    def test_build_report_input_deterministic_projection(self) -> None:
+        """A-7（评审 R-1 负例口径）：规则轨 finding 种子三字段 None +
+        deterministic_summary 不含 description（AI 文本隔离——R-6）。"""
+        from app.reporting.generator import _build_report_input
+
+        finding = _confirmed_finding(description="L2 AI 生成的描述文本-隔离探针")
+        model_input = _build_report_input(finding)
+        assert model_input.explorer_hypothesis is None
+        assert model_input.explorer_impact_proposal is None
+        assert model_input.explorer_component_summary is None
+        assert "L2 AI 生成的描述文本-隔离探针" not in model_input.deterministic_summary
+        assert "ACTIVITY_INTENT_TO_SENSITIVE_SINK" in model_input.deterministic_summary
+        assert model_input.l2_verdict == "supports_candidate"
+        assert model_input.evidence_refs
+
+    def test_ai_provider_success_and_fallback(self) -> None:
+        """A-5/A-6：真协议成功（ai_report_protocol + metadata 回填）与降级
+        （projection + fallback 可观测——评审 R-9）。"""
+        from app.reporting.generator import generate_report_document
+
+        class _OkAnalyzer:
+            async def report_entry(self, model_input: Any) -> dict[str, Any]:
+                return {
+                    "status": "completed",
+                    "analysis": {
+                        "summary": "AI 摘要", "vulnerability_narrative": "AI 叙述",
+                        "exploit_scenario": "AI 场景", "confidence_tier": "medium",
+                        "analysis_complete": True,
+                    },
+                    "metadata": {"prompt_version": "1.0.0", "model": "test-model"},
+                }
+
+        class _FailAnalyzer:
+            async def report_entry(self, model_input: Any) -> dict[str, Any]:
+                return {"status": "failed", "classification": "schema_invalid",
+                        "message": "契约不符"}
+
+        ok = run(generate_report_document(_confirmed_finding(), analyzer=_OkAnalyzer()))
+        assert ok.ai_draft["provenance"] == "ai_report_protocol"
+        assert ok.ai_draft["summary"] == "AI 摘要"
+        assert ok.ai_draft["prompt_version"] == "1.0.0"
+        assert ok.ai_draft["model"] == "test-model"
+        assert "fallback" not in ok.ai_draft
+
+        degraded = run(generate_report_document(_confirmed_finding(), analyzer=_FailAnalyzer()))
+        assert degraded.ai_draft["provenance"] == "projected_from_l2_review"
+        assert degraded.ai_draft["fallback"]["classification"] == "schema_invalid"
+
+    def test_provider_takes_priority_over_analyzer(self) -> None:
+        """评审 R-10a：显式 provider 优先于 analyzer。"""
+        from app.reporting.generator import generate_report_document
+
+        custom = ReportDraft(
+            summary="s", vulnerability_narrative="n", exploit_scenario="e",
+            evidence_refs=[], confidence_tier="high", analysis_complete=True)
+
+        async def fake_provider(finding: dict[str, Any]) -> ReportDraft:
+            return custom
+
+        class _NeverAnalyzer:
+            async def report_entry(self, model_input: Any) -> dict[str, Any]:
+                raise AssertionError("analyzer 不应被调用")
+
+        doc = run(generate_report_document(
+            _confirmed_finding(), provider=fake_provider, analyzer=_NeverAnalyzer()))
+        assert doc.ai_draft["summary"] == "s"

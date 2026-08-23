@@ -24,7 +24,8 @@
         "FinalizationOutput",
         "DeepDiveOutput",
         "ExplorerObservation",
-        "VerifyOutput"
+        "VerifyOutput",
+        "ReportDraftOutput"
       ],
       "title": "Target Output Model",
       "type": "string"

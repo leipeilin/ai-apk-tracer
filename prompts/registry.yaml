@@ -336,7 +336,7 @@ prompts:
     system: ac507a90ac24d85267f2141746c8d58015dbf9ce33a4b238e3cf6820ea47c146
     user: e65a65f0531ba0a0ca92e2048b8c09a05935a5b70edf0651a588b01cd6ac5dea
   schema_sha256:
-    input: 684b0c4d04579519e2bc8b2731f422f3972442e1e0167fcd5231c4198a19d783
+    input: 2b378b2fb0ae3b195c6cc41a503af503e4a5fadcbf0b80e3fd3614d987ae1259
     output: 0e580ab0af82a278757f6d7c8c70591d4d3e7b86ded85666d0701665cb2b6772
 - id: finalization
   version: 1.0.1
@@ -402,3 +402,19 @@ prompts:
   schema_sha256:
     input: 21608b57507d5a42615e817f24638c5d24910f5f3c09db029a3221d715ee8b79
     output: 323ac68ccf1ecad7339f56dc57dd5bffa2a1deae4feb7d5cf656b3d800e6a5fc
+- id: report
+  version: 1.0.0
+  system_file: report/1.0.0/system.md
+  user_file: report/1.0.0/user.md
+  allowed_placeholders:
+  - report_input_json
+  input_model: ReportInput
+  output_model: ReportDraftOutput
+  input_schema_file: ai_report_input.schema.json
+  output_schema_file: ai_report_draft_output.schema.json
+  template_sha256:
+    system: 2b3c47ccf4a17b593a587469e1e8083a983089c17e278b9ae325d0c8ec9546a4
+    user: 9d784f1cde94b6fcb9540ceb5b2b7642842c9a9cb8c3abfd8c1fc0b5a58c59c8
+  schema_sha256:
+    input: 7e46ba1632ff8ebbf552375d1a4efc686cc63891eb2fc07035a6982a86de1aeb
+    output: 5a79df72f592a701c9d5b7a8386157340880845760e3696d89d9bb667c37c361

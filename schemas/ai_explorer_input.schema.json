@@ -1,6 +1,41 @@
 {
+  "$defs": {
+    "SeedHop": {
+      "additionalProperties": false,
+      "description": "探索骨架链第一跳（M4-SEED-HOPS 评审 R-1：三要素全确定性）。\n\n驱动层直查 call_sites（resolved 边 + start_line）构造——模型复制\nfrom/to/call_site_line 三要素即通过跳回查（真正确定性可回查，\n非仅\"边存在\"）。",
+      "properties": {
+        "call_site_line": {
+          "description": "调用点行号（call_sites.start_line——确定性）",
+          "minimum": 1,
+          "title": "Call Site Line",
+          "type": "integer"
+        },
+        "from_method_id": {
+          "description": "入口方法 ID",
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "From Method Id",
+          "type": "string"
+        },
+        "to_method_id": {
+          "description": "被调方法 ID（resolved 调用边目标）",
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "To Method Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_method_id",
+        "to_method_id",
+        "call_site_line"
+      ],
+      "title": "SeedHop",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
-  "description": "探索 Agent 每轮输入（T2.5a：explorer.py 构造——上下文累积 + 预算透明）。\n\nentry_json/attack_surface_json 为 api_entry_table/attack_surface 条目的\nJSON 序列化文本（六类入口字段异构——扁平文本注入优于投影模型，对齐\nDeepDiveInput.code_context 先例；评审 R-1/R-5：既有输出模型零改动）。",
+  "description": "探索 Agent 每轮输入（T2.5a：explorer.py 构造——上下文累积 + 预算透明）。\n\nentry_json/attack_surface_json 为 api_entry_table/attack_surface 条目的\nJSON 序列化文本（六类入口字段异构——扁平文本注入优于投影模型，对齐\nDeepDiveInput.code_context 先例；评审 R-1/R-5：既有输出模型零改动）。\nseed_hops 为骨架链第一跳（M4-SEED-HOPS——确定性可回查素材）。",
   "properties": {
     "attack_surface_json": {
       "anyOf": [
@@ -71,6 +106,15 @@
       "minimum": 1,
       "title": "Rounds Budget",
       "type": "integer"
+    },
+    "seed_hops": {
+      "description": "入口第一跳骨架（驱动层从 call_sites resolved 边确定性构造——from/to/call_site_line 三要素可直接复制进 chain_proposals 的 hops，复制即通过跳回查；骨架是起点素材而非结论，source/sink 语义仍由模型判定",
+      "items": {
+        "$ref": "#/$defs/SeedHop"
+      },
+      "maxItems": 16,
+      "title": "Seed Hops",
+      "type": "array"
     }
   },
   "required": [

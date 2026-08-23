@@ -15,12 +15,16 @@ ReportDocument 结构零改动。
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
+
+from app.analysis.ai_models import ReportDraftOutput, ReportEvidenceRef, ReportInput
 from app.config import ReportSettings
 from app.reporting.models import (
     EXPLORER_CAVEAT,
@@ -117,13 +121,109 @@ def _deterministic_projection(finding: dict[str, Any]) -> dict[str, Any]:
     return {field: finding.get(field) for field in _DETERMINISTIC_FIELDS}
 
 
+_L2_VERDICT_VALUES = {"supports_candidate", "refutes_candidate", "unresolved"}
+_TIER_VALUES = {"low", "medium", "high"}
+
+
+def _build_report_input(finding: dict[str, Any]) -> ReportInput:
+    """finding → ReportInput 投影（评审 R-6/R-7）。
+
+    deterministic_summary 拼接确定性字段（排除 finding.description——
+    L2 AI 文本，混入即违背 AI/确定性分离）；l2_* 用 candidate_verdict +
+    harm 结构化子字段（真实 ai_analysis 键名）；探索种子三字段按存在性
+    透传（归一化层当前不产出——接口就绪数据缓期，评审 R-1）。
+    """
+
+    ai = finding.get("ai_analysis") or {}
+    harm = ai.get("harm") if isinstance(ai.get("harm"), dict) else {}
+    parts = [
+        f"规则: {finding.get('rule_id')}",
+        f"组件: {finding.get('component_name')}（{finding.get('component')}）",
+        f"source 事实: {json.dumps(finding.get('sources') or [], ensure_ascii=False)[:3000]}",
+        f"sink 事实: {json.dumps(finding.get('sinks') or [], ensure_ascii=False)[:2000]}",
+        f"Guard: {finding.get('guard_status')}",
+        f"授权: {finding.get('authorization_status')}",
+        f"数据流: {finding.get('flow_kind')}",
+        f"严重性提示: {finding.get('severity_hint')}",
+    ]
+    deterministic_summary = "；".join(str(p) for p in parts if p and str(p) != "None") or "确定性事实缺失"
+    if len(deterministic_summary) > 9500:
+        deterministic_summary = deterministic_summary[:9500] + "…(truncated)"
+    l2_verdict = ai.get("candidate_verdict")
+    l2_tier = ai.get("confidence_tier")
+    pointers = _evidence_pointers(finding)
+    return ReportInput(
+        finding_id=str(finding.get("id") or finding.get("finding_id") or "unknown"),
+        rule_id=str(finding.get("rule_id") or "unknown"),
+        component_name=str(finding.get("component_name") or finding.get("component") or "unknown"),
+        deterministic_summary=deterministic_summary,
+        explorer_hypothesis=finding.get("explorer_hypothesis"),
+        explorer_impact_proposal=finding.get("explorer_impact_proposal"),
+        explorer_component_summary=finding.get("explorer_component_summary"),
+        evidence_refs=[
+            ReportEvidenceRef(
+                path=p.path, line=p.line, end_line=p.end_line,
+                note=(p.note[:200] if p.note else None))
+            for p in pointers
+        ],
+        l2_verdict=l2_verdict if l2_verdict in _L2_VERDICT_VALUES else None,
+        l2_confidence_tier=l2_tier if l2_tier in _TIER_VALUES else None,
+        l2_flaw_holds=ai.get("flaw_holds") if isinstance(ai.get("flaw_holds"), bool) else None,
+        l2_harm_impact_type=harm.get("impact_type"),
+        l2_harm_impact_target=harm.get("impact_target"),
+    )
+
+
+async def _ai_report_draft(
+    finding: dict[str, Any], analyzer: Any
+) -> tuple[ReportDraft | None, dict[str, Any]]:
+    """真协议调用（M3-2 评审 R-5）：成功 (draft, meta)；失败 (None, failure)。
+
+    evidence_refs 由确定性投影补齐（防 AI 虚构引用——DraftOutput 无此字段）。
+    """
+
+    result = await analyzer.report_entry(_build_report_input(finding))
+    if not isinstance(result, dict) or result.get("status") != "completed":
+        return None, {
+            "fallback": True,
+            "classification": result.get("classification") if isinstance(result, dict) else None,
+            "message": str(result.get("message") or "")[:200] if isinstance(result, dict) else "协议返回异常",
+        }
+    try:
+        output = ReportDraftOutput.model_validate(result.get("analysis") or {})
+    except PydanticValidationError:  # repair 后仍不符合严格契约则降级（协议层不抛出）
+        return None, {
+            "fallback": True, "classification": "response_invalid",
+            "message": "分析结果不符合 ReportDraftOutput 严格契约",
+        }
+    metadata = result.get("metadata") or {}
+    return ReportDraft(
+        summary=output.summary,
+        vulnerability_narrative=output.vulnerability_narrative,
+        exploit_scenario=output.exploit_scenario,
+        evidence_refs=_evidence_pointers(finding),
+        confidence_tier=output.confidence_tier,
+        analysis_complete=output.analysis_complete,
+    ), {
+        "fallback": False,
+        "prompt_version": metadata.get("prompt_version"),
+        "model": metadata.get("model"),
+    }
+
+
 async def generate_report_document(
     finding: dict[str, Any],
     *,
     settings: ReportSettings | None = None,
     provider: ReportDraftProvider | None = None,
+    analyzer: Any = None,
 ) -> ReportDocument:
-    """门禁校验 → provider 草稿 → 组装 ReportDocument（不落盘）。"""
+    """门禁校验 → 草稿（provider 显式注入优先，其次 analyzer 真协议，
+    缺省投影——评审 R-10a 优先级）→ 组装 ReportDocument（不落盘）。
+
+    analyzer 真协议失败时降级回投影（报告永不因 AI 阻塞——provenance 诚实
+    标注 + fallback 可观测，评审 R-9）。
+    """
 
     config = settings or ReportSettings()
     if config.allow_executable_poc:
@@ -151,12 +251,23 @@ async def generate_report_document(
         raise ValidationError(
             f"finding ID 含非法字符: {finding_id!r}", "FINDING_ID_INVALID")
 
-    draft_provider = provider or project_draft_from_l2_review
-    draft = await draft_provider(finding)
+    draft: ReportDraft | None = None
+    ai_meta: dict[str, Any] = {}
+    if provider is not None:
+        draft = await provider(finding)
+    elif analyzer is not None:
+        draft, ai_meta = await _ai_report_draft(finding, analyzer)
+        if draft is None:
+            draft = await project_draft_from_l2_review(finding)
+    else:
+        draft = await project_draft_from_l2_review(finding)
+    assert draft is not None
+
     evidence_source = (
         "explorer_candidate" if finding.get("candidate_source") == "explorer"
         else "rule_candidate"
     )
+    used_ai_protocol = bool(ai_meta) and not ai_meta.get("fallback")
     return ReportDocument(
         finding_id=finding_id,
         run_id=str(finding.get("run_id") or ""),
@@ -168,10 +279,13 @@ async def generate_report_document(
             "narrative": draft.vulnerability_narrative,
             "exploit_scenario": draft.exploit_scenario,
             "confidence_tier": draft.confidence_tier,
-            "provenance": "projected_from_l2_review",
-            "prompt_version": None,
-            "model": None,
+            "provenance": (
+                "ai_report_protocol" if used_ai_protocol else "projected_from_l2_review"
+            ),
+            "prompt_version": ai_meta.get("prompt_version"),
+            "model": ai_meta.get("model"),
             "analysis_complete": draft.analysis_complete,
+            **({"fallback": ai_meta} if ai_meta.get("fallback") else {}),
         },
         poc_skeleton=build_poc_skeleton(finding),
         repair=build_repair_draft(finding),

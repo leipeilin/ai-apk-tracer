@@ -260,6 +260,7 @@ class ReportSettings(BaseModel):
 
     allow_executable_poc: bool = Field(default=False, description="是否允许生成可执行 PoC；默认禁止（仅骨架）")
     require_confirmed_finding: bool = Field(default=True, description="仅已确认 finding 可触发报告生成")
+    prompt_version: str = Field(default="report/1.0.0", description="报告协议版本；先声明后注册（T0.9），注册前不得运行时解析")
 
 
 class Settings(BaseSettings):
