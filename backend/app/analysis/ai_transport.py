@@ -6,13 +6,17 @@ import asyncio
 import random
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
 
-from app.analysis.ai_scheduler import CircuitOpenError, TaskCircuit, get_provider_controller
+from app.analysis.ai_scheduler import (
+    CircuitOpenError,
+    TaskCircuit,
+    get_provider_controller,
+)
 
 _RETRYABLE_STATUSES = {408, 425, 429}
 _SECRET_PATTERN = re.compile(r"(?i)(bearer\s+|api[_-]?key[=:]\s*)[^\s,;]+")
@@ -90,12 +94,17 @@ class AITransport:
         )
         controller = self.provider_controller()
         url = self.settings.base_url.rstrip("/") + "/chat/completions"
+        # M2-DEFECT-FIX D-2：单次请求总时长兜底（墙钟）——防御中间层 keepalive
+        # 重置 httpx 分项超时的长挂起（实测连接 15 分钟无数据且 read_timeout
+        # 未触发）；未显式配置时由 config 派生 read_timeout + 60
+        request_timeout = float(getattr(self.settings, "request_timeout_seconds", 180.0) or 180.0)
         for attempt in range(max_attempts):
             if self._fatal_failure is not None:
                 failure, status = self._fatal_failure
                 return AITransportResult(None, attempts, failure, status)
             if circuit is not None and circuit.is_open:
                 return AITransportResult(None, attempts, "circuit_open")
+            timed_out = False
             try:
                 async with controller.lease(circuit):
                     await self._global_semaphore.acquire()
@@ -106,12 +115,25 @@ class AITransport:
                         if circuit is not None and circuit.is_open:
                             raise CircuitOpenError(circuit.reason or "task circuit is open")
                         attempts += 1
-                        response = await self.client.post(url, headers=headers, json=payload)
+                        response = None
+                        try:
+                            response = await asyncio.wait_for(
+                                self.client.post(url, headers=headers, json=payload),
+                                request_timeout,
+                            )
+                        except TimeoutError:
+                            # 总时长兜底触发——wait_for 已取消底层请求（semaphore
+                            # 释放与 lease 退出必经 finally/__aexit__——评审 R-5）
+                            timed_out = True
+                            response = None
                     finally:
                         self._global_semaphore.release()
             except CircuitOpenError:
                 return AITransportResult(None, attempts, "circuit_open")
             except httpx.HTTPError:
+                timed_out = True  # 网络异常与总时长兜底共用重试路径
+                response = None
+            if timed_out or response is None:
                 if attempt + 1 < max_attempts:
                     await self.retry_backoff(None, attempt)
                     continue
@@ -191,8 +213,8 @@ def retry_after_seconds(response: httpx.Response | None) -> float | None:
         try:
             retry_at = parsedate_to_datetime(value)
             if retry_at.tzinfo is None:
-                retry_at = retry_at.replace(tzinfo=timezone.utc)
-            return max((retry_at - datetime.now(timezone.utc)).total_seconds(), 0.0)
+                retry_at = retry_at.replace(tzinfo=UTC)
+            return max((retry_at - datetime.now(UTC)).total_seconds(), 0.0)
         except (TypeError, ValueError, OverflowError):
             return None
 

@@ -10,6 +10,7 @@
 7. 必填字段一个都不得省略：嵌套结构（Hop/ExplorerEvidenceRef/ChainProposal/ReadRequest/ComponentSummary/ExplorerLoopState）的 required 字段全部必填；只能输出协议声明的字段，禁止附加字段；枚举值逐一按定义取值。
 8. component_summary 是对入口组件功能的客观描述：exported 依据入口事实（entry_json 的 exported/externally_reachable），不评价漏洞性。
 9. read_requests 每条必须给出 reason（为什么需要这份代码/调用关系——审计要求）。
+10. 禁止无据产链：输入的 code_context 为 null（尚未读码）时，禁止输出 chain_proposals——此时只输出 component_summary、loop.done=false 与 read_requests（先通过读码获取真实方法 ID 与调用关系，再在后续轮构造链）。chain_proposals 中的每个 method_id 都必须出现在已见过的 code_context 或 entry_json 中。预算将尽且无可用 code_context 时仍不得产链，仅输出 component_summary + done=false + read_requests，由驱动层预算终止承载。
 
 ## 输出契约（ExplorerObservation，严格按此字段名）
 顶层必填字段：component_summary、loop。

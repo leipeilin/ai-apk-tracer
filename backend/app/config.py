@@ -71,6 +71,16 @@ class AISettings(BaseModel):
     read_timeout_seconds: float = Field(default=120.0, gt=0, le=3600, description="读取模型响应的超时，单位秒")
     write_timeout_seconds: float = Field(default=30.0, gt=0, le=600, description="写入模型请求的超时，单位秒")
     pool_timeout_seconds: float = Field(default=10.0, gt=0, le=600, description="等待 HTTP 连接池的超时，单位秒")
+    request_timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        le=7200,
+        description=(
+            "单次模型 HTTP 请求总时长兜底（墙钟）——防御中间层 keepalive 重置分项超时的"
+            "长挂起（M2-DEFECT-FIX D-2）；超时归入可重试 network 失败。"
+            "None 时动态取 read_timeout_seconds + 60"
+        ),
+    )
     max_request_bytes: int = Field(default=524288, description="单次 AI 请求 HTTP body 字节上限，超过则不发请求")
     max_concurrent: int = Field(default=6, ge=1, le=64, description="进程级 AI HTTP 最大并发数")
     candidate_concurrency: int = Field(default=4, ge=1, le=32, description="单次扫描并发分析候选数上限")
@@ -111,6 +121,15 @@ class AISettings(BaseModel):
         if isinstance(value, dict) and "read_timeout_seconds" not in value and "timeout_seconds" in value:
             return {**value, "read_timeout_seconds": value["timeout_seconds"]}
         return value
+
+    @model_validator(mode="after")
+    def derive_request_timeout(self) -> AISettings:
+        """总时长兜底未显式配置时随 read 超时缩放（评审 R-2——硬编码会在
+        read_timeout 配大时先于分项超时触发，误杀正常长响应）。"""
+
+        if self.request_timeout_seconds is None:
+            self.request_timeout_seconds = self.read_timeout_seconds + 60.0
+        return self
 
 
 class FunnelSettings(BaseModel):

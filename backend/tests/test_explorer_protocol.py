@@ -214,3 +214,8 @@ def test_prompt_declares_required_and_enums() -> None:
     # 数组上限声明（Pydantic 校验先于驱动归一化——超限即 schema_invalid）
     for token in ("1-32 个", "最多 32 个", "最多 16 个", "最多 64 个"):
         assert token in system, f"prompt 缺少数组上限声明: {token}"
+    # M2-DEFECT-FIX D-3：无据产链禁令（首轮无 code_context 时模型编造 hops
+    # → 跳回查必然失败 → validated=0 的质量根因防护）
+    assert "禁止无据产链" in system, "prompt 缺少'禁止无据产链'约束"
+    assert "code_context 为 null" in system, "prompt 缺少无上下文禁链条件声明"
+    assert "由驱动层预算终止承载" in system, "prompt 缺少预算尽与禁链的优先级声明"

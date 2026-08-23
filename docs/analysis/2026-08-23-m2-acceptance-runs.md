@@ -81,12 +81,11 @@
 
 ## 4. 已知限制与发现（如实记录，不勾选对应验收点）
 
-1. **validated=0（探索候选质量限制）**：根因 = 模型在首轮无 code_context 时直接产出 chain_proposals（hops 的 method_id 为推测值，违反 prompt"引用必须可回查"约束）→ 跳回查必然失败 → unverified。带方法体上下文时模型可产出结构正确的链（探针实证：2 条链 hops 全真实）。
-   **改进方向**（M4 评估项）：prompt 增加硬约束"无 code_context 时禁止输出 chain_proposals，必须先 read_requests"；或首轮驱动层不传产链指令。
+1. **validated=0（探索候选质量限制）→ prompt 侧已修复（M2-DEFECT-FIX 硬约束 10"禁止无据产链"）；行为级效果待下轮真实 run 验证（探针可选项见 M2-DEFECT-FIX 验收方案 R-6）**：根因 = 模型在首轮无 code_context 时直接产出 chain_proposals（hops 的 method_id 为推测值，违反 prompt"引用必须可回查"约束）→ 跳回查必然失败 → unverified。带方法体上下文时模型可产出结构正确的链（探针实证：2 条链 hops 全真实）。
 2. **核验 52 候选全部 fallback**：verify_entry 对全部 L2 规则候选未产出 completed 结果（单候选级失败→回退单轮 L2）。主链未阻塞（设计内降级）。根因待查（大概率同为 verify prompt 输出 schema/repair 失败——与探索 repair 率高同源：模型对严格 JSON 输出的合规率）。**改进方向**：verify prompt 迭代（对齐 explorer prompt 修复模式）。
 3. **repair 重试率高**：探索 458 预算请求产生 ~900+ 实际 HTTP 调用（含 repair）——每 schema_invalid 触发一次 repair 重试。成本翻倍。改进方向同 ①②（prompt 合规率）。
-4. **产品缺陷（M2 审查新发现，待修复）**：`manifest_extractor.extract_decoded_manifest` 的 `process.communicate()`（两处）与 `shutil.rmtree(.manifest-decode)`（万级文件清理）**均无超时保护**——大 APK 场景可无限阻塞 run。建议：communicate 加 wait_for、rmtree 换增量删除或后台清理。
-5. **AI 偶发长挂起（待核实）**：一次观察中 httpx 连接 ESTABLISHED 后 15 分钟无数据且 read_timeout=120s 未触发（疑似服务端/VPN 中间层行为）。建议产品级加固：AI 调用加总时长兜底（如 `asyncio.wait_for(transport 调用, 300s)`）。
+4. **产品缺陷（M2 审查新发现）→ 已修复（M2-DEFECT-FIX，2026-08-23）**：`manifest_extractor.extract_decoded_manifest` 的 `process.communicate()`（两处）与 `shutil.rmtree(.manifest-decode)`（万级文件清理）均无超时——已修复（communicate 包 wait_for + killpg 进程树回收二次兜底；rmtree 走 to_thread + wait_for 不阻塞事件循环；start_new_session 隔离进程组；超时归 DependencyError/MANIFEST_DECODE_TIMEOUT）。
+5. **AI 偶发长挂起 → 已加固（M2-DEFECT-FIX）**：一次观察中 httpx 连接 ESTABLISHED 后 15 分钟无数据且 read_timeout=120s 未触发（疑似服务端/VPN 中间层 keepalive 重置分项超时）——已加**总时长兜底**（`request_timeout_seconds` 单次请求墙钟，未配置时动态取 read_timeout+60；超时归入可重试 network 路径）。
 
 ## 5. 环境说明
 
