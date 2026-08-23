@@ -1259,3 +1259,50 @@ def test_attack_surface_injected_into_model_input(tmp_path: Path) -> None:
     orchestrator2 = ExplorerOrchestrator(fake2, call_tree2, ExplorerSettings(), tmp_path)
     asyncio_run(orchestrator2.explore_all([entry2]))
     assert fake2.inputs[0].attack_surface_json is None
+
+
+# ---------------------------------------------------------------------------
+# M4-SEED-HOPS：骨架链第一跳（确定性可回查——评审 R-1 三要素）
+# ---------------------------------------------------------------------------
+
+
+def test_seed_hops_built_from_call_sites(tmp_path: Path) -> None:
+    """A-2：入口有 resolved 边 → 前 N 个 callee 组装为 SeedHop（三要素）。"""
+    fake = FakeAnalyzer([{"done": True, "proposals": [_proposal()]}])
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    orchestrator = ExplorerOrchestrator(fake, call_tree, ExplorerSettings(), tmp_path)
+    seed_hops = orchestrator._build_seed_hops(entry)
+    assert seed_hops, "A→B 链应有 resolved 第一跳"
+    assert entry["method_id"]
+    for hop in seed_hops:
+        assert hop.from_method_id == entry["method_id"]
+        assert hop.to_method_id
+        assert hop.call_site_line >= 1
+    assert len(seed_hops) <= 8
+
+
+def test_seed_hops_injected_every_round(tmp_path: Path) -> None:
+    """A-4：每轮 model_input.seed_hops 同一非空列表（幂等注入）。"""
+    fake = FakeAnalyzer([
+        {"done": False, "requests": [{"operation": "get_method_body", "target": None}]},
+        {"done": True, "proposals": [_proposal()]},
+    ])
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    fake._rounds[0]["requests"][0]["target"] = entry["method_id"]
+    orchestrator = ExplorerOrchestrator(fake, call_tree, ExplorerSettings(), tmp_path)
+
+    asyncio_run(orchestrator.explore_all([entry]))
+    assert len(fake.inputs) == 2
+    seed_lists = [model_input.seed_hops for model_input in fake.inputs]
+    assert all(seed_lists) and seed_lists[0] == seed_lists[1]
+
+
+def test_seed_hops_degrade_to_empty(tmp_path: Path) -> None:
+    """A-3：无 method_id / 库不可读 → 空列表降级（探索不阻塞）。"""
+    fake = FakeAnalyzer([{"done": True, "proposals": [_proposal()]}])
+    call_tree = _service(tmp_path)
+    orchestrator = ExplorerOrchestrator(fake, call_tree, ExplorerSettings(), tmp_path)
+    assert orchestrator._build_seed_hops({"method_id": None}) == []
+    assert orchestrator._build_seed_hops({"method_id": "x#y:1"}) == []

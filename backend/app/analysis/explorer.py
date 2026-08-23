@@ -38,6 +38,7 @@ from app.analysis.ai_models import (
     ExplorerCandidateDeepDive,
     ExplorerInput,
     ExplorerObservation,
+    SeedHop,
 )
 from app.config import ExplorerSettings
 
@@ -50,6 +51,9 @@ _MAX_CONTEXT_BYTES_PER_REQUEST = 8 * 1024
 # 探针 v3 实测多轮累积可超限致 ExplorerInput 构造 ValidationError——驱动层防御，
 # 保头部（入口方法体优先），尾部截断并标注）
 _MAX_EXPLORE_CONTEXT_CHARS = 9500
+
+# 骨架链第一跳上限（M4-SEED-HOPS：构造截断 N=8；schema 上限 16 留余量）
+_MAX_SEED_HOPS = 8
 
 # 深挖 code_context 总量上限（schema LongText max 10_000 留余量）
 _MAX_DEEP_DIVE_CONTEXT_CHARS = 9500
@@ -164,6 +168,22 @@ class ExplorerOrchestrator:
         self._write_candidates(candidates)
         return candidates
 
+    def _build_seed_hops(self, entry: dict[str, Any]) -> list[SeedHop]:
+        """骨架链第一跳（M4-SEED-HOPS 评审 R-1/R-6：三要素全确定性）。
+
+        委托 CallTreeService.get_seed_hops（其 run_dir 为真实 run 目录——
+        探针场景 ExplorerOrchestrator 的 run_dir 是落盘目录，两种语义
+        不能混用——v5 探针实证的装配缺陷修正）。无边/失败 → 空列表降级。
+        """
+
+        method_id = str(entry.get("method_id") or "")
+        if not method_id:
+            return []
+        return [
+            SeedHop.model_validate(row)
+            for row in self._call_tree.get_seed_hops(method_id, _MAX_SEED_HOPS)
+        ]
+
     async def _explore_entry(self, entry: dict[str, Any]) -> tuple[list[dict[str, Any]], str, list[dict[str, Any]]]:
         """单入口轮循环：返回（候选列表, 终止原因）。
 
@@ -176,6 +196,8 @@ class ExplorerOrchestrator:
         if not method_id:
             return [], "no_method", []
 
+        # M4-SEED-HOPS：首轮前构造一次，每轮幂等注入（与 attack_surface 同模式）
+        seed_hops = self._build_seed_hops(entry)
         rounds: list[dict[str, Any]] = []
         proposals: list[dict[str, Any]] = []
         prompt_version = model = None
@@ -206,6 +228,7 @@ class ExplorerOrchestrator:
                 "requests_budget": max(requests_budget, 0),
                 "entry_json": json.dumps(entry, ensure_ascii=False),
                 "attack_surface_json": attack_surface_json,
+                "seed_hops": seed_hops,
                 "prior_observations": prior_summary,
                 "code_context": joined_context,
             })

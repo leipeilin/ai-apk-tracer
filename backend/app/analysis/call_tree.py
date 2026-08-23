@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
@@ -164,9 +165,34 @@ class CallTreeService:
             "gaps": relations["gaps"].get(method_id, []),
         }
 
+    def get_seed_hops(self, method_id: str, limit: int = 8) -> list[dict[str, Any]]:
+        """骨架链第一跳（M4-SEED-HOPS 评审 R-1/R-6）：直查 call_sites 的
+        resolved 边（含 start_line——三要素确定性，按 start_line 确定序）。
+
+        库不可读/无边 → 空列表降级（探索回到现状行为——结构性回退开关）。
+        """
+
+        database_path = self._run_dir / "index" / "analysis.sqlite3"
+        try:
+            with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as connection:
+                rows = connection.execute(
+                    "SELECT start_line, resolved_target_id FROM call_sites "
+                    "WHERE method_id = ? AND resolve_status = 'resolved' "
+                    "AND resolved_target_id IS NOT NULL "
+                    "ORDER BY start_line LIMIT ?",
+                    (method_id, limit),
+                ).fetchall()
+        except sqlite3.Error:
+            LOGGER.warning("seed hops 查询失败（降级为空骨架）", extra={"method_id": method_id})
+            return []
+        return [
+            {"from_method_id": method_id, "to_method_id": str(target), "call_site_line": line}
+            for line, target in rows
+            if isinstance(line, int) and line >= 1 and target
+        ]
+
     def get_callers(self, method_id: str) -> dict[str, Any]:
         """直接调用方（resolved 边）。"""
-
         relations = self._reader.get_call_relations_for_methods(
             [method_id], include_callers=True, include_callees=False
         )

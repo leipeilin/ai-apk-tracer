@@ -224,3 +224,10 @@ def test_prompt_declares_required_and_enums() -> None:
     assert "禁止空转轮" in system, "prompt 缺少'禁止空转轮'约束"
     assert "done=false 且 read_requests 为空" in system, "prompt 缺少空转轮判定条件声明"
     assert "get_callers/get_callees" in system, "prompt 缺少信息稀少入口的主动取证指导"
+    # M4-SEED-HOPS：骨架链使用（评审 R-4 修正——三要素确定性 + D-3 不豁免）
+    assert "骨架链使用" in system, "prompt 缺少'骨架链使用'约束"
+    assert "复制进 chain_proposals 的 hops 即通过跳回查" in system, "prompt 缺少 seed 三要素可回查声明"
+    assert "起点骨架而非结论" in system, "prompt 缺少 seed 语义边界声明"
+    assert "约束 10 不因 seed 豁免" in system, "prompt 缺少 D-3 不豁免声明"
+    # 约束 4 的可回查来源枚举补 seed_hops（评审 R-4）
+    assert "entry_json/code_context/seed_hops" in system, "约束 4 未声明 seed_hops 来源"

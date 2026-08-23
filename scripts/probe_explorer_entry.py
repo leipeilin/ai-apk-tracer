@@ -190,12 +190,28 @@ async def _run_probe(args: argparse.Namespace) -> int:
             result = await analyzer.explore_entry(model_input)
             analysis = result.get("analysis") if isinstance(result, dict) else None
             chain_count = len((analysis or {}).get("chain_proposals") or [])
+            # M4-SEED-HOPS 评审 R-2：seed 命中统计——产链首跳 from/to 是否取自 seed
+            seed_keys = {
+                (h.from_method_id, h.to_method_id) for h in model_input.seed_hops
+            }
+            seed_hits = 0
+            first_hops_total = 0
+            for proposal in (analysis or {}).get("chain_proposals") or []:
+                hops = proposal.get("hops") or []
+                if hops and isinstance(hops[0], dict):
+                    first_hops_total += 1
+                    key = (hops[0].get("from_method_id"), hops[0].get("to_method_id"))
+                    if key in seed_keys:
+                        seed_hits += 1
             round_probes.append({
                 "entry_id": json.loads(model_input.entry_json).get("entry_id"),
                 "round_index": model_input.round_index,
                 "code_context_is_none": context_is_none,
                 "status": result.get("status"),
                 "chain_proposals_count": chain_count,
+                "seed_hops_count": len(model_input.seed_hops),
+                "seed_first_hop_hits": seed_hits,
+                "first_hops_total": first_hops_total,
                 "d3_violation": _classify_d3_violation(
                     context_is_none, result.get("status"), chain_count),
             })
@@ -235,6 +251,13 @@ async def _run_probe(args: argparse.Namespace) -> int:
         validated = int(validation_counts.get("validated") or 0)
         partial = int(validation_counts.get("partially_validated") or 0)
         unverified = int(validation_counts.get("unverified") or 0)
+        # M4-SEED-HOPS：骨架使用率（评审 R-2——A-8 验收载体）
+        first_hops_total = sum(p["first_hops_total"] for p in round_probes)
+        seed_first_hop_hits = sum(p["seed_first_hop_hits"] for p in round_probes)
+        rounds_with_seed = sum(1 for p in round_probes if p["seed_hops_count"] > 0)
+        seed_hit_rate = (
+            round(seed_first_hop_hits / first_hops_total, 3) if first_hops_total else None
+        )
         threshold = 5 if len(selected) >= 10 else max(1, round(len(selected) * 0.5))
         passed = not d3_violations and (validated + partial) >= threshold
 
@@ -249,6 +272,12 @@ async def _run_probe(args: argparse.Namespace) -> int:
                 "validated": validated,
                 "partially_validated": partial,
                 "unverified": unverified,
+            },
+            "seed_usage": {
+                "rounds_with_seed": rounds_with_seed,
+                "first_hops_total": first_hops_total,
+                "seed_first_hop_hits": seed_first_hop_hits,
+                "seed_hit_rate": seed_hit_rate,
             },
             "d3_violations": d3_violations,
             "threshold": {"required_validated_plus_partial": threshold,

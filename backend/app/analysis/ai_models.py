@@ -404,12 +404,26 @@ class ExplorerCandidate(StrictAIModel):
     deep_dive: ExplorerCandidateDeepDive | None = Field(default=None, description="T2.8 深挖结果（仅 partially_validated 候选；未深挖为 None；前向引用——见 DeepDiveOutput 后 model_rebuild）")
 
 
+class SeedHop(StrictAIModel):
+    """探索骨架链第一跳（M4-SEED-HOPS 评审 R-1：三要素全确定性）。
+
+    驱动层直查 call_sites（resolved 边 + start_line）构造——模型复制
+    from/to/call_site_line 三要素即通过跳回查（真正确定性可回查，
+    非仅"边存在"）。
+    """
+
+    from_method_id: MethodId = Field(description="入口方法 ID")
+    to_method_id: MethodId = Field(description="被调方法 ID（resolved 调用边目标）")
+    call_site_line: int = Field(ge=1, description="调用点行号（call_sites.start_line——确定性）")
+
+
 class ExplorerInput(StrictAIModel):
     """探索 Agent 每轮输入（T2.5a：explorer.py 构造——上下文累积 + 预算透明）。
 
     entry_json/attack_surface_json 为 api_entry_table/attack_surface 条目的
     JSON 序列化文本（六类入口字段异构——扁平文本注入优于投影模型，对齐
     DeepDiveInput.code_context 先例；评审 R-1/R-5：既有输出模型零改动）。
+    seed_hops 为骨架链第一跳（M4-SEED-HOPS——确定性可回查素材）。
     """
 
     round_index: int = Field(ge=1, description="当前轮次（从 1 起）")
@@ -419,6 +433,15 @@ class ExplorerInput(StrictAIModel):
     attack_surface_json: LongText | None = Field(
         default=None,
         description="入口所属组件的 attack_surface 条目 JSON（攻击面/索引摘要上下文）",
+    )
+    seed_hops: list[SeedHop] = Field(
+        default_factory=list,
+        max_length=16,
+        description=(
+            "入口第一跳骨架（驱动层从 call_sites resolved 边确定性构造——"
+            "from/to/call_site_line 三要素可直接复制进 chain_proposals 的 hops，"
+            "复制即通过跳回查；骨架是起点素材而非结论，source/sink 语义仍由模型判定"
+        ),
     )
     prior_observations: LongText | None = Field(
         default=None,
