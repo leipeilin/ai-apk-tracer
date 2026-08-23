@@ -67,6 +67,31 @@ _KIND_MAP = {
 }
 
 
+def load_attack_surface_index(run_dir: Path) -> dict[str, dict[str, Any]]:
+    """attack_surface/{kind}.json 的组件索引（name → 组件条目）。
+
+    供探索输入注入攻击面事实（exported/权限/intent-filter/敏感能力——
+    确定性分析产物，模型可信任；M2 收尾-3 稳定修复：把"模型从空方法体
+    猜入口可控性"换成"直接看到事实"）。缺失/损坏 → 空索引（容错降级，
+    探索仍可运行——与 attack_surface_json 可选语义一致）。
+    """
+
+    index: dict[str, dict[str, Any]] = {}
+    for kind in ("activity", "service", "receiver", "provider"):
+        path = run_dir / "attack_surface" / f"{kind}.json"
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text("utf-8"))
+        except (json.JSONDecodeError, OSError):
+            LOGGER.warning("attack_surface/%s.json 读取失败（探索攻击面注入降级）", kind)
+            continue
+        for component in payload.get("components") or []:
+            if isinstance(component, dict) and component.get("name"):
+                index[str(component["name"])] = component
+    return index
+
+
 class ExplorerOrchestrator:
     """探索轨循环驱动者（受控检索循环——方案 §2.4）。
 
@@ -82,12 +107,16 @@ class ExplorerOrchestrator:
         settings: ExplorerSettings,
         run_dir: Path,
         deep_dive_call: Callable[[DeepDiveInput], Awaitable[dict[str, Any]]] | None = None,
+        attack_surface: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self._ai_call = ai_call
         self._call_tree = call_tree
         self._settings = settings
         self._run_dir = run_dir
         self._deep_dive_call = deep_dive_call
+        # M2 收尾-3：组件名 → attack_surface 条目（load_attack_surface_index
+        # 构造）；None = 降级为不注入（attack_surface_json 保持 null）
+        self._attack_surface = attack_surface or {}
         self._ai_requests_used = 0
         self._read_requests_used = 0
         self._deep_dive_requests_used = 0
@@ -162,12 +191,21 @@ class ExplorerOrchestrator:
                     joined_context[:_MAX_EXPLORE_CONTEXT_CHARS]
                     + "\n…(earlier context retained, later context truncated)"
                 )
+            attack_surface_entry = self._attack_surface.get(
+                str(entry.get("component_name") or ""))
+            attack_surface_json = (
+                json.dumps(attack_surface_entry, ensure_ascii=False)
+                if attack_surface_entry else None
+            )
+            if attack_surface_json is not None and len(attack_surface_json) > _MAX_EXPLORE_CONTEXT_CHARS:
+                attack_surface_json = (
+                    attack_surface_json[:_MAX_EXPLORE_CONTEXT_CHARS] + "…(truncated)")
             model_input = ExplorerInput.model_validate({
                 "round_index": round_index,
                 "rounds_budget": self._settings.max_rounds_per_entry,
                 "requests_budget": max(requests_budget, 0),
                 "entry_json": json.dumps(entry, ensure_ascii=False),
-                "attack_surface_json": None,  # 由调用方扩展点注入（攻击面上下文）
+                "attack_surface_json": attack_surface_json,
                 "prior_observations": prior_summary,
                 "code_context": joined_context,
             })

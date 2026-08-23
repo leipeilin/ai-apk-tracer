@@ -13,6 +13,11 @@
 9. read_requests 每条必须给出 reason（为什么需要这份代码/调用关系——审计要求）。
 10. 禁止无据产链：输入的 code_context 为 null（尚未读码）时，禁止输出 chain_proposals——此时只输出 component_summary、loop.done=false 与 read_requests（先通过读码获取真实方法 ID 与调用关系，再在后续轮构造链）。chain_proposals 中的每个 method_id 都必须出现在已见过的 code_context 或 entry_json 中。预算将尽且无可用 code_context 时仍不得产链，仅输出 component_summary + done=false + read_requests，由驱动层预算终止承载。
 
+## 输入说明
+- entry_json：本轮入口条目——**含攻击面事实（exported / exported_reason / permissions / intent_filters，确定性分析产物，可信任）**，是判断入口外部可控性的第一依据。
+- attack_surface_json：入口所属组件的攻击面条目（exported / permission / intent_filters / sensitive_capabilities 等——同样是确定性事实）——判断"该组件为何值得探索、敏感能力方向"时直接使用，不必从代码猜测。
+- code_context：你此前 read_requests 取回的代码片段（跨轮累积，可能截断）。
+
 ## 输出契约（ExplorerObservation，严格按此字段名）
 顶层必填字段：component_summary、loop。
 

@@ -1198,3 +1198,64 @@ def test_deep_dive_output_invalid_fails(tmp_path: Path) -> None:
     assert counts["failed"] == 1
     assert candidate["deep_dive"]["status"] == "failed"
     assert candidate["deep_dive"]["rounds"][0]["status"] == "output_invalid"
+
+
+# ---------------------------------------------------------------------------
+# M2 收尾-3：攻击面事实注入（稳定修复——入口可控性从"模型猜"到"直接看到"）
+# ---------------------------------------------------------------------------
+
+
+def test_load_attack_surface_index(tmp_path: Path) -> None:
+    """索引构造：四 kind 文件聚合、按组件名索引、缺失/损坏容错。"""
+    from app.analysis.explorer import load_attack_surface_index
+
+    surface = tmp_path / "attack_surface"
+    surface.mkdir()
+    (surface / "service.json").write_text(json.dumps({
+        "package": "com.example", "schema_version": "1.0.0",
+        "components": [
+            {"name": "com.example.Svc", "kind": "service", "exported": True,
+             "permission": None, "sensitive_capabilities": ["device_id"]},
+            {"name": None, "kind": "service"},  # 无名条目跳过
+        ],
+    }), "utf-8")
+    (surface / "receiver.json").write_text("{ not-json", "utf-8")  # 损坏容错
+
+    index = load_attack_surface_index(tmp_path)
+    assert set(index) == {"com.example.Svc"}
+    assert index["com.example.Svc"]["exported"] is True
+
+    empty_dir = tmp_path / "no-such-dir"
+    assert load_attack_surface_index(empty_dir) == {}
+
+
+def test_attack_surface_injected_into_model_input(tmp_path: Path) -> None:
+    """注入通道：构造 index 传入 → 每轮 model_input.attack_surface_json 非空；
+    未传 → None（降级语义不变）。"""
+    fake = FakeAnalyzer([{"done": True, "proposals": [_proposal()]}])
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    component_name = entry.get("component_name")
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(), tmp_path,
+        attack_surface={str(component_name): {
+            "name": component_name, "kind": entry.get("kind"),
+            "exported": True, "sensitive_capabilities": ["device_id"],
+        }},
+    )
+
+    asyncio_run(orchestrator.explore_all([entry]))
+    assert len(fake.inputs) == 1
+    injected = fake.inputs[0].attack_surface_json
+    assert injected is not None
+    payload = json.loads(injected)
+    assert payload["name"] == component_name
+    assert payload["exported"] is True
+
+    # 降级：不传 attack_surface → null（既有行为不变）
+    fake2 = FakeAnalyzer([{"done": True, "proposals": [_proposal()]}])
+    call_tree2 = _service(tmp_path)
+    entry2 = _entry(call_tree2)
+    orchestrator2 = ExplorerOrchestrator(fake2, call_tree2, ExplorerSettings(), tmp_path)
+    asyncio_run(orchestrator2.explore_all([entry2]))
+    assert fake2.inputs[0].attack_surface_json is None

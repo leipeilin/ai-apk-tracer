@@ -1113,7 +1113,10 @@ class ScanOrchestrator:
         """
 
         from app.analysis.call_tree import CallTreeService
-        from app.analysis.explorer import ExplorerOrchestrator
+        from app.analysis.explorer import (
+            ExplorerOrchestrator,
+            load_attack_surface_index,
+        )
 
         budget = self.settings.context_budget
         explorer_settings = self.settings.explorer
@@ -1147,7 +1150,8 @@ class ScanOrchestrator:
             effective = [entry for entry in entries if entry.get("method_id")]
             degraded = bool(entries) and not effective and entries[0].get("degraded")
             orchestrator = ExplorerOrchestrator(
-                budgeted_ai_call, call_tree, explorer_settings, run_dir, budgeted_deep_dive_call
+                budgeted_ai_call, call_tree, explorer_settings, run_dir, budgeted_deep_dive_call,
+                attack_surface=load_attack_surface_index(run_dir),
             )
             candidates = await orchestrator.explore_all(effective)
             # 三档校验（T2.6）：reader 存活期内回查（跳/methods/call_sites）；

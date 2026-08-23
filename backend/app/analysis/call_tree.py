@@ -84,6 +84,14 @@ class CallTreeService:
                 "source": entry.get("source"),
                 "entry_method": entry.get("entry_method"),
                 "method_id": self._entry_method_id(entry),
+                # 攻击面事实直取（M2 收尾-3 稳定修复：入口可控性信息曾整体
+                # 丢失——模型只能从空方法体猜，是 service/receiver 空转与
+                # 产链不稳的信息层根因）
+                "exported": entry.get("exported"),
+                "exported_reason": entry.get("exported_reason"),
+                "permissions": entry.get("permissions"),
+                "intent_filters": entry.get("intent_filters"),
+                "authorities": entry.get("authorities"),
             })
         return result
 

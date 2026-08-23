@@ -68,7 +68,7 @@ except ImportError:  # pragma: no cover
 
 from app.analysis.ai_models import ExplorerInput
 from app.analysis.call_tree import CallTreeService
-from app.analysis.explorer import ExplorerOrchestrator
+from app.analysis.explorer import ExplorerOrchestrator, load_attack_surface_index
 from app.analysis.explorer_validation import validate_explorer_candidates
 from app.analysis.index_store import SQLiteCodeIndexReader
 from app.analysis.sink_taxonomy import load_sink_taxonomy
@@ -102,6 +102,10 @@ def _select_entries(entries: list[dict[str, Any]], args: argparse.Namespace) -> 
     by_kind: dict[str, list[dict[str, Any]]] = {}
     for entry in entries:
         by_kind.setdefault(str(entry.get("kind") or "other"), []).append(entry)
+    # M2 收尾-3：exported 入口优先（攻击面真实存在的入口才是质量判定的
+    # 有效样本——exported=false 的空转属合理行为不该占样本）
+    for bucket in by_kind.values():
+        bucket.sort(key=lambda e: not e.get("exported"))
     selected: list[dict[str, Any]] = []
     for kind in _KIND_ORDER:
         selected.extend(by_kind.get(kind, [])[:_PER_KIND_SAMPLE])
@@ -199,7 +203,8 @@ async def _run_probe(args: argparse.Namespace) -> int:
 
         started = time.monotonic()
         orchestrator = ExplorerOrchestrator(
-            probed_ai_call, call_tree, settings.explorer, probe_dir
+            probed_ai_call, call_tree, settings.explorer, probe_dir,
+            attack_surface=load_attack_surface_index(run_dir),
         )
         candidates = await orchestrator.explore_all(selected)
         validation_counts = validate_explorer_candidates(
