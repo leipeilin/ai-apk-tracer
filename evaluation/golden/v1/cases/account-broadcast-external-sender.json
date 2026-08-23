@@ -6,12 +6,52 @@
   "component": "receiver",
   "entry": "sendAccountUpdateBroadcast",
   "operation": "implicit account broadcast leaks Account plaintext (sender com.xiaomi.account)",
-  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
-  "must_not_report": ["external-sender account broadcast inside shop APK"],
-  "sources": [{"path": "synthetic/AccountChangedBroadcastHelper.java", "symbol": "Account object", "kind": "sensitive_data"}],
-  "sinks": [{"path": "synthetic/AccountChangedBroadcastHelper.java", "symbol": "sendAccountUpdateBroadcast", "kind": "implicit_broadcast"}],
-  "tags": ["conditional", "account-broadcast", "external-sender", "p-01-shop", "low"],
+  "expected": {
+    "candidate": false,
+    "dataflow": "not_applicable",
+    "auth": "not_applicable",
+    "guard": "not_applicable",
+    "taxonomy": null,
+    "verdict": "suppress"
+  },
+  "must_not_report": [
+    "external-sender account broadcast inside shop APK"
+  ],
+  "sources": [
+    {
+      "path": "synthetic/AccountChangedBroadcastHelper.java",
+      "symbol": "Account object",
+      "kind": "sensitive_data"
+    }
+  ],
+  "sinks": [
+    {
+      "path": "synthetic/AccountChangedBroadcastHelper.java",
+      "symbol": "sendAccountUpdateBroadcast",
+      "kind": "implicit_broadcast"
+    }
+  ],
+  "tags": [
+    "conditional",
+    "account-broadcast",
+    "external-sender",
+    "p-01-shop",
+    "low"
+  ],
+  "explorer_expected": {
+    "expectation": "conditional",
+    "source_match_keys": [
+      "AccountChangedBroadcastHelper"
+    ],
+    "sink_match_keys": [
+      "sendAccountUpdateBroadcast"
+    ],
+    "notes": "规则轨 expected.candidate=false（suppress）——探索轨期望 conditional 不进二元（评审 R-1）"
+  },
   "provenance": [
-    {"kind": "dynamic", "reference": "manual-verification-report/com.xiaomi.shop/2026-08-15/attack-surface-inventory.md P-01（v05 捕获明文账号）"}
+    {
+      "kind": "dynamic",
+      "reference": "manual-verification-report/com.xiaomi.shop/2026-08-15/attack-surface-inventory.md P-01（v05 捕获明文账号）"
+    }
   ]
 }

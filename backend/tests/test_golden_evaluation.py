@@ -11,10 +11,14 @@ from pydantic import ValidationError
 
 import app.evaluation.golden as golden_module
 from app.analysis.ai_models import AI_OUTPUT_MODEL_VERSIONS, L2ReviewOutput
-from app.evaluation.golden import CaseLabel, GoldenCase, GoldenManifest, load_golden_dataset
+from app.evaluation.golden import (
+    CaseLabel,
+    GoldenCase,
+    GoldenManifest,
+    load_golden_dataset,
+)
 from app.evaluation.metrics import ActualResult, calculate_metrics
 from app.evaluation.runner import evaluate_results
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GOLDEN_ROOT = REPO_ROOT / "evaluation" / "golden" / "v1"
@@ -268,10 +272,134 @@ def test_cli_prints_json_without_writing_output(tmp_path: Path) -> None:
     )
     assert completed.returncode == 0, completed.stderr
     output = json.loads(completed.stdout)
-    assert output["dataset_version"] == "v2"
+    assert output["dataset_version"] == "v3"  # M4-T4.1：探索轨标注层升级（评审 R-2）
     assert output["submitted_result_count"] == 1
     assert output["missing_actual_count"] == 28
     assert output["missing_actual_ids"] == output["metrics"]["missing_actual_ids"]
     assert "remote-aidl-unguarded" not in output["missing_actual_ids"]
     assert output["metrics"]["candidate"]["tp"] == 1
     assert list(tmp_path.iterdir()) == [results]
+
+
+# ---------------------------------------------------------------------------
+# M4-T4.1：探索轨命中标注（ExplorerExpectation + explorer_hit）
+# ---------------------------------------------------------------------------
+
+_HIT_CASES = {
+    "remote-aidl-unguarded", "provider-query-helper-delegation",
+    "sport-binder-unguarded-effect", "router-validation-overwritten",
+    "fragment-external-class-name",
+}
+_CONDITIONAL_CASES = {
+    "account-broadcast-external-sender",
+    "keepalive-proxy-data-status-injection",
+    "extra-splashinfo-plugin-injection",
+}
+
+
+def _load_all_cases() -> dict:
+    root = Path(__file__).resolve().parents[2] / "evaluation" / "golden" / "v1" / "cases"
+    manifest = json.loads(
+        (root.parent / "manifest.json").read_text("utf-8"))
+    cases = {}
+    for entry in manifest["cases"]:
+        cases[entry["id"]] = json.loads((root.parent / entry["file"]).read_text("utf-8"))
+    return cases
+
+
+def test_explorer_annotations_present_and_typed() -> None:
+    """A-6：8 case 有标注（5 hit + 3 conditional——评审 R-1 口径）、其余 None。"""
+    cases = _load_all_cases()
+    annotated = {cid for cid, c in cases.items() if c.get("explorer_expected")}
+    assert annotated == _HIT_CASES | _CONDITIONAL_CASES
+    for cid in _HIT_CASES:
+        assert cases[cid]["explorer_expected"]["expectation"] == "hit"
+        assert cases[cid]["explorer_expected"]["source_match_keys"]
+        assert cases[cid]["explorer_expected"]["sink_match_keys"]
+        assert cases[cid]["explorer_expected"]["notes"]
+    for cid in _CONDITIONAL_CASES:
+        assert cases[cid]["explorer_expected"]["expectation"] == "conditional"
+
+
+def test_explorer_hit_matching_channels() -> None:
+    """A-3/A-5/A-8 三通道命中（source 文本 + sink 文本或 hops method_id）。"""
+    from app.evaluation.golden import GoldenCase, explorer_hit
+
+    case = GoldenCase.model_validate({
+        **_load_all_cases()["sport-binder-unguarded-effect"]})
+    # sink 文本通道
+    assert explorer_hit(case, {
+        "source": "SportXmsService.onBind", "sink": "finishSport 停止运动",
+        "hops": []})
+    # hops method_id 通道（描述性 sink——评审 R-3）
+    assert explorer_hit(case, {
+        "source": "SportXmsService 绑定入口",
+        "sink": "未确认的敏感操作",
+        "hops": [{"from_method_id": "a/A.java#A.f:1",
+                  "to_method_id": "com/xiaomi/fitness/sport_xms/SportXmsApiImpl.java#finishSport:703"}]})
+    # 单边命中（source 对 sink 错）→ False；大小写不敏感 → True
+    assert not explorer_hit(case, {
+        "source": "SportXmsService.onBind", "sink": "unrelated", "hops": []})
+    assert explorer_hit(case, {
+        "source": "sportxmsservice.onbind", "sink": "FINISHSPORT", "hops": []})
+
+
+def test_explorer_hit_conditional_and_unannotated_excluded() -> None:
+    """A-4：conditional/无标注/miss 不进二元命中。"""
+    from app.evaluation.golden import GoldenCase, explorer_hit
+
+    cases = _load_all_cases()
+    conditional = GoldenCase.model_validate({
+        **cases["account-broadcast-external-sender"]})
+    assert conditional.explorer_expected is not None
+    assert conditional.explorer_expected.expectation == "conditional"
+    assert not explorer_hit(conditional, {
+        "source": "AccountChangedBroadcastHelper", "sink": "sendAccountUpdateBroadcast",
+        "hops": []})
+    # 无标注 case
+    for data in cases.values():
+        if not data.get("explorer_expected"):
+            plain = GoldenCase.model_validate({**data})
+            assert plain.explorer_expected is None
+            assert not explorer_hit(plain, {"source": "x", "sink": "y", "hops": []})
+            break
+
+
+def test_explorer_match_keys_no_cross_case_collision() -> None:
+    """评审 R-4：hit case 的合成候选两两交叉命中为空（键区分度）。
+
+    conditional case 不进二元命中（explorer_hit 恒 False）——只验证
+    其标注键不使 hit case 的标准候选产生额外命中路径外的语义（键
+    层面交叉由 hit 集合承载）。
+    """
+    from app.evaluation.golden import GoldenCase, explorer_hit
+
+    cases = _load_all_cases()
+    annotated = {}
+    for cid, data in cases.items():
+        if data.get("explorer_expected"):
+            annotated[cid] = GoldenCase.model_validate({**data})
+    hit_cases = {
+        cid: case for cid, case in annotated.items()
+        if case.explorer_expected.expectation == "hit"
+    }
+    assert len(hit_cases) == 5
+    for owner_cid, case in hit_cases.items():
+        # 以 owner 自己的键构造"标准候选"，检查其他 hit case 不误命中
+        keys = case.explorer_expected
+        candidate = {
+            "source": " ".join(keys.source_match_keys),
+            "sink": " ".join(keys.sink_match_keys),
+            "hops": [],
+        }
+        for other_cid, other in hit_cases.items():
+            hit = explorer_hit(other, candidate)
+            if other_cid == owner_cid:
+                assert hit, f"{owner_cid} 应命中自身标准候选"
+            else:
+                assert not hit, f"{other_cid} 不应命中 {owner_cid} 的标准候选（键冲突）"
+    # conditional 标注键非空（数据完整性）
+    for cid, case in annotated.items():
+        if case.explorer_expected.expectation == "conditional":
+            assert case.explorer_expected.source_match_keys
+            assert case.explorer_expected.sink_match_keys

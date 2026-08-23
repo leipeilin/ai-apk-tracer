@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from ..analysis.ai_models import AI_OUTPUT_MODEL_VERSIONS, L2ReviewOutput
-
 
 _SCHEMAS_ROOT = Path(__file__).resolve().parents[3] / "schemas"
 _L2_SCHEMA_FILE = "ai_l2_review_output.schema.json"
@@ -87,6 +87,63 @@ class ExpectedOutcome(StrictModel):
     verdict: Verdict
 
 
+class ExplorerExpectation(StrictModel):
+    """探索轨命中期望（M4-T4.1——M2 验收 §2.3 覆盖映射的机器判定基础）。
+
+    匹配为三通道（评审 R-3——真实探索候选的 sink 约半数为描述性文本，
+    方法名键须有 hops method_id 结构化通道兜底）：source 文本 / sink 文本 /
+    hops 的 method_id。conditional 不进二元命中（与规则轨 label 排除语义
+    对齐——T4.2 单独报告 conditional_hit_rate）。
+    """
+
+    expectation: Literal["hit", "miss", "conditional"]
+    source_match_keys: list[str] = Field(min_length=1, max_length=8,
+        description="探索候选 source 表达式/组件名匹配键（任一子串命中即 source 命中）")
+    sink_match_keys: list[str] = Field(min_length=1, max_length=8,
+        description="探索候选 sink 方法/操作名匹配键（任一子串命中即 sink 命中）")
+    notes: str | None = Field(default=None, description="标注依据（审计引用，不参与评分）")
+
+    def matches(self, source_text: str, sink_text: str, hop_method_ids: str) -> bool:
+        """三通道命中：source 与（sink 文本或 hops method_id 任一）含匹配键。
+
+        子串、大小写不敏感；hop_method_ids 为该候选全部 hop 的
+        from/to method_id 拼接文本（结构化 `类#方法:行`）。
+        """
+
+        src = source_text.lower()
+        snk = sink_text.lower()
+        hops = hop_method_ids.lower()
+        source_hit = any(k.lower() in src for k in self.source_match_keys)
+        sink_hit = (
+            any(k.lower() in snk for k in self.sink_match_keys)
+            or any(k.lower() in hops for k in self.sink_match_keys)
+        )
+        return source_hit and sink_hit
+
+
+def explorer_hit(case: GoldenCase, chain_proposal: Mapping[str, Any]) -> bool:
+    """探索候选的 chain_proposal 是否命中该 case 的探索标注。
+
+    仅 expectation=="hit" 进二元命中（miss/conditional/无标注均 False——
+    评审 R-5：签名接收已提取的 chain_proposal Mapping，字段 source/sink/
+    hops 与 ExplorerCandidate 落盘结构一致）。
+    """
+
+    expected = case.explorer_expected
+    if expected is None or expected.expectation != "hit":
+        return False
+    hops = chain_proposal.get("hops") or []
+    hop_ids = " ".join(
+        f"{hop.get('from_method_id', '')} {hop.get('to_method_id', '')}"
+        for hop in hops if isinstance(hop, Mapping)
+    )
+    return expected.matches(
+        str(chain_proposal.get("source") or ""),
+        str(chain_proposal.get("sink") or ""),
+        hop_ids,
+    )
+
+
 class GoldenCase(StrictModel):
     """One labeled case; ``must_not_report`` entries use exact string matching."""
 
@@ -103,9 +160,13 @@ class GoldenCase(StrictModel):
     sinks: list[EvidenceRef]
     tags: list[str]
     provenance: list[ProvenanceRef] = Field(min_length=1)
+    explorer_expected: ExplorerExpectation | None = Field(
+        default=None,
+        description="探索轨命中期望（M4-T4.1——可选，v2 case 无此字段保持兼容）",
+    )
 
     @model_validator(mode="after")
-    def label_matches_binary_expectation(self) -> "GoldenCase":
+    def label_matches_binary_expectation(self) -> GoldenCase:
         if self.label is CaseLabel.POSITIVE and self.expected.candidate is not True:
             raise ValueError("positive case must expect candidate=true")
         if self.label is CaseLabel.NEGATIVE and self.expected.candidate is not False:
@@ -128,7 +189,7 @@ class AIResponseManifestEntry(StrictModel):
     schema_sha256: str = Field(pattern=_SHA256_PATTERN)
 
     @model_validator(mode="after")
-    def targets_current_l2_protocol(self) -> "AIResponseManifestEntry":
+    def targets_current_l2_protocol(self) -> AIResponseManifestEntry:
         expected_model = L2ReviewOutput.__name__
         expected_version = AI_OUTPUT_MODEL_VERSIONS[expected_model]
         if self.target_model != expected_model:
@@ -150,7 +211,7 @@ class GoldenManifest(StrictModel):
     ai_responses: list[AIResponseManifestEntry] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def ids_and_files_are_unique(self) -> "GoldenManifest":
+    def ids_and_files_are_unique(self) -> GoldenManifest:
         _require_unique((entry.id for entry in self.cases), "manifest case id")
         _require_unique((entry.file for entry in self.cases), "manifest case file")
         _require_unique((entry.id for entry in self.ai_responses), "AI response id")
@@ -222,7 +283,7 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         value = json.load(handle, object_pairs_hook=_reject_duplicate_keys)
     if not isinstance(value, dict):
-        raise ValueError(f"JSON root must be an object: {path}")
+        raise TypeError(f"JSON root must be an object: {path}")
     return value
 
 

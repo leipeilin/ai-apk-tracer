@@ -6,10 +6,52 @@
   "component": "activity",
   "entry": "onCreate",
   "operation": "putExtras overwrite then loadUrl",
-  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "data_disclosure", "verdict": "report"},
-  "must_not_report": ["validation remains effective after same-slot overwrite"],
-  "sources": [{"path": "synthetic/RouterActivity.java", "symbol": "Intent extras override", "kind": "intent"}],
-  "sinks": [{"path": "synthetic/RouterActivity.java", "symbol": "WebView.loadUrl", "kind": "webview"}],
-  "tags": ["true-positive", "validation", "slot-overwrite", "router"],
-  "provenance": [{"kind": "test", "reference": "backend/tests/test_component_specialized_analysis.py::test_router_put_extras_overwrite_is_the_only_validation_bypass"}]
+  "expected": {
+    "candidate": true,
+    "dataflow": "intraprocedural",
+    "auth": "unprotected",
+    "guard": "absent",
+    "taxonomy": "data_disclosure",
+    "verdict": "report"
+  },
+  "must_not_report": [
+    "validation remains effective after same-slot overwrite"
+  ],
+  "sources": [
+    {
+      "path": "synthetic/RouterActivity.java",
+      "symbol": "Intent extras override",
+      "kind": "intent"
+    }
+  ],
+  "sinks": [
+    {
+      "path": "synthetic/RouterActivity.java",
+      "symbol": "WebView.loadUrl",
+      "kind": "webview"
+    }
+  ],
+  "tags": [
+    "true-positive",
+    "validation",
+    "slot-overwrite",
+    "router"
+  ],
+  "explorer_expected": {
+    "expectation": "hit",
+    "source_match_keys": [
+      "RouterActivity",
+      "Intent extras"
+    ],
+    "sink_match_keys": [
+      "loadUrl"
+    ],
+    "notes": "V-02 覆盖（router-validation-overwritten）；与 fragment-external-class-name 以 sink 键区分"
+  },
+  "provenance": [
+    {
+      "kind": "test",
+      "reference": "backend/tests/test_component_specialized_analysis.py::test_router_put_extras_overwrite_is_the_only_validation_bypass"
+    }
+  ]
 }

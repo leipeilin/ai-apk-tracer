@@ -6,13 +6,57 @@
   "component": "activity",
   "entry": "onCreate|onNewIntent",
   "operation": "extra_splashinfo JSON controls pluginId and bulk extras",
-  "expected": {"candidate": true, "dataflow": "interprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "ui_navigation", "verdict": "review"},
-  "must_not_report": ["fixed plugin navigation as suppressed"],
-  "sources": [{"path": "synthetic/MainActivity.java", "symbol": "extra_splashinfo JSON", "kind": "intent_extra"}],
-  "sinks": [{"path": "synthetic/MainActivity.java", "symbol": "Fasade.startNewPluginActivity(pluginId, extras)", "kind": "route_launch"}],
-  "tags": ["true-positive", "route-injection", "plugin", "v-01-shop", "conditional-strong-candidate"],
+  "expected": {
+    "candidate": true,
+    "dataflow": "interprocedural",
+    "auth": "unprotected",
+    "guard": "absent",
+    "taxonomy": "ui_navigation",
+    "verdict": "review"
+  },
+  "must_not_report": [
+    "fixed plugin navigation as suppressed"
+  ],
+  "sources": [
+    {
+      "path": "synthetic/MainActivity.java",
+      "symbol": "extra_splashinfo JSON",
+      "kind": "intent_extra"
+    }
+  ],
+  "sinks": [
+    {
+      "path": "synthetic/MainActivity.java",
+      "symbol": "Fasade.startNewPluginActivity(pluginId, extras)",
+      "kind": "route_launch"
+    }
+  ],
+  "tags": [
+    "true-positive",
+    "route-injection",
+    "plugin",
+    "v-01-shop",
+    "conditional-strong-candidate"
+  ],
+  "explorer_expected": {
+    "expectation": "conditional",
+    "source_match_keys": [
+      "MainActivity",
+      "extra_splashinfo"
+    ],
+    "sink_match_keys": [
+      "startNewPluginActivity"
+    ],
+    "notes": "shop V-01 conditional；探索轨 conditional（评审 R-1）"
+  },
   "provenance": [
-    {"kind": "test", "reference": "backend/tests/test_component_specialized_analysis.py::test_external_route_injection_plugin_extras"},
-    {"kind": "dynamic", "reference": "manual-verification-report/com.xiaomi.shop/2026-08-15/attack-surface-inventory.md V-01"}
+    {
+      "kind": "test",
+      "reference": "backend/tests/test_component_specialized_analysis.py::test_external_route_injection_plugin_extras"
+    },
+    {
+      "kind": "dynamic",
+      "reference": "manual-verification-report/com.xiaomi.shop/2026-08-15/attack-surface-inventory.md V-01"
+    }
   ]
 }

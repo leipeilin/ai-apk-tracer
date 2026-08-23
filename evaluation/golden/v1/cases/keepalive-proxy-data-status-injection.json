@@ -6,12 +6,52 @@
   "component": "service",
   "entry": "onStartCommand",
   "operation": "KeepAliveService restores ProxyData from untrusted extra (low status injection)",
-  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "state_injection", "verdict": "review"},
-  "must_not_report": ["ProxyData restore as high severity"],
-  "sources": [{"path": "synthetic/KeepAliveService.java", "symbol": "hasExtra(device)", "kind": "ipc_input"}],
-  "sinks": [{"path": "synthetic/KeepAliveService.java", "symbol": "restoreProxyData", "kind": "persistent_state_write"}],
-  "tags": ["conditional", "status-injection", "low", "p-05-health"],
+  "expected": {
+    "candidate": true,
+    "dataflow": "intraprocedural",
+    "auth": "unprotected",
+    "guard": "absent",
+    "taxonomy": "state_injection",
+    "verdict": "review"
+  },
+  "must_not_report": [
+    "ProxyData restore as high severity"
+  ],
+  "sources": [
+    {
+      "path": "synthetic/KeepAliveService.java",
+      "symbol": "hasExtra(device)",
+      "kind": "ipc_input"
+    }
+  ],
+  "sinks": [
+    {
+      "path": "synthetic/KeepAliveService.java",
+      "symbol": "restoreProxyData",
+      "kind": "persistent_state_write"
+    }
+  ],
+  "tags": [
+    "conditional",
+    "status-injection",
+    "low",
+    "p-05-health"
+  ],
+  "explorer_expected": {
+    "expectation": "conditional",
+    "source_match_keys": [
+      "KeepAliveService",
+      "hasExtra"
+    ],
+    "sink_match_keys": [
+      "restoreProxyData"
+    ],
+    "notes": "P-01/P-05 conditional；探索轨 conditional（评审 R-1）"
+  },
   "provenance": [
-    {"kind": "dynamic", "reference": "manual-verification-report/com.mi.health/2026-08-15/vuln-verification-status.md P-05"}
+    {
+      "kind": "dynamic",
+      "reference": "manual-verification-report/com.mi.health/2026-08-15/vuln-verification-status.md P-05"
+    }
   ]
 }

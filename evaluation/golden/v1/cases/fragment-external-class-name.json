@@ -6,10 +6,52 @@
   "component": "activity",
   "entry": "onCreate",
   "operation": "Fragment.instantiate",
-  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "ui_navigation", "verdict": "report"},
-  "must_not_report": ["fixed fragment class as external input"],
-  "sources": [{"path": "synthetic/RouterActivity.java", "symbol": "external className extra", "kind": "intent"}],
-  "sinks": [{"path": "synthetic/RouterActivity.java", "symbol": "Fragment.instantiate", "kind": "fragment_reflection"}],
-  "tags": ["true-positive", "fragment", "reflection", "class-name"],
-  "provenance": [{"kind": "test", "reference": "backend/tests/test_component_specialized_analysis.py::test_detector_fragment_external_class_positive_fixed_class_negative"}]
+  "expected": {
+    "candidate": true,
+    "dataflow": "intraprocedural",
+    "auth": "unprotected",
+    "guard": "absent",
+    "taxonomy": "ui_navigation",
+    "verdict": "report"
+  },
+  "must_not_report": [
+    "fixed fragment class as external input"
+  ],
+  "sources": [
+    {
+      "path": "synthetic/RouterActivity.java",
+      "symbol": "external className extra",
+      "kind": "intent"
+    }
+  ],
+  "sinks": [
+    {
+      "path": "synthetic/RouterActivity.java",
+      "symbol": "Fragment.instantiate",
+      "kind": "fragment_reflection"
+    }
+  ],
+  "tags": [
+    "true-positive",
+    "fragment",
+    "reflection",
+    "class-name"
+  ],
+  "explorer_expected": {
+    "expectation": "hit",
+    "source_match_keys": [
+      "RouterActivity",
+      "external className"
+    ],
+    "sink_match_keys": [
+      "instantiate"
+    ],
+    "notes": "P-08 覆盖（同规则同模式）；sink 键 instantiate 区分"
+  },
+  "provenance": [
+    {
+      "kind": "test",
+      "reference": "backend/tests/test_component_specialized_analysis.py::test_detector_fragment_external_class_positive_fixed_class_negative"
+    }
+  ]
 }

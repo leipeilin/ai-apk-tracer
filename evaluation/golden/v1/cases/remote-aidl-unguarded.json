@@ -6,10 +6,58 @@
   "component": "service",
   "entry": "onBind|onTransact",
   "operation": "AIDL transaction dispatch",
-  "expected": {"candidate": true, "dataflow": "interprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "location_sensor_collection", "verdict": "report"},
-  "must_not_report": ["unmapped transaction method", "local-only Binder finding"],
-  "sources": [{"path": "synthetic/RemoteService.java", "symbol": "onBind", "kind": "service_entry"}, {"path": "synthetic/SportApiStub.java", "symbol": "onTransact parcel input", "kind": "binder_transaction"}],
-  "sinks": [{"path": "synthetic/SportApiStub.java", "symbol": "startSport", "kind": "sensitive_effect"}],
-  "tags": ["true-positive", "binder", "aidl", "interprocedural"],
-  "provenance": [{"kind": "test", "reference": "backend/tests/test_p0_closure.py::test_binder_requires_remote_dispatch_and_maps_transaction"}]
+  "expected": {
+    "candidate": true,
+    "dataflow": "interprocedural",
+    "auth": "unprotected",
+    "guard": "absent",
+    "taxonomy": "location_sensor_collection",
+    "verdict": "report"
+  },
+  "must_not_report": [
+    "unmapped transaction method",
+    "local-only Binder finding"
+  ],
+  "sources": [
+    {
+      "path": "synthetic/RemoteService.java",
+      "symbol": "onBind",
+      "kind": "service_entry"
+    },
+    {
+      "path": "synthetic/SportApiStub.java",
+      "symbol": "onTransact parcel input",
+      "kind": "binder_transaction"
+    }
+  ],
+  "sinks": [
+    {
+      "path": "synthetic/SportApiStub.java",
+      "symbol": "startSport",
+      "kind": "sensitive_effect"
+    }
+  ],
+  "tags": [
+    "true-positive",
+    "binder",
+    "aidl",
+    "interprocedural"
+  ],
+  "explorer_expected": {
+    "expectation": "hit",
+    "source_match_keys": [
+      "SportApiStub",
+      "RemoteService"
+    ],
+    "sink_match_keys": [
+      "startSport"
+    ],
+    "notes": "M2 验收覆盖映射表 binder 条目；键派生自 path 类名（SportApiStub）与 symbol（startSport）"
+  },
+  "provenance": [
+    {
+      "kind": "test",
+      "reference": "backend/tests/test_p0_closure.py::test_binder_requires_remote_dispatch_and_maps_transaction"
+    }
+  ]
 }
