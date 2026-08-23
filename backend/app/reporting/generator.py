@@ -306,4 +306,5 @@ def save_report_document(document: ReportDocument, run_dir: Path) -> Path:
         raise ValidationError(
             f"报告草稿落盘路径异常（symlink/非常规文件）: {path}", "REPORT_DRAFT_PATH_UNSAFE")
     path.write_text(document.model_dump_json(indent=2), "utf-8")
+    path.chmod(0o600)  # M3/M4 审查 4.4：mkdir 的 mode 不覆盖文件——显式收紧
     return path

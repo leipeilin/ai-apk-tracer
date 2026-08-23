@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -299,12 +300,14 @@ async def generate_finding_report_draft(finding_id: str, request: Request) -> di
     repository = request.app.state.repository
     finding = repository.get_finding(finding_id)
     # M3-2（评审 R-4）：真协议接线——共享 runtime transport；AI 失败由
-    # generator 降级回投影（报告永不因 AI 阻塞）
+    # generator 降级回投影（报告永不因 AI 阻塞）。async 是必需的
+    # （analyzer.report_entry 为真实网络 IO——M3/M4 审查 4.7 的"改 def"
+    # 建议不成立）；落盘同步 IO 包 to_thread 防事件循环阻塞。
     analyzer = request.app.state.ai_runtime.create_analyzer()
     document = await generate_report_document(
         finding, settings=request.app.state.settings.report, analyzer=analyzer)
     run_dir = request.app.state.storage.run_dir(finding["run_id"])
-    save_report_document(document, run_dir)
+    await asyncio.to_thread(save_report_document, document, run_dir)
     return document.model_dump(mode="json")
 
 

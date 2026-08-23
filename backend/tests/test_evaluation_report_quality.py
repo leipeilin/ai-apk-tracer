@@ -131,3 +131,16 @@ class TestRealDocument:
         document = asyncio.run(generate_report_document(finding))
         result = check_report_document(document.model_dump(mode="json"))
         assert result["verdict"] == "PASS", result["checks"]
+
+
+def test_locations_bucket_checked() -> None:
+    """M3/M4 审查 4.5：引用回查覆盖 locations 桶（与投影三桶对齐）。"""
+    doc = _document()
+    doc["deterministic"]["locations"] = [{"path": "loc/L.java", "line": 5}]
+    assert check_report_document(doc)["verdict"] == "PASS"
+    bad = _document()
+    bad["deterministic"]["locations"] = [{"path": "", "line": 5}]
+    result = check_report_document(bad)
+    assert result["verdict"] == "WARN"
+    assert any("locations" in v and "path 空" in v
+               for v in result["checks"]["evidence_reference_integrity"]["violations"])

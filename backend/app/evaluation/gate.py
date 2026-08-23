@@ -106,7 +106,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.tolerance:
         for chunk in args.tolerance.split(","):
             name, _, value = chunk.partition("=")
-            tolerances[name.strip()] = float(value)
+            try:
+                tolerances[name.strip()] = float(value)
+            except ValueError:
+                parser.error(f"非法容差: {chunk!r}（期望 形如 f1=0.02）")  # M3/M4 审查 4.6
     result = compare_against_baseline(current, baseline, tolerances)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["gate"] == "ALLOW" else 1

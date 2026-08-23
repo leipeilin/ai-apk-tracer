@@ -6,12 +6,54 @@
   "component": "activity",
   "entry": "onNewIntent",
   "operation": "extra_close_url launches unregistered WebActivity causing crash",
-  "expected": {"candidate": true, "dataflow": "intraprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": "unregistered_target_dos", "verdict": "report"},
-  "must_not_report": ["unregistered target as fixed_local_target suppression"],
-  "sources": [{"path": "synthetic/MainActivity.java", "symbol": "extra_close_url", "kind": "intent_extra"}],
-  "sinks": [{"path": "synthetic/MainActivity.java", "symbol": "startActivity(WebActivity) unregistered", "kind": "component_launch"}],
-  "tags": ["true-positive", "route-injection", "unregistered-target", "dos", "v-02-shop"],
+  "expected": {
+    "candidate": true,
+    "dataflow": "intraprocedural",
+    "auth": "unprotected",
+    "guard": "absent",
+    "taxonomy": "unregistered_target_dos",
+    "verdict": "report"
+  },
+  "must_not_report": [
+    "unregistered target as fixed_local_target suppression"
+  ],
+  "sources": [
+    {
+      "path": "synthetic/MainActivity.java",
+      "symbol": "extra_close_url",
+      "kind": "intent_extra"
+    }
+  ],
+  "sinks": [
+    {
+      "path": "synthetic/MainActivity.java",
+      "symbol": "startActivity(WebActivity) unregistered",
+      "kind": "component_launch"
+    }
+  ],
+  "tags": [
+    "true-positive",
+    "route-injection",
+    "unregistered-target",
+    "dos",
+    "v-02-shop"
+  ],
+  "explorer_expected": {
+    "expectation": "hit",
+    "source_match_keys": [
+      "MainActivity",
+      "extra_close_url"
+    ],
+    "sink_match_keys": [
+      "startActivity",
+      "go2CloseSet"
+    ],
+    "notes": "M2 动态终审成立（shop V-02，manual-verification-report/com.xiaomi.sh）——M3/M4 实施审查 4.1 补标（键派生自 path 类名与 symbol；go2CloseSet 为 finding 中间节点兜底键）"
+  },
   "provenance": [
-    {"kind": "dynamic", "reference": "manual-verification-report/com.xiaomi.shop/2026-08-15/attack-surface-inventory.md V-02"}
+    {
+      "kind": "dynamic",
+      "reference": "manual-verification-report/com.xiaomi.shop/2026-08-15/attack-surface-inventory.md V-02"
+    }
   ]
 }

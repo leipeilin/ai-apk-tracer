@@ -154,8 +154,9 @@ class TestAggregate:
         result = evaluate_runs([r1, r2], manifest_path=DEFAULT_MANIFEST)
         assert result["aggregate"]["explorer_hit_rate"] == 0.0  # 加权（0 命中如实）
         assert result["aggregate"]["explorer_hits_total"] == 0
-        # run-case 加权语义：每 run 独立评估同一 golden 集（2 run × 5 hit case）
-        assert result["aggregate"]["explorer_hit_cases_total"] == 10
+        # run-case 加权语义：每 run 独立评估同一 golden 集
+        # （2 run × 6 hit case——M3/M4 审查 4.1 补标 shop V-02 后）
+        assert result["aggregate"]["explorer_hit_cases_total"] == 12
         assert result["aggregate"]["costs_total"]["explorer_requests"] == 15
         assert result["aggregate"]["wall_seconds_total"] == 3600.0
         assert result["aggregate"]["unaggregated_runs"] == []

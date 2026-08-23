@@ -25,7 +25,8 @@
 - golden case 现有结构（cases/remote-aidl-unguarded.json 实读）：id/category/**label**/rule/component/entry/operation/expected/sources(**path+symbol+kind**)/sinks/tags/provenance——**sources/sinks 已有 symbol 标注**，探索轨匹配键可直接派生；
 - `GoldenCase`（golden.py:90）为 StrictModel（extra=forbid）——新字段须可选（default None，向后兼容 v2 无标注 case）；
 - metrics.calculate_metrics（metrics.py:35）只算规则轨二元指标——探索轨命中率由 T4.2 在此扩展；
-- 正样本 8 项候选（从 v2 manifest 的 positive 中选，对应 M2 验收覆盖映射表条目）：remote-aidl-unguarded / provider-query-helper-delegation / sport-binder-unguarded-effect / router-validation-overwritten / fragment-external-class-name / account-broadcast-external-sender / keepalive-proxy-data-status-injection / extra-splashinfo-plugin-injection。
+- 正样本标注候选（从 v2 manifest 的 positive 中选）：remote-aidl-unguarded / provider-query-helper-delegation / sport-binder-unguarded-effect / router-validation-overwritten / fragment-external-class-name / extra-close-url-unregistered-dos。
+- **口径修正（M3/M4 实施审查 4.1，2026-08-23）**：原方案声称 8 候选"对应 M2 验收覆盖映射表条目"不实——该清单为 golden positive 的选择（含规则轨合成样本，非全部属 M2 动态终审 8 项）；且遗漏了动态终审成立的 shop V-02（`extra-close-url-unregistered-dos`）——已补标注（hit），标注集为 **6 hit + 3 conditional = 9**。manifest 描述与测试集合同步修正。
 
 ## 3. 详细实现方案
 

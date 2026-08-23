@@ -142,3 +142,17 @@ class TestWorkflowDoc:
         assert "--runs" in doc and "--results" in doc  # R-3：规则轨快照命令
         assert "backend.app.evaluation.gate" in doc
         assert "不劣于基线" in doc
+
+
+class TestToleranceParsing:
+    def test_invalid_tolerance_value_errors_cleanly(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """M3/M4 审查 4.6：非法容差走 parser.error（退出码 2）而非 Traceback。"""
+        current = tmp_path / "c.json"
+        baseline = tmp_path / "b.json"
+        current.write_text(json.dumps(_current()), "utf-8")
+        baseline.write_text(json.dumps(_current()), "utf-8")
+        with pytest.raises(SystemExit) as exc_info:
+            main(["--current", str(current), "--baseline", str(baseline),
+                  "--tolerance", "f1=abc"])
+        assert exc_info.value.code == 2
+        assert "非法容差" in capsys.readouterr().err

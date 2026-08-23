@@ -68,7 +68,7 @@ def _check_references(document: Mapping[str, Any]) -> dict[str, Any]:
     deterministic = document.get("deterministic")
     if not isinstance(deterministic, Mapping):
         return {"verdict": "WARN", "violations": ["deterministic 缺失——无法回查引用"]}
-    for bucket in ("sources", "sinks"):
+    for bucket in ("sources", "sinks", "locations"):  # M3/M4 审查 4.5：与投影三桶对齐
         items = deterministic.get(bucket)
         if items is None:
             continue  # 可选字段

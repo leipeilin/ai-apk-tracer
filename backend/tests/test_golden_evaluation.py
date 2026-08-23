@@ -288,7 +288,7 @@ def test_cli_prints_json_without_writing_output(tmp_path: Path) -> None:
 _HIT_CASES = {
     "remote-aidl-unguarded", "provider-query-helper-delegation",
     "sport-binder-unguarded-effect", "router-validation-overwritten",
-    "fragment-external-class-name",
+    "fragment-external-class-name", "extra-close-url-unregistered-dos",
 }
 _CONDITIONAL_CASES = {
     "account-broadcast-external-sender",
@@ -308,7 +308,8 @@ def _load_all_cases() -> dict:
 
 
 def test_explorer_annotations_present_and_typed() -> None:
-    """A-6：8 case 有标注（5 hit + 3 conditional——评审 R-1 口径）、其余 None。"""
+    """A-6：9 case 有标注（6 hit + 3 conditional——M3/M4 实施审查 4.1 修正后
+    口径：含 shop V-02 extra-close-url-unregistered-dos）、其余 None。"""
     cases = _load_all_cases()
     annotated = {cid for cid, c in cases.items() if c.get("explorer_expected")}
     assert annotated == _HIT_CASES | _CONDITIONAL_CASES
@@ -383,7 +384,7 @@ def test_explorer_match_keys_no_cross_case_collision() -> None:
         cid: case for cid, case in annotated.items()
         if case.explorer_expected.expectation == "hit"
     }
-    assert len(hit_cases) == 5
+    assert len(hit_cases) == 6
     for owner_cid, case in hit_cases.items():
         # 以 owner 自己的键构造"标准候选"，检查其他 hit case 不误命中
         keys = case.explorer_expected
