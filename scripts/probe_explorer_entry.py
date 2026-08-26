@@ -230,6 +230,12 @@ async def _run_probe(args: argparse.Namespace) -> int:
             manifest_facts,
             taxonomy_entries=taxonomy_entries,
         )
+        # F2 核验 V-3：校验结果持久化——回写带 validation 的候选（可审计）
+        # + summary 落盘 probe_dir（stdout 之外的可复核记录）
+        candidates_path = probe_dir / "explorer" / "candidates.json"
+        if candidates_path.parent.is_dir():
+            candidates_path.write_text(
+                json.dumps(candidates, ensure_ascii=False, indent=2), "utf-8")
         elapsed = time.monotonic() - started
 
         # 轮次审计回读（probe_dir 隔离落盘——不污染真实 run 产物）
@@ -285,6 +291,10 @@ async def _run_probe(args: argparse.Namespace) -> int:
             "verdict": "PASS" if passed else "FAIL",
         }
         print(json.dumps(summary, ensure_ascii=False, indent=2))
+        summary_path = probe_dir / "explorer" / "probe-summary.json"
+        if summary_path.parent.is_dir():
+            summary_path.write_text(
+                json.dumps(summary, ensure_ascii=False, indent=2), "utf-8")
         print(
             f"[probe-explorer] {summary['verdict']}: entries={len(selected)} "
             f"rounds={len(round_probes)} ai={orchestrator.ai_requests_used} "

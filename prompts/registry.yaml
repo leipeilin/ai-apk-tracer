@@ -365,7 +365,7 @@ prompts:
   input_schema_file: ai_explorer_input.schema.json
   output_schema_file: ai_explorer_observation.schema.json
   template_sha256:
-    system: 449946047b8050f5fa1979f6b9c18cc52c94a9d3ead4d64cf1300ffe4593d12d
+    system: 1a642af53c635975ac43bb49a05ccf8116b00e105495dbb390d5566f7a4cb380
     user: 85ec035cb2ea03c955c124e388af360be38d32e884b596edbc60f65b6c676f66
   schema_sha256:
     input: 7892832384f01b8ca6dc8d81e37e98ff67eb773fe44ee99eeea2e48fa8374ba0

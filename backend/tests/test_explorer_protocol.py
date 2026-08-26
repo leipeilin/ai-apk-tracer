@@ -231,3 +231,30 @@ def test_prompt_declares_required_and_enums() -> None:
     assert "约束 10 不因 seed 豁免" in system, "prompt 缺少 D-3 不豁免声明"
     # 约束 4 的可回查来源枚举补 seed_hops（评审 R-4）
     assert "entry_json/code_context/seed_hops" in system, "约束 4 未声明 seed_hops 来源"
+    # F2（2026-08-27）：sink 敏感度约束（九类语义 + 禁令——44 封顶中 77% 为
+    # 模型把常规方法当 sink 的实证）
+    assert "sink 敏感度约束" in system, "prompt 缺少'sink 敏感度约束'"
+    assert "九类语义" in system, "prompt 缺少九类敏感语义声明"
+    for kw in ("UI 导航", "连接与会话控制", "事件注入", "位置与传感器采集",
+               "设备协议输出", "持久状态写", "数据库变更", "文件写", "数据披露"):
+        assert kw in system, f"prompt 缺少敏感类别声明: {kw}"
+    # 禁令全 token（F2 核验 V-4——防无语义凑过）
+    for banned in ("finish", "onBackPressed", "Log.*", "setResultData",
+                   "getInstance", "init*", "handleIntent", "syncPluginById"):
+        assert banned in system, f"prompt 禁令缺少 token: {banned}"
+    assert "业务中间逻辑" in system, "prompt 缺少业务中间方法禁令类目"
+    assert "继续 read_requests 追踪其内部调用" in system, "prompt 缺少链尾常规方法的追踪指导"
+    # 特例论证通道限定（F2 核验 V-1——仅隐私封装方法）
+    assert "隐私数据读取/外发的封装方法" in system, "prompt 特例论证通道未限定"
+    # taxonomy 交叉校验（V-4：九类与 versions.yaml 的 9 个 taxonomy 值对齐防漂移）
+    import yaml
+    taxonomy_path = Path(__file__).resolve().parents[2] / "rules" / "sink_taxonomy" / "versions.yaml"
+    entries = yaml.safe_load(taxonomy_path.read_text("utf-8"))["entries"]
+    taxonomies = {e["taxonomy"] for e in entries}
+    assert taxonomies == {
+        "ui_navigation", "connection_session_control", "callback_event_injection",
+        "location_sensor_collection", "device_protocol_output",
+        "persistent_state_write", "database_mutation", "file_mutation",
+        "data_disclosure",
+    }, f"taxonomy 类别集漂移: {sorted(taxonomies)}"
+    assert len(taxonomies) == 9, "九类语义与 taxonomy 类别数不一致"
