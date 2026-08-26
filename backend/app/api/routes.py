@@ -303,7 +303,11 @@ async def generate_finding_report_draft(finding_id: str, request: Request) -> di
     # generator 降级回投影（报告永不因 AI 阻塞）。async 是必需的
     # （analyzer.report_entry 为真实网络 IO——M3/M4 审查 4.7 的"改 def"
     # 建议不成立）；落盘同步 IO 包 to_thread 防事件循环阻塞。
-    analyzer = request.app.state.ai_runtime.create_analyzer()
+    analyzer = request.app.state.ai_runtime.create_analyzer(
+        # 审查 R-4：报告 AI 请求补输出上限（对齐 orchestrator.py:76 先例——
+        # 上轮"默认路径"澄清失实，payload 实际不含 max_tokens）
+        max_output_tokens=request.app.state.settings.context_budget.max_output_tokens,
+    )
     document = await generate_report_document(
         finding, settings=request.app.state.settings.report, analyzer=analyzer)
     run_dir = request.app.state.storage.run_dir(finding["run_id"])

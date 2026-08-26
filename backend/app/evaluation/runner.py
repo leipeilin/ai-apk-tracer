@@ -150,8 +150,8 @@ def evaluate_runs(
             total_hit_cases += explorer_metrics["explorer_hit_total"]
         total_conditional += len(explorer_metrics["conditional_hits"])
         total_conditional_cases += explorer_metrics["conditional_total"]
-        for key in ("explorer_requests", "deep_dive_requests", "verify_requests",
-                    "ai_stage_requests", "total_requests"):
+        for key in ("explorer_requests", "deep_dive_requests", "read_requests",
+                    "verify_requests", "ai_stage_requests", "total_requests"):
             value = costs.get(key)
             if isinstance(value, int):
                 costs_total[key] = costs_total.get(key, 0) + value
@@ -255,9 +255,9 @@ def _load_results(path: str | Path) -> dict[str, Any]:
         with result_path.open("r", encoding="utf-8") as handle:
             value = json.load(handle, object_pairs_hook=_reject_duplicate_keys)
     if not isinstance(value, dict):
-        raise ValueError("actual results JSON root must be an object")
+        raise TypeError("actual results JSON root must be an object")
     if not all(isinstance(key, str) and isinstance(item, dict) for key, item in value.items()):
-        raise ValueError("actual results must map string case ids to result objects")
+        raise TypeError("actual results must map string case ids to result objects")
     return value
 
 

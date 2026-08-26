@@ -82,10 +82,12 @@ class TestPocConsistency:
         assert any("executable_files_created 非空" in v for v in result["checks"]["poc_skeleton_consistency"]["violations"])
 
     def test_concrete_command_warns(self) -> None:
+        """R-7 分级：命令无占位符 → WARN（非硬红线）。"""
         doc = _document()
         doc["poc_skeleton"]["command_skeleton"] = ["adb shell am start -n real.app/Real"]
         result = check_report_document(doc)
-        assert result["verdict"] == "FAIL"  # 无占位符 + notes 关键词仍在——command 违规是 WARN 但 notes 也可能挂
+        assert result["verdict"] == "WARN"
+        assert result["checks"]["poc_skeleton_consistency"]["verdict"] == "WARN"
 
     def test_kind_enum(self) -> None:
         doc = _document()
@@ -93,10 +95,12 @@ class TestPocConsistency:
         result = check_report_document(doc)
         assert any("poc kind 非法" in v for v in result["checks"]["poc_skeleton_consistency"]["violations"])
 
-    def test_notes_keyword_required(self) -> None:
+    def test_notes_keyword_required_warns(self) -> None:
+        """R-7 分级：notes 缺声明 → WARN（非硬红线）。"""
         doc = _document()
         doc["poc_skeleton"]["notes"] = ["随便一句话"]
         result = check_report_document(doc)
+        assert result["verdict"] == "WARN"
         assert any("notes 缺少" in v for v in result["checks"]["poc_skeleton_consistency"]["violations"])
 
 
@@ -144,3 +148,22 @@ def test_locations_bucket_checked() -> None:
     assert result["verdict"] == "WARN"
     assert any("locations" in v and "path 空" in v
                for v in result["checks"]["evidence_reference_integrity"]["violations"])
+
+
+class TestComponentDomainR3:
+    """2026-08-26 审查 R-3：webview/crypto/manifest 组件域合法（真实 finding 域）。"""
+
+    def test_webview_and_crypto_components_pass(self) -> None:
+        for component in ("webview", "crypto", "manifest"):
+            doc = _document()
+            doc["poc_skeleton"]["component_kind"] = component
+            result = check_report_document(doc)
+            assert result["verdict"] == "PASS", (component, result["checks"]["poc_skeleton_consistency"])
+
+    def test_component_kind_shared_constant(self) -> None:
+        from app.evaluation.report_quality import _LEGAL_COMPONENT_KINDS
+        from app.reporting.poc import FINDING_COMPONENT_KINDS
+
+        assert _LEGAL_COMPONENT_KINDS is FINDING_COMPONENT_KINDS  # 共享单一常量
+        for component in ("webview", "crypto", "manifest"):
+            assert component in FINDING_COMPONENT_KINDS

@@ -11,6 +11,14 @@ from typing import Any
 
 from app.reporting.models import PocKind, PoCSkeleton
 
+# finding 组件域全集（2026-08-26 审查 R-3：真实产物实测 activity/crypto/
+# manifest/provider/receiver/service/webview + 入口域兜底——report_quality
+# 与本模块共享单一常量防口径漂移）
+FINDING_COMPONENT_KINDS: frozenset[str] = frozenset({
+    "activity", "service", "receiver", "provider", "webview",
+    "crypto", "manifest", "other", "binder", "webview_bridge",
+})
+
 # rule_id 关键词 → 骨架类型（确定性映射；未命中按组件类型兜底）
 _RULE_KIND_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("BINDER",), "binder_transaction"),

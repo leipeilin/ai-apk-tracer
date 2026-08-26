@@ -173,18 +173,23 @@ class CallTreeService:
         """
 
         database_path = self._run_dir / "index" / "analysis.sqlite3"
+        connection = None
         try:
-            with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as connection:
-                rows = connection.execute(
-                    "SELECT start_line, resolved_target_id FROM call_sites "
-                    "WHERE method_id = ? AND resolve_status = 'resolved' "
-                    "AND resolved_target_id IS NOT NULL "
-                    "ORDER BY start_line LIMIT ?",
-                    (method_id, limit),
-                ).fetchall()
+            connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
+            rows = connection.execute(
+                "SELECT start_line, resolved_target_id FROM call_sites "
+                "WHERE method_id = ? AND resolve_status = 'resolved' "
+                "AND resolved_target_id IS NOT NULL "
+                "ORDER BY start_line LIMIT ?",
+                (method_id, limit),
+            ).fetchall()
         except sqlite3.Error:
             LOGGER.warning("seed hops 查询失败（降级为空骨架）", extra={"method_id": method_id})
             return []
+        finally:
+            # 审查 R-6：with sqlite3.connect 是事务上下文非关闭——显式释放
+            if connection is not None:
+                connection.close()
         return [
             {"from_method_id": method_id, "to_method_id": str(target), "call_site_line": line}
             for line, target in rows

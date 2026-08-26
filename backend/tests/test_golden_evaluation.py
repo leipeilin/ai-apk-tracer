@@ -404,3 +404,45 @@ def test_explorer_match_keys_no_cross_case_collision() -> None:
         if case.explorer_expected.expectation == "conditional":
             assert case.explorer_expected.source_match_keys
             assert case.explorer_expected.sink_match_keys
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-26 审查 R-1：词边界匹配 + 真实假阳回归
+# ---------------------------------------------------------------------------
+
+
+def test_explorer_match_word_boundary() -> None:
+    """R-1：词边界——"startActivity" 不匹配 "startActivityForResult"。"""
+    from app.evaluation.golden import GoldenCase
+
+    case = GoldenCase.model_validate({
+        **_load_all_cases()["extra-close-url-unregistered-dos"],
+    })
+    keys = case.explorer_expected
+    assert keys.matches("MainActivity extras", "startActivityForResult", "") is False
+    assert keys.matches("MainActivity extras", "startActivity:33", "") is True
+    assert keys.matches("MainActivity extras", "调用 startActivity", "") is True
+
+
+def test_explorer_hit_qq_sdk_false_positive_regression() -> None:
+    """R-1 真实假阳回归：QQ SDK AuthActivity 候选（source='Intent extras' +
+    sink='WebView.loadUrl'）不得命中 router-validation-overwritten
+    （原宽松子串命中的假阳——2026-08-23 shop 基线 0.167 即此假阳）。"""
+    from app.evaluation.golden import GoldenCase, explorer_hit
+
+    case = GoldenCase.model_validate({
+        **_load_all_cases()["router-validation-overwritten"]})
+    qq_candidate = {
+        "source": "Intent extras",
+        "sink": "WebView.loadUrl",
+        "hops": [{"from_method_id": "com/tencent/tauth/AuthActivity.java#onCreate:63",
+                  "to_method_id": "android/webkit/WebView.java#loadUrl:184"}],
+    }
+    assert not explorer_hit(case, qq_candidate)
+    # 真实 RouterActivity 候选仍命中（类名键 + 词边界）
+    real_candidate = {
+        "source": "RouterActivity Intent extras",
+        "sink": "loadUrl(url)",
+        "hops": [],
+    }
+    assert explorer_hit(case, real_candidate)

@@ -63,3 +63,22 @@ M3 报告链路（门禁/降级/零可执行/防虚构）实现正确、测试�
 
 - **M3：可放行（附条件）**——条件：修 R-4（一行传参）与 R-2 文档更正后合入；
 - **M4：机制放行、指标采信暂缓**——R-1 假阳使 m4-shop 基线 0.167 不可作为优化门槛真值（会把正确性修复判为劣化）；建议收紧匹配键（组件限定/词边界）、修 R-3、重刷基线后，再让 T4.4 承担守门职责。R-5~R-8 随批处理。
+
+---
+
+## 8. 被审查方处置意见（主代理回填，2026-08-26）
+
+**总体**：R-1~R-8 全部认同（R-1/R-3 已独立复验：假阳候选 1 个实证在库；真实组件域为 activity/crypto/manifest/provider/receiver/service/webview——合法集缺 crypto/manifest/webview 三个）。上轮 4.3 澄清失实确认——主代理上轮的"默认路径"判断错误，接受 R-4 批评。
+
+| 编号 | 认同度 | 处置 | 修复方案 |
+|---|---|---|---|
+| R-1 | **完全认同**（复验：假阳候选 source="Intent extras" 实证在库） | 修复 | ①`matches()` 加词边界（regex `\b`——"startActivity" 不再匹配 "startActivityForResult"；method_id 通道 `startActivity:33` 仍命中）②标注键收紧（router-validation 删泛键 "Intent extras"；extra-close 的 "startActivity" 依赖词边界精确化）③真实假阳回归测试（AuthActivity 候选不命中）④基线重刷（假阳归零后如实）⑤validation 分层计数记 backlog（不本轮做——复杂度收益比不佳） |
+| R-2 | 完全认同 | 修复 | README 归因修正（随 R-1 重刷后按实际命中清单如实记录） |
+| R-3 | 完全认同（复验：组件域多 crypto/manifest/webview） | 修复 | 合法集改为 finding 组件域全集（activity/service/receiver/provider/webview/crypto/manifest/other）+ 与 poc.py 兜底映射共享常量 + webview/crypto 用例 |
+| R-4 | 完全认同（上轮澄清错误确认） | 修复 | routes.py 补 `max_output_tokens=settings.context_budget.max_output_tokens`（一行，对齐 orchestrator.py:76 先例） |
+| R-5 | 完全认同 | 修复 | costs_total 聚合键补 read_requests |
+| R-6 | **部分认同** | 部分修复 | 连接管理修（显式 close——`with` 确为事务语义非关闭）；**截断观测记 backlog**（LIMIT 截断是设计取向，COUNT 查询翻倍成本不值——子代理亦标注"可接受"） |
+| R-7 | 完全认同 | 修复（修实现而非 docstring） | _check_poc 按 T4.3 原方案分级：executable 非法/kind 非法 → FAIL；命令占位符/notes → WARN（实现当初偷懒全 FAIL，违背原设计） |
+| R-8 | 完全认同 | 修复 | 投影 l2_verdict 兼容旧键 `verdict`（20260815 产物）；harm/flaw_holds 旧 schema 无对应留 None（诚实） |
+
+测试盲区 6 项：本轮随修复覆盖 2 项（真实假阳回归=R-1；webview/crypto 用例=R-3）；并发竞态/_ACTIVE_PROMPT_CASES 扩展/gate 真实基线消费测试/golden CI 兜底 4 项记 backlog（独立任务规模）。

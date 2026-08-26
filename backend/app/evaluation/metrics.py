@@ -145,7 +145,7 @@ def _calculate_slice(
     }
 
 
-def _ratio(numerator: float | int, denominator: float | int) -> float:
+def _ratio(numerator: float, denominator: float) -> float:
     if denominator == 0:
         return 0.0
     return round(numerator / denominator, 6)

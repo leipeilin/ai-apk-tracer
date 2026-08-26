@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
@@ -106,17 +107,21 @@ class ExplorerExpectation(StrictModel):
     def matches(self, source_text: str, sink_text: str, hop_method_ids: str) -> bool:
         """三通道命中：source 与（sink 文本或 hops method_id 任一）含匹配键。
 
-        子串、大小写不敏感；hop_method_ids 为该候选全部 hop 的
-        from/to method_id 拼接文本（结构化 `类#方法:行`）。
+        **词边界匹配**（2026-08-26 审查 R-1：宽松子串在真实数据上假阳——
+        "startActivity" 曾命中 "startActivityForResult"、"Intent extras"
+        曾命中任意含 extras 的候选）；大小写不敏感；hop_method_ids 为该
+        候选全部 hop 的 from/to method_id 拼接文本（`类#方法:行`——冒号/
+        点号是非词字符，"startActivity:33" 可被词边界正确命中）。
         """
 
-        src = source_text.lower()
-        snk = sink_text.lower()
-        hops = hop_method_ids.lower()
-        source_hit = any(k.lower() in src for k in self.source_match_keys)
+        def _has_key(key: str, text: str) -> bool:
+            pattern = rf"\b{re.escape(key.lower())}\b"
+            return re.search(pattern, text.lower()) is not None
+
+        source_hit = any(_has_key(k, source_text) for k in self.source_match_keys)
         sink_hit = (
-            any(k.lower() in snk for k in self.sink_match_keys)
-            or any(k.lower() in hops for k in self.sink_match_keys)
+            any(_has_key(k, sink_text) for k in self.sink_match_keys)
+            or any(_has_key(k, hop_method_ids) for k in self.sink_match_keys)
         )
         return source_hit and sink_hit
 

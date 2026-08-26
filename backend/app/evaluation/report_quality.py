@@ -11,9 +11,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from app.reporting.poc import FINDING_COMPONENT_KINDS
+
 _LEGAL_PROVENANCE = {"ai_report_protocol", "projected_from_l2_review"}
 _LEGAL_POC_KINDS = {"intent", "uri", "binder_transaction", "broadcast", "provider_query"}
-_LEGAL_COMPONENT_KINDS = {"activity", "service", "provider", "receiver", "other", "binder", "webview_bridge"}
+# 组件域与 poc.py 共享单一常量（审查 R-3——曾缺 webview/crypto/manifest
+# 致真实 finding 报告误 FAIL）
+_LEGAL_COMPONENT_KINDS = FINDING_COMPONENT_KINDS
 _NOTE_KEYWORDS = ("占位符", "授权", "<PACKAGE>")
 
 
@@ -89,8 +93,12 @@ def _check_references(document: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _check_poc(document: Mapping[str, Any]) -> dict[str, Any]:
-    """检查 3：PoC 骨架一致性（零可执行 FAIL 级；命令占位符/kind 枚举/
-    notes 声明 WARN 级——评审 R-2/R-3/R-6）。"""
+    """检查 3：PoC 骨架一致性。
+
+    分级（T4.3 原方案语义——2026-08-26 审查 R-7 修正，实现当初偷懒全 FAIL）：
+    - FAIL 级：executable_files_created 非空（硬红线）、kind/component 枚举非法；
+    - WARN 级：命令占位符形态、notes 声明关键词。
+    """
 
     violations: list[str] = []
     fail = False
@@ -110,11 +118,16 @@ def _check_poc(document: Mapping[str, Any]) -> dict[str, Any]:
                     violations.append(f"command_skeleton[{index}] 无占位符且非注释形态")
     if poc.get("kind") not in _LEGAL_POC_KINDS:
         violations.append(f"poc kind 非法: {poc.get('kind')!r}")
+        fail = True
     if poc.get("component_kind") not in _LEGAL_COMPONENT_KINDS:
         violations.append(f"component_kind 非法: {poc.get('component_kind')!r}")
+        fail = True
     notes = poc.get("notes")
     if isinstance(notes, list) and notes and not any(
         any(kw in str(note) for kw in _NOTE_KEYWORDS) for note in notes
     ):
         violations.append("notes 缺少占位符/授权声明关键词")
-    return {"verdict": "FAIL" if fail or violations else "PASS", "violations": violations}
+    return {
+        "verdict": "FAIL" if fail else ("WARN" if violations else "PASS"),
+        "violations": violations,
+    }

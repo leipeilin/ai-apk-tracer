@@ -40,13 +40,12 @@
   "explorer_expected": {
     "expectation": "hit",
     "source_match_keys": [
-      "RouterActivity",
-      "Intent extras"
+      "RouterActivity"
     ],
     "sink_match_keys": [
       "loadUrl"
     ],
-    "notes": "V-02 覆盖（router-validation-overwritten）；与 fragment-external-class-name 以 sink 键区分"
+    "notes": "V-02 覆盖（router-validation-overwritten）；与 fragment-external-class-name 以 sink 键区分；2026-08-26 审查 R-1：删泛键 'Intent extras'（QQ SDK AuthActivity 假阳）+ 词边界匹配"
   },
   "provenance": [
     {

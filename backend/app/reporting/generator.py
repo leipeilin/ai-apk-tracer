@@ -149,7 +149,7 @@ def _build_report_input(finding: dict[str, Any]) -> ReportInput:
     deterministic_summary = "；".join(str(p) for p in parts if p and str(p) != "None") or "确定性事实缺失"
     if len(deterministic_summary) > 9500:
         deterministic_summary = deterministic_summary[:9500] + "…(truncated)"
-    l2_verdict = ai.get("candidate_verdict")
+    l2_verdict = ai.get("candidate_verdict") or ai.get("verdict")  # 审查 R-8：旧 schema 键兼容
     l2_tier = ai.get("confidence_tier")
     pointers = _evidence_pointers(finding)
     return ReportInput(
