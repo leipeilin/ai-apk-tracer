@@ -1,6 +1,6 @@
 """API 入口表生成测试（T2.2）。
 
-设计：docs/analysis/2026-08-22-t2-2-implementation-plan.md（含评审 R-1~R-9 修订）。
+设计：docs/analysis/explorer-track/2026-08-22-t2-2-implementation-plan.md（含评审 R-1~R-9 修订）。
 构造模式复用 T2.1（tmp 源码 → build_code_index 真实 index）；规则产物手写
 rule-results/*.json（T2.1 落盘结构）。
 """

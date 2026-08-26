@@ -559,7 +559,7 @@ _CHAIN_EVIDENCE_FIELDS = (
 
 # ---------------------------------------------------------------------------
 # 规则产物导出（T2.1）：stdout 协议内嵌 artifacts，backend 汇总侧落盘。
-# 依据 docs/analysis/2026-08-22-t2-1-implementation-plan.md（评审 R-1~R-7 修订）。
+# 依据 docs/analysis/explorer-track/2026-08-22-t2-1-implementation-plan.md（评审 R-1~R-7 修订）。
 # ---------------------------------------------------------------------------
 
 _ARTIFACT_MAX_BYTES = 2 * 1024 * 1024  # 单产物 2 MiB（stdout 预算 10 MiB 内自控）

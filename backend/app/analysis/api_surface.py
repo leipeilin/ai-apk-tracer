@@ -4,7 +4,7 @@
 组装 `run_dir/api-surface/api_entry_table.json`——探索轨 Agent1 的确定性
 "对外暴露 API 揭秘"输入。
 
-设计：docs/analysis/2026-08-22-t2-2-implementation-plan.md
+设计：docs/analysis/explorer-track/2026-08-22-t2-2-implementation-plan.md
 （含评审 R-1~R-9 修订：entry_method 实际格式 `name(params)->return` /
 exported 四值域 / qualified_class 精确过滤 / lifecycle 补齐 / `__2` 去重 /
 空数组产物容错 / 注册类语义标注）。

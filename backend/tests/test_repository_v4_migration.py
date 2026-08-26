@@ -1,7 +1,7 @@
 """schema_migrations v4（assets/batches + runs 关联列）迁移测试（T1.1）。
 
-设计稿：docs/analysis/2026-08-22-t0-8-implementation-plan.md；
-实施方案：docs/analysis/2026-08-22-t1-1-implementation-plan.md（含评审 R-1~R-6 修订）：
+设计稿：docs/analysis/explorer-track/2026-08-22-t0-8-implementation-plan.md；
+实施方案：docs/analysis/explorer-track/2026-08-22-t1-1-implementation-plan.md（含评审 R-1~R-6 修订）：
 - 迁移逐条 execute（保持挂起事务原子性，评审 R-1）；
 - FK 行为测试须在 PRAGMA foreign_keys=ON 连接上执行（评审 R-5）；
 - 叠加路径构造：initialize 后回退 v4 记录 + DROP 两表（评审 R-2 定稿）。

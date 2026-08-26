@@ -336,7 +336,7 @@ def cleanup_run(run_id: str, body: CleanupRequest, request: Request) -> dict:
 
 # ----------------------------------------------------------------------
 # 资产与批量扫描（T1.4；门禁/授权/脱敏设计见
-# docs/analysis/2026-08-22-t1-4-implementation-plan.md）
+# docs/analysis/explorer-track/2026-08-22-t1-4-implementation-plan.md）
 # ----------------------------------------------------------------------
 
 

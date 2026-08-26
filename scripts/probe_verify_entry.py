@@ -34,7 +34,7 @@ evidence_integrity_validation 阶段同函数）。
 输出：结构化 JSON（stdout）+ 人读摘要（stderr）。
 退出码：0 = dry-run 或 PASS；1 = FAIL；2 = 输入/环境错误。
 
-设计：docs/analysis/2026-08-23-m2m3-forward-guidance.md §4.2/§9。
+设计：docs/analysis/milestones/2026-08-23-m2m3-forward-guidance.md §4.2/§9。
 """
 
 from __future__ import annotations

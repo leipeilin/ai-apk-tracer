@@ -1,6 +1,6 @@
 """批量编排：资产副本 → run 创建（降级判定）→ 并发扫描 → 状态汇总（T1.3）。
 
-设计依据：docs/analysis/2026-08-22-t1-3-implementation-plan.md
+设计依据：docs/analysis/explorer-track/2026-08-22-t1-3-implementation-plan.md
 （含评审 R-1~R-10 修订：to_thread ingest / create_run 三列一次落库 /
 gather(return_exceptions) / 条件 UPDATE 抢占 / skip_reason 分解计数）。
 

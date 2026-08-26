@@ -1,6 +1,6 @@
 """探索 Agent 驱动循环测试（T2.5b）。
 
-设计：docs/analysis/2026-08-22-t2-5b-implementation-plan.md（含评审
+设计：docs/analysis/explorer-track/2026-08-22-t2-5b-implementation-plan.md（含评审
 R-1~R-10 修订）。FakeAnalyzer 按队列逐轮弹出 Observation；真实 index
 （复用 test_call_tree 调用链源码）承载 read_requests 本地检索。
 """

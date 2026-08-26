@@ -1,6 +1,6 @@
 """资产/批量 API 端点测试（T1.4）。
 
-设计：docs/analysis/2026-08-22-t1-4-implementation-plan.md
+设计：docs/analysis/explorer-track/2026-08-22-t1-4-implementation-plan.md
 （含评审 R-1~R-6 修订：data_root 显式 tmp 隔离 / _public_batch 剔除
 assets_json / 恶意文件名负例）。API 层只验协议；编排逻辑由
 test_batch.py 覆盖（run_batch 以 no-op 替身防真实 decompile 重执行）。

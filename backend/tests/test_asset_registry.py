@@ -1,6 +1,6 @@
 """资产注册表测试（T1.2）。
 
-设计：docs/analysis/2026-08-22-t1-2-implementation-plan.md（含评审 R-1~R-8 修订）；
+设计：docs/analysis/explorer-track/2026-08-22-t1-2-implementation-plan.md（含评审 R-1~R-8 修订）；
 关键断言：重复注册冲突保留副本（R-1）、limits 三参数同源（R-2）、
 link_run 前置 run 存在（R-4）、删除复用 safe_remove_tree（R-4）。
 """

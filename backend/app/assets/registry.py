@@ -1,7 +1,7 @@
 """资产注册表：APK 副本（内容寻址）+ assets 表 CRUD（T1.2）。
 
-设计依据：docs/analysis/2026-08-22-t0-8-implementation-plan.md（表结构）与
-docs/analysis/2026-08-22-t1-2-implementation-plan.md（含评审 R-1~R-8 修订）。
+设计依据：docs/analysis/explorer-track/2026-08-22-t0-8-implementation-plan.md（表结构）与
+docs/analysis/explorer-track/2026-08-22-t1-2-implementation-plan.md（含评审 R-1~R-8 修订）。
 
 关键语义：
 - 副本内容寻址 assets_root/<sha256[:2]>/<sha256>/<basename>——与 apk_sha256

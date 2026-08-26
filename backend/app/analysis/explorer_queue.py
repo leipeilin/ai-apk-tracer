@@ -5,7 +5,7 @@ partial/unverified/pending 候选的人工队列视图数据源：投影（脱 h
 → 跳回查完整度——评审 R-1：unverified 无深挖证据不被系统性埋没）+
 计数汇总（validated 仅计数不进列表——已并入主链 findings）。
 
-设计：docs/analysis/2026-08-22-t2-10-implementation-plan.md（含评审
+设计：docs/analysis/explorer-track/2026-08-22-t2-10-implementation-plan.md（含评审
 R-1~R-9 修订）。
 """
 

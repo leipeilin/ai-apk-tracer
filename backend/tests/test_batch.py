@@ -1,6 +1,6 @@
 """批量编排测试（T1.3）。
 
-设计：docs/analysis/2026-08-22-t1-3-implementation-plan.md
+设计：docs/analysis/explorer-track/2026-08-22-t1-3-implementation-plan.md
 （含评审 R-1~R-10 修订）。FakeOrchestrator 与改后真实行为同构：
 成功路径 = update_run(completed) + manifest stages 追加含 requests_used
 的 ai_analysis 条目；失败路径覆盖"异常收敛 failed"与"直接抛异常"两种。

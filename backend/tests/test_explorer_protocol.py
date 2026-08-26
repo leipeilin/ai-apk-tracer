@@ -1,6 +1,6 @@
 """探索 Agent 协议层测试（T2.5a）。
 
-设计：docs/analysis/2026-08-22-t2-5a-implementation-plan.md（含评审
+设计：docs/analysis/explorer-track/2026-08-22-t2-5a-implementation-plan.md（含评审
 R-1~R-8 修订：既有输出模型零改动——本测试同时回归锚定其行为锚点：
 四操作枚举/_done_requires_chain 校验器/结构化 ComponentSummary）。
 """

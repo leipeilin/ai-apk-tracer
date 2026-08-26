@@ -2,7 +2,7 @@
 
 fixture 复用 test_explorer 模式：真实索引（A.entry→B.run→C.write 调用链）
 承载首轮上下文与 read_requests 取证；FakeVerifyAI 按轮弹出 VerifyOutput spec。
-设计：docs/analysis/2026-08-22-t2-11-implementation-plan.md（含评审 R-1~R-10 修订）。
+设计：docs/analysis/explorer-track/2026-08-22-t2-11-implementation-plan.md（含评审 R-1~R-10 修订）。
 """
 
 from __future__ import annotations

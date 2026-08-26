@@ -1,6 +1,6 @@
 """四组件攻击面导出测试（T2.3）。
 
-设计：docs/analysis/2026-08-22-t2-3-implementation-plan.md（含评审 R-1~R-7
+设计：docs/analysis/explorer-track/2026-08-22-t2-3-implementation-plan.md（含评审 R-1~R-7
 修订）。夹具策略（评审 R-4）：手写 rule-results 产物 + **真实
 build_api_entry_table 生成** entry_table——消手写漂移（entry_method 复用
 name(params)->return 实际格式、exported 映射与 T2.2 同源）。

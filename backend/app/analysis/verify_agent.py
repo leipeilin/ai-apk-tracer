@@ -7,7 +7,7 @@ confidence/reasoning/needs_expansion 与 evidence_refs[].claim）；终止条件
 字段（verdict/flaw_holds/exploitability/refutation_basis），DecisionEngine
 消费方式不变（分流与适配层为 T2.12）。
 
-设计：docs/analysis/2026-08-22-t2-11-implementation-plan.md（含评审
+设计：docs/analysis/explorer-track/2026-08-22-t2-11-implementation-plan.md（含评审
 R-1~R-10 修订：reader 通道/一致性规则 4/request_budget 提前终止/claim
 剥离/undecided_claim_indices 物化/claims 空快速返回/首轮双路径上下文）。
 """

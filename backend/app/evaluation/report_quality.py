@@ -2,7 +2,7 @@
 
 消费 M3 的 ReportDocument（dict 形态）——输出结构化结果
 （verdict PASS/WARN/FAIL + 逐项 violations），供 T4.4 优化门槛与
-人工复核消费。设计：docs/analysis/2026-08-23-m4-t4-3-implementation-plan.md
+人工复核消费。设计：docs/analysis/milestones/2026-08-23-m4-t4-3-implementation-plan.md
 （含评审 R-1~R-7 修订）。
 """
 

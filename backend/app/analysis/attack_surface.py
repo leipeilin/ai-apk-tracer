@@ -4,7 +4,7 @@
 ——探索轨 Agent1 的"从攻击面出发"确定性输入。receiver 合并静态（manifest）
 与动态（T2.1 receiver_registrations 产物）注册。
 
-设计：docs/analysis/2026-08-22-t2-3-implementation-plan.md
+设计：docs/analysis/explorer-track/2026-08-22-t2-3-implementation-plan.md
 （含评审 R-1~R-7 修订：exported 保守统一高估 / T0.5 样例勘误 /
 entry_methods 含 dynrcv / reason 组合标注 / provider 读写权限透传 /
 binder 无挂靠声明 / auxiliary 含入聚合）。

@@ -4,7 +4,7 @@
 Explorer Agent（T2.5）、核验 Agent（T2.11）与人工分析共用，不预生成
 全量调用树。
 
-设计：docs/analysis/2026-08-22-t2-4-implementation-plan.md
+设计：docs/analysis/explorer-track/2026-08-22-t2-4-implementation-plan.md
 （含评审 R-1~R-7 修订：树透传歧义 gaps / body 行预算对齐 240 /
 method_id 列值直取硬约束 / lifecycle 解析复用公共函数）。
 """

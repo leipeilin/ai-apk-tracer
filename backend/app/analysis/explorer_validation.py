@@ -14,7 +14,7 @@
   partially_validated 或人工队列"——升级闭环经 promote 后重校验升档）；
   taxonomy_entries=None 禁用判定（保守 False，兼容 T2.6 行为）。
 
-设计：docs/analysis/2026-08-22-t2-6-implementation-plan.md（含评审
+设计：docs/analysis/explorer-track/2026-08-22-t2-6-implementation-plan.md（含评审
 R-1~R-8 修订）；2026-08-22-t2-9-implementation-plan.md（含评审 R-1~R-11）。
 """
 

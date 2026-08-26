@@ -10,7 +10,7 @@ identity——funnel 身份含 candidate_source 分源，此处仅做人工视�
 显式关联，口径与 M2 验收 §4.3.1"同一链"判定一致：source 组件一致且
 sink 方法一致）。
 
-设计：docs/analysis/2026-08-22-t2-7-implementation-plan.md（含评审 R-1~R-7
+设计：docs/analysis/explorer-track/2026-08-22-t2-7-implementation-plan.md（含评审 R-1~R-7
 修订：guard 双字段语义 / notes 分支收紧 / description 留空防锚定 /
 SEVERITY_KEYWORDS 生产侧单一事实源）。
 """

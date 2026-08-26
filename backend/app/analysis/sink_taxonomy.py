@@ -9,7 +9,7 @@ backend 侧 custom_sink_proposal 判定的独立数据源（零依赖红线—�
 （generate_golden_case——形状对齐 backend/app/evaluation/golden.py
 GoldenCase 模型，manifest 合并留人工）。
 
-设计：docs/analysis/2026-08-22-t2-9-implementation-plan.md（含评审
+设计：docs/analysis/explorer-track/2026-08-22-t2-9-implementation-plan.md（含评审
 R-1~R-11 修订：receiver 规范化/leaf 末段提取宽匹配/arity 预留/
 GoldenCase 必填字段/reader 重建路径）。
 """

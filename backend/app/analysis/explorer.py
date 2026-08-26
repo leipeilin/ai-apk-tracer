@@ -11,7 +11,7 @@ T2.8 增补：deep_dive_partials 对 partially_validated 候选执行深挖
 不改写链（hops/validation 不变，M2 验收 4.3-5.4）、不自动升级档位（D1）、
 不进 funnel 主链（L2 复核独立裁决不受影响）。
 
-设计：docs/analysis/2026-08-22-t2-5b-implementation-plan.md（含评审
+设计：docs/analysis/explorer-track/2026-08-22-t2-5b-implementation-plan.md（含评审
 R-1~R-10 修订：ai_call 预算回调/circuit_breaking 短路判据/轮输入哈希落盘/
 not_found 统一结构/8KB 截断/prompt_version 前缀拼接）；
 2026-08-22-t2-8-implementation-plan.md（含评审 R-1~R-9 修订：

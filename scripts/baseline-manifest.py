@@ -17,7 +17,7 @@
 - logs/、tmp/、rule-work/、input/（日志 / 临时 / 上传副本）
 
 M1 各任务验收对照：对新 run 生成清单后 diff 两份 JSON；文件集合与哈希一致即
-"默认配置产物 diff 为空"（口径详见 docs/analysis/2026-08-22-m1-baseline-runs.md）。
+"默认配置产物 diff 为空"（口径详见 docs/analysis/milestones/2026-08-22-m1-baseline-runs.md）。
 """
 
 from __future__ import annotations

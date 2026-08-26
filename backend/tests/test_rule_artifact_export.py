@@ -1,6 +1,6 @@
 """规则产物导出测试（T2.1）。
 
-设计：docs/analysis/2026-08-22-t2-1-implementation-plan.md（含评审 R-1~R-7 修订）。
+设计：docs/analysis/explorer-track/2026-08-22-t2-1-implementation-plan.md（含评审 R-1~R-7 修订）。
 分层：
 - detector 层：build_code_index 构造真实 index 路径（复用 test_dynamic_receiver_resolution
   先例——生产 payload 只含 manifest/index/config，legacy files 生产无数据，评审 R-5）；

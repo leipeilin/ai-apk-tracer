@@ -1,6 +1,6 @@
 """call_tree on-demand 检索服务测试（T2.4）。
 
-设计：docs/analysis/2026-08-22-t2-4-implementation-plan.md（含评审
+设计：docs/analysis/explorer-track/2026-08-22-t2-4-implementation-plan.md（含评审
 R-1~R-7 修订）。真实 build_code_index 构造调用链/继承/同名歧义源码。
 """
 

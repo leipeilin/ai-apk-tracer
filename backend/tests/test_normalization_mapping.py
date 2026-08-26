@@ -1,6 +1,6 @@
 """ExplorerCandidate → Candidate 归一化映射表可执行断言（T0.6）。
 
-映射表规范见 docs/analysis/2026-08-22-t0-6-normalization-mapping.md；
+映射表规范见 docs/analysis/explorer-track/2026-08-22-t0-6-normalization-mapping.md；
 本文件固化 MAPPING 作为可执行契约（防双源漂移），T2.7 归一化实现须满足
 这些断言。SEVERITY_KEYWORDS 单一事实源在生产模块 explorer_normalization
 （T2.7 评审 R-5：生产代码不得 import 测试模块——依赖方向为测试→生产）。

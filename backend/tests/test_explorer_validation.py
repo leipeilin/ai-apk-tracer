@@ -1,6 +1,6 @@
 """探索候选三档校验测试（T2.6）。
 
-设计：docs/analysis/2026-08-22-t2-6-implementation-plan.md（含评审 R-1~R-8
+设计：docs/analysis/explorer-track/2026-08-22-t2-6-implementation-plan.md（含评审 R-1~R-8
 修订）。真实 index（调用链 + guard 组件）承载回查；手造候选覆盖三档。
 """
 
