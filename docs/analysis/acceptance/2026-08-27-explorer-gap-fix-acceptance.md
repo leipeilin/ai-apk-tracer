@@ -38,8 +38,18 @@
 2. **taxonomy file_mutation 读侧缺口**（V-6）：库内无文件读条目——待真实候选出现后按升级闭环扩充；
 3. **约束编号非单调**（V-8）：历史追加痕迹——重排会破坏既有引用，不动。
 
+## F4：入口覆盖透明化（本次提交——含核验闭合）
+
+| 验收 | 结果 |
+|---|---|
+| A4-1 单测（上限触发 summary 含未探索计数） | ✅ 三层覆盖：property 截断态 + **全探索正例**（核验 V-2 补强）+ **集成 summary 接线断言**（核验 V-1 补强——entries_explored/entries_unexplored 进 stage summary） |
+| A4-2 eada0e71 口径回填 | ✅ **口径核对修正**：explorer summary 的 `entry_count=198`（effective——method_id 过滤后的有效起点），非 api_entry_table 总数 278（80 个入口无 method_id 被过滤）——准确覆盖口径为 **73/198（37%）**，125 未探索（gap-analysis 原"73/278"分母不准，以此为准）；该 run 跑在 F4 代码前（新字段下次 run 生效） |
+| 核验闭合 | V-3 死字段 `_entries_total` 删除（单一事实源 len(effective)）；V-6 恒真断言删；V-4（break 截断入口无逐条 observation 记录——不对称）与 V-5（no_method 计数语义）记 backlog/说明 |
+| 回归 | ✅ 全量 **1260 passed / 0 failed** |
+
 ## 总验收状态
 
-- 全量 **1259 passed / 0 failed**；sync --check 0；
-- **F4（入口覆盖透明化）待实施**——本记录在 F4 完成后补 F4 节并终验；
-- 加分项（health run 全量验证 F1 口径下的 4 case 真分母）待用户指示。
+- 全量 **1260 passed / 0 failed**；sync --check 0；
+- **F1/F2/F3/F4 全部完成**（各自子代理核验 + 主代理采纳处置闭合——流程符合用户指定）；
+- 加分项（health run 全量验证 F1 口径下的 4 case 真分母）待用户指示；
+- backlog：重复请求空转变体（驱动层重复检测 + 无敏感结论干净出口——与 F5 一并设计）/ taxonomy file_mutation 读侧 / break 截断入口的逐条 observation。

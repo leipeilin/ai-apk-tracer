@@ -124,6 +124,8 @@ class ExplorerOrchestrator:
         self._ai_requests_used = 0
         self._read_requests_used = 0
         self._deep_dive_requests_used = 0
+        # F4：入口覆盖透明化（explore_all 结束时更新——0 表示未运行）
+        self._entries_explored = 0
 
     @property
     def ai_requests_used(self) -> int:
@@ -138,6 +140,11 @@ class ExplorerOrchestrator:
         """深挖 AI 调用数（复核账本组成部分——T2.8 三本账公式见任务方案 §3.3）。"""
         return self._deep_dive_requests_used
 
+    @property
+    def entries_explored(self) -> int:
+        """实际探索的入口数（F4 覆盖透明化——explore_all 结束时更新）。"""
+        return self._entries_explored
+
     async def explore_all(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """逐入口探索：method_id 非 None 者为有效起点（no_method 跳过并记录）；
         候选累计达 max_candidates_per_run 即止（剩余入口记 skipped）。"""
@@ -145,6 +152,7 @@ class ExplorerOrchestrator:
         candidates: list[dict[str, Any]] = []
         observations = self._load_observations()
         skipped_short_circuit = False
+        entries_explored = 0
         for entry in entries:
             if skipped_short_circuit:
                 observations["entries"].append({
@@ -152,6 +160,7 @@ class ExplorerOrchestrator:
                     "rounds": [], "candidate_count": 0,
                 })
                 continue
+            entries_explored += 1
             entry_candidates, terminated_by, rounds = await self._explore_entry(entry)
             candidates.extend(entry_candidates)
             observations["entries"].append({
@@ -164,6 +173,9 @@ class ExplorerOrchestrator:
                 skipped_short_circuit = True
             if len(candidates) >= self._settings.max_candidates_per_run:
                 break
+        # F4（2026-08-27）：入口覆盖透明化——上限截断可见（未探索入口计数
+        # 入 stage summary，供覆盖率评估与入口策略优化决策）
+        self._entries_explored = entries_explored
         self._write_observations(observations)
         self._write_candidates(candidates)
         return candidates

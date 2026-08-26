@@ -1213,6 +1213,9 @@ class ScanOrchestrator:
             "ai_requests_used": orchestrator.ai_requests_used,
             "read_requests_used": orchestrator.read_requests_used,
             "deep_dive_requests_used": orchestrator.deep_dive_requests_used,
+            # F4：入口覆盖透明化——上限截断可见（73/278 类覆盖率的机器口径）
+            "entries_explored": orchestrator.entries_explored,
+            "entries_unexplored": len(effective) - orchestrator.entries_explored,
             "validation_counts": validation_counts,
             "deep_dive_counts": deep_dive_counts,
             "normalization_counts": normalization_counts,

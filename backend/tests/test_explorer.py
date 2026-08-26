@@ -574,6 +574,9 @@ def test_explorer_stage_normalizes_validated_into_main_candidates(tmp_path: Path
     assert summary["normalization_counts"]["partial_kept"] == 0
     assert summary["normalization_counts"]["unverified_kept"] == 0
     assert summary["ai_requests_used"] == 1
+    # F4 核验 V-1：summary 接线断言（单入口无截断——全覆盖态）
+    assert summary["entries_explored"] == 1
+    assert summary["entries_unexplored"] == 0
     # T2.10：探索产物注册（explorer_candidates 既有 + explorer_observations 补注册）
     artifact_types = {a["type"] for a in manifest.get("artifacts", [])}
     assert "explorer_candidates" in artifact_types
@@ -1306,3 +1309,28 @@ def test_seed_hops_degrade_to_empty(tmp_path: Path) -> None:
     orchestrator = ExplorerOrchestrator(fake, call_tree, ExplorerSettings(), tmp_path)
     assert orchestrator._build_seed_hops({"method_id": None}) == []
     assert orchestrator._build_seed_hops({"method_id": "x#y:1"}) == []
+
+
+def test_entry_coverage_transparency(tmp_path: Path) -> None:
+    """F4：入口覆盖透明化——截断与全探索两态（核验 V-2 正例补强）。"""
+    call_tree = _service(tmp_path)
+    entries = [_entry(call_tree), _entry(call_tree)]
+    # 上限 1：首入口产链后截断——第二入口不探索
+    fake = FakeAnalyzer([
+        {"done": True, "proposals": [_proposal()]},
+        {"done": True, "proposals": [_proposal()]},
+    ])
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(max_candidates_per_run=1), tmp_path)
+    asyncio_run(orchestrator.explore_all(entries))
+    assert orchestrator.entries_explored == 1  # 截断态：只探索了首入口
+
+    # 全探索态（无截断）：entries_explored == 输入总数
+    fake2 = FakeAnalyzer([
+        {"done": True, "proposals": [_proposal()]},
+        {"done": True, "proposals": [_proposal()]},
+    ])
+    orchestrator2 = ExplorerOrchestrator(
+        fake2, call_tree, ExplorerSettings(), tmp_path)
+    asyncio_run(orchestrator2.explore_all(entries))
+    assert orchestrator2.entries_explored == len(entries)  # 正例：全覆盖
