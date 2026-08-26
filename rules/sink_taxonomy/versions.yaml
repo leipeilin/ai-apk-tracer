@@ -1,80 +1,391 @@
-schema_version: "1.0"
-taxonomy_version: "1.0.0"
-description: >-
-  sink taxonomy 版本化文件（T2.9，方案 §2.2/§2.5）：backend 侧
-  custom_sink_proposal 判定的独立数据源（零依赖红线——backend 不 import
-  rules 模块，本文件是唯一共享数据层）。种子（source=base）自
-  rules/shared/dataflow.py classify_operation_taxonomy 提炼的高置信度
-  子集（同名异义靠 receiver 消歧；构造器/参数字面量/resolved_wrapper
-  等不可数据化分支未收录——rules 侧迭代时 base 条目需人工同步本文件）。
-  人工确认扩展（source=manual）经 scripts/promote_custom_sink.py 追加
-  （taxonomy_version 递增；单人操作约定——并发 promote 的版本冲突在
-  git 层解决）。匹配语义：method 精确匹配 + receiver 三态约束
-  （leaves=末段提取宽匹配 / prefixes=包前缀 / exact=FQCN）；receiver
-  证据缺失时宽松命中（与 rules 侧空值失配口径的主动偏离——索引
-  receiver 缺失常见，严格失配伤召回）。arities 为结构预留（空=不校验）。
+schema_version: '1.0'
+taxonomy_version: 1.0.4
+description: sink taxonomy 版本化文件（T2.9）——backend custom_sink_proposal 判定数据源；种子（base）自
+  rules/shared/dataflow.py 提炼，人工扩展（manual）经 scripts/promote_custom_sink.py 追加；单人操作约定，版本冲突
+  git 层解决。
 entries:
-  # ---- ui_navigation ----
-  - {method: forName, receiver_leaves: [Class], taxonomy: ui_navigation, source: base}
-  - {method: getDeclaredConstructor, receiver_leaves: [Class], taxonomy: ui_navigation, source: base}
-  - {method: getConstructor, receiver_leaves: [Class], taxonomy: ui_navigation, source: base}
-  - {method: startActivity, receiver_leaves: [Context, ContextWrapper, Activity, Service], taxonomy: ui_navigation, source: base}
-  - {method: startActivities, receiver_leaves: [Context, ContextWrapper, Activity, Service], taxonomy: ui_navigation, source: base}
-  - {method: navigate, receiver_prefixes: ["androidx.navigation."], taxonomy: ui_navigation, source: base}
-  - {method: instantiate, receiver_leaves: [FragmentFactory], taxonomy: ui_navigation, source: base}
-  # ---- connection_session_control ----
-  - {method: startService, receiver_leaves: [Context, ContextWrapper, Activity, Service], taxonomy: connection_session_control, source: base}
-  - {method: startForegroundService, receiver_leaves: [Context, ContextWrapper, Activity, Service], taxonomy: connection_session_control, source: base}
-  - {method: bindService, receiver_leaves: [Context, ContextWrapper, Activity, Service], taxonomy: connection_session_control, source: base}
-  - {method: stopSelf, receiver_leaves: [Context, ContextWrapper, Activity, Service], taxonomy: connection_session_control, source: base}
-  - {method: startForeground, receiver_leaves: [Context, ContextWrapper, Activity, Service], taxonomy: connection_session_control, source: base}
-  - {method: connect, receiver_leaves: [BluetoothGatt, BluetoothSocket, WifiManager, ConnectivityManager, Socket, UsbDeviceConnection, URLConnection, HttpURLConnection], taxonomy: connection_session_control, source: base}
-  - {method: disconnect, receiver_leaves: [BluetoothGatt, BluetoothSocket, WifiManager, ConnectivityManager, Socket, UsbDeviceConnection], taxonomy: connection_session_control, source: base}
-  - {method: openConnection, receiver_leaves: [URL, URLConnection], taxonomy: connection_session_control, source: base}
-  # ---- callback_event_injection ----
-  - {method: sendBroadcast, receiver_leaves: [Context, ContextWrapper, Activity, Service], taxonomy: callback_event_injection, source: base}
-  - {method: sendOrderedBroadcast, receiver_leaves: [Context, ContextWrapper, Activity, Service], taxonomy: callback_event_injection, source: base}
-  - {method: postValue, receiver_leaves: [LiveData, MutableLiveData, EventBus], taxonomy: callback_event_injection, source: base}
-  - {method: setValue, receiver_leaves: [LiveData, MutableLiveData], taxonomy: callback_event_injection, source: base}
-  - {method: notify, receiver_leaves: [NotificationManager], taxonomy: callback_event_injection, source: base}
-  # ---- location_sensor_collection ----
-  - {method: requestLocationUpdates, receiver_leaves: [LocationManager], taxonomy: location_sensor_collection, source: base}
-  - {method: requestLocationUpdates, receiver_prefixes: ["com.google.android.gms.location."], taxonomy: location_sensor_collection, source: base}
-  - {method: getLastLocation, receiver_leaves: [LocationManager], taxonomy: location_sensor_collection, source: base}
-  - {method: registerListener, receiver_prefixes: ["android.hardware."], taxonomy: location_sensor_collection, source: base}
-  # ---- device_protocol_output ----
-  - {method: writeCharacteristic, receiver_leaves: [BluetoothGatt], taxonomy: device_protocol_output, source: base}
-  - {method: writeDescriptor, receiver_leaves: [BluetoothGatt], taxonomy: device_protocol_output, source: base}
-  - {method: bulkTransfer, receiver_leaves: [UsbDeviceConnection], taxonomy: device_protocol_output, source: base}
-  - {method: controlTransfer, receiver_leaves: [UsbDeviceConnection], taxonomy: device_protocol_output, source: base}
-  - {method: transceive, receiver_prefixes: ["android.nfc.tech."], taxonomy: device_protocol_output, source: base}
-  # ---- persistent_state_write ----
-  - {method: putString, receiver_leaves: [Editor], receiver_exact: ["android.content.SharedPreferences$Editor", "android.provider.Settings$Secure", "android.provider.Settings$Global"], taxonomy: persistent_state_write, source: base}
-  - {method: remove, receiver_leaves: [Editor], receiver_exact: ["android.content.SharedPreferences$Editor"], taxonomy: persistent_state_write, source: base}
-  - {method: apply, receiver_leaves: [Editor], receiver_exact: ["android.content.SharedPreferences$Editor"], taxonomy: persistent_state_write, source: base}
-  - {method: commit, receiver_leaves: [Editor], receiver_exact: ["android.content.SharedPreferences$Editor"], taxonomy: persistent_state_write, source: base}
-  - {method: updateData, receiver_prefixes: ["androidx.datastore."], taxonomy: persistent_state_write, source: base}
-  # ---- database_mutation ----
-  - {method: insert, receiver_leaves: [ContentResolver], taxonomy: database_mutation, source: base}
-  - {method: insert, receiver_prefixes: ["android.database.sqlite.", "androidx.sqlite.db."], taxonomy: database_mutation, source: base}
-  - {method: update, receiver_leaves: [ContentResolver], taxonomy: database_mutation, source: base}
-  - {method: update, receiver_prefixes: ["android.database.sqlite.", "androidx.sqlite.db."], taxonomy: database_mutation, source: base}
-  - {method: delete, receiver_leaves: [ContentResolver], taxonomy: database_mutation, source: base}
-  - {method: delete, receiver_prefixes: ["android.database.sqlite.", "androidx.sqlite.db."], taxonomy: database_mutation, source: base}
-  - {method: execSQL, receiver_prefixes: ["android.database.sqlite.", "androidx.sqlite.db."], taxonomy: database_mutation, source: base}
-  # ---- data_disclosure ----
-  - {method: query, receiver_leaves: [ContentResolver], taxonomy: data_disclosure, source: base}
-  - {method: rawQuery, receiver_prefixes: ["android.database.sqlite.", "androidx.sqlite.db."], taxonomy: data_disclosure, source: base}
-  - {method: loadUrl, receiver_leaves: [WebView], taxonomy: data_disclosure, source: base}
-  - {method: evaluateJavascript, receiver_leaves: [WebView], taxonomy: data_disclosure, source: base}
-  - {method: addJavascriptInterface, receiver_leaves: [WebView], taxonomy: data_disclosure, source: base}
-  - {method: execute, receiver_prefixes: ["okhttp3.", "retrofit2."], taxonomy: data_disclosure, source: base}
-  - {method: enqueue, receiver_prefixes: ["okhttp3.", "retrofit2."], taxonomy: data_disclosure, source: base}
-  # ---- file_mutation ----
-  - {method: delete, receiver_leaves: [File], receiver_prefixes: ["java.nio.file."], taxonomy: file_mutation, source: base}
-  - {method: renameTo, receiver_leaves: [File], taxonomy: file_mutation, source: base}
-  - {method: mkdir, receiver_leaves: [File], taxonomy: file_mutation, source: base}
-  - {method: mkdirs, receiver_leaves: [File], taxonomy: file_mutation, source: base}
-  - {method: createNewFile, receiver_leaves: [File], taxonomy: file_mutation, source: base}
-  - {method: append, receiver_leaves: [FileWriter, BufferedWriter], receiver_prefixes: ["java.nio.file."], taxonomy: file_mutation, source: base}
-  - {method: write, receiver_leaves: [FileOutputStream, FileWriter, RandomAccessFile, BufferedWriter, BluetoothOutputStream, UsbOutputStream, NfcOutputStream, ProtocolWriter], receiver_prefixes: ["java.nio.file."], taxonomy: file_mutation, source: base}
+- method: forName
+  taxonomy: ui_navigation
+  receiver_leaves:
+  - Class
+  source: base
+- method: getDeclaredConstructor
+  taxonomy: ui_navigation
+  receiver_leaves:
+  - Class
+  source: base
+- method: getConstructor
+  taxonomy: ui_navigation
+  receiver_leaves:
+  - Class
+  source: base
+- method: startActivity
+  taxonomy: ui_navigation
+  receiver_leaves:
+  - Activity
+  - Context
+  - ContextWrapper
+  - Service
+  source: base
+- method: startActivities
+  taxonomy: ui_navigation
+  receiver_leaves:
+  - Activity
+  - Context
+  - ContextWrapper
+  - Service
+  source: base
+- method: navigate
+  taxonomy: ui_navigation
+  receiver_prefixes:
+  - androidx.navigation.
+  source: base
+- method: instantiate
+  taxonomy: ui_navigation
+  receiver_leaves:
+  - FragmentFactory
+  source: base
+- method: startService
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - Activity
+  - Context
+  - ContextWrapper
+  - Service
+  source: base
+- method: startForegroundService
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - Activity
+  - Context
+  - ContextWrapper
+  - Service
+  source: base
+- method: bindService
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - Activity
+  - Context
+  - ContextWrapper
+  - Service
+  source: base
+- method: stopSelf
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - Activity
+  - Context
+  - ContextWrapper
+  - Service
+  source: base
+- method: startForeground
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - Activity
+  - Context
+  - ContextWrapper
+  - Service
+  source: base
+- method: connect
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - BluetoothGatt
+  - BluetoothSocket
+  - ConnectivityManager
+  - HttpURLConnection
+  - Socket
+  - URLConnection
+  - UsbDeviceConnection
+  - WifiManager
+  source: base
+- method: disconnect
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - BluetoothGatt
+  - BluetoothSocket
+  - ConnectivityManager
+  - Socket
+  - UsbDeviceConnection
+  - WifiManager
+  source: base
+- method: openConnection
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - URL
+  - URLConnection
+  source: base
+- method: sendBroadcast
+  taxonomy: callback_event_injection
+  receiver_leaves:
+  - Activity
+  - Context
+  - ContextWrapper
+  - Service
+  source: base
+- method: sendOrderedBroadcast
+  taxonomy: callback_event_injection
+  receiver_leaves:
+  - Activity
+  - Context
+  - ContextWrapper
+  - Service
+  source: base
+- method: postValue
+  taxonomy: callback_event_injection
+  receiver_leaves:
+  - EventBus
+  - LiveData
+  - MutableLiveData
+  source: base
+- method: setValue
+  taxonomy: callback_event_injection
+  receiver_leaves:
+  - LiveData
+  - MutableLiveData
+  source: base
+- method: notify
+  taxonomy: callback_event_injection
+  receiver_leaves:
+  - NotificationManager
+  source: base
+- method: requestLocationUpdates
+  taxonomy: location_sensor_collection
+  receiver_leaves:
+  - LocationManager
+  source: base
+- method: requestLocationUpdates
+  taxonomy: location_sensor_collection
+  receiver_prefixes:
+  - com.google.android.gms.location.
+  source: base
+- method: getLastLocation
+  taxonomy: location_sensor_collection
+  receiver_leaves:
+  - LocationManager
+  source: base
+- method: registerListener
+  taxonomy: location_sensor_collection
+  receiver_prefixes:
+  - android.hardware.
+  source: base
+- method: writeCharacteristic
+  taxonomy: device_protocol_output
+  receiver_leaves:
+  - BluetoothGatt
+  source: base
+- method: writeDescriptor
+  taxonomy: device_protocol_output
+  receiver_leaves:
+  - BluetoothGatt
+  source: base
+- method: bulkTransfer
+  taxonomy: device_protocol_output
+  receiver_leaves:
+  - UsbDeviceConnection
+  source: base
+- method: controlTransfer
+  taxonomy: device_protocol_output
+  receiver_leaves:
+  - UsbDeviceConnection
+  source: base
+- method: transceive
+  taxonomy: device_protocol_output
+  receiver_prefixes:
+  - android.nfc.tech.
+  source: base
+- method: putString
+  taxonomy: persistent_state_write
+  receiver_leaves:
+  - Editor
+  receiver_exact:
+  - android.content.SharedPreferences$Editor
+  - android.provider.Settings$Global
+  - android.provider.Settings$Secure
+  source: base
+- method: remove
+  taxonomy: persistent_state_write
+  receiver_leaves:
+  - Editor
+  receiver_exact:
+  - android.content.SharedPreferences$Editor
+  source: base
+- method: apply
+  taxonomy: persistent_state_write
+  receiver_leaves:
+  - Editor
+  receiver_exact:
+  - android.content.SharedPreferences$Editor
+  source: base
+- method: commit
+  taxonomy: persistent_state_write
+  receiver_leaves:
+  - Editor
+  receiver_exact:
+  - android.content.SharedPreferences$Editor
+  source: base
+- method: updateData
+  taxonomy: persistent_state_write
+  receiver_prefixes:
+  - androidx.datastore.
+  source: base
+- method: insert
+  taxonomy: database_mutation
+  receiver_leaves:
+  - ContentResolver
+  source: base
+- method: insert
+  taxonomy: database_mutation
+  receiver_prefixes:
+  - android.database.sqlite.
+  - androidx.sqlite.db.
+  source: base
+- method: update
+  taxonomy: database_mutation
+  receiver_leaves:
+  - ContentResolver
+  source: base
+- method: update
+  taxonomy: database_mutation
+  receiver_prefixes:
+  - android.database.sqlite.
+  - androidx.sqlite.db.
+  source: base
+- method: delete
+  taxonomy: database_mutation
+  receiver_leaves:
+  - ContentResolver
+  source: base
+- method: delete
+  taxonomy: database_mutation
+  receiver_prefixes:
+  - android.database.sqlite.
+  - androidx.sqlite.db.
+  source: base
+- method: execSQL
+  taxonomy: database_mutation
+  receiver_prefixes:
+  - android.database.sqlite.
+  - androidx.sqlite.db.
+  source: base
+- method: query
+  taxonomy: data_disclosure
+  receiver_leaves:
+  - ContentResolver
+  source: base
+- method: rawQuery
+  taxonomy: data_disclosure
+  receiver_prefixes:
+  - android.database.sqlite.
+  - androidx.sqlite.db.
+  source: base
+- method: loadUrl
+  taxonomy: data_disclosure
+  receiver_leaves:
+  - WebView
+  source: base
+- method: evaluateJavascript
+  taxonomy: data_disclosure
+  receiver_leaves:
+  - WebView
+  source: base
+- method: addJavascriptInterface
+  taxonomy: data_disclosure
+  receiver_leaves:
+  - WebView
+  source: base
+- method: execute
+  taxonomy: data_disclosure
+  receiver_prefixes:
+  - okhttp3.
+  - retrofit2.
+  source: base
+- method: enqueue
+  taxonomy: data_disclosure
+  receiver_prefixes:
+  - okhttp3.
+  - retrofit2.
+  source: base
+- method: delete
+  taxonomy: file_mutation
+  receiver_leaves:
+  - File
+  receiver_prefixes:
+  - java.nio.file.
+  source: base
+- method: renameTo
+  taxonomy: file_mutation
+  receiver_leaves:
+  - File
+  source: base
+- method: mkdir
+  taxonomy: file_mutation
+  receiver_leaves:
+  - File
+  source: base
+- method: mkdirs
+  taxonomy: file_mutation
+  receiver_leaves:
+  - File
+  source: base
+- method: createNewFile
+  taxonomy: file_mutation
+  receiver_leaves:
+  - File
+  source: base
+- method: append
+  taxonomy: file_mutation
+  receiver_leaves:
+  - BufferedWriter
+  - FileWriter
+  receiver_prefixes:
+  - java.nio.file.
+  source: base
+- method: write
+  taxonomy: file_mutation
+  receiver_leaves:
+  - BluetoothOutputStream
+  - BufferedWriter
+  - FileOutputStream
+  - FileWriter
+  - NfcOutputStream
+  - ProtocolWriter
+  - RandomAccessFile
+  - UsbOutputStream
+  receiver_prefixes:
+  - java.nio.file.
+  source: base
+- method: getPrefEncryptedUserId
+  taxonomy: data_disclosure
+  receiver_exact:
+  - com.xiaomi.shop2.account.lib.SubProcessLoginManager
+  source: manual
+  confirmed_at: '2026-08-26'
+  confirmed_by: leipeilin-20260827
+  run_id: 20260826T141857Z_1c55d3fb9f95_eada0e71
+  candidate_id: expl_264d7f419340499eb931
+- method: getAccountId
+  taxonomy: data_disclosure
+  receiver_exact:
+  - com.xiaomi.shop2.account.lib.SubProcessLoginManager
+  source: manual
+  confirmed_at: '2026-08-26'
+  confirmed_by: leipeilin-20260827
+  run_id: 20260826T141857Z_1c55d3fb9f95_eada0e71
+  candidate_id: expl_969ce598df0f44a0b650
+- method: setStringPref
+  taxonomy: persistent_state_write
+  receiver_exact:
+  - com.xiaomi.shop2.util.PreferenceUtil
+  source: manual
+  confirmed_at: '2026-08-26'
+  confirmed_by: leipeilin-20260827
+  run_id: 20260826T141857Z_1c55d3fb9f95_eada0e71
+  candidate_id: expl_ffe762bf8f204df4baf5
+- method: setIntPref
+  taxonomy: persistent_state_write
+  receiver_exact:
+  - com.xiaomi.shop2.util.PreferenceUtil
+  source: manual
+  confirmed_at: '2026-08-26'
+  confirmed_by: leipeilin-20260827
+  run_id: 20260826T141857Z_1c55d3fb9f95_eada0e71
+  candidate_id: expl_9171c5bb4e4f4ee19e69

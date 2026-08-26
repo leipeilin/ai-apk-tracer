@@ -113,11 +113,16 @@ def _entries(*overrides: SinkTaxonomyEntry) -> list[SinkTaxonomyEntry]:
 
 
 def test_seed_file_loadable() -> None:
-    """A-1/A-17：种子文件合法加载（≥30 条 base + 三态约束覆盖）。"""
+    """A-1/A-17：种子文件合法加载（≥30 条 base + 三态约束覆盖）。
+
+    source 合法集 {base, manual}——manual 为升级闭环追加（2026-08-27
+    F3 首批 4 条人工确认扩充，taxonomy_version 1.0.4）。
+    """
 
     entries = load_sink_taxonomy(WORKSPACE_ROOT / "rules" / "sink_taxonomy" / "versions.yaml")
     assert len(entries) >= 30
-    assert all(entry.source == "base" for entry in entries)
+    assert all(entry.source in {"base", "manual"} for entry in entries)
+    assert sum(1 for e in entries if e.source == "base") >= 30  # 种子基线不劣化
     assert all(entry.method and entry.taxonomy for entry in entries)
     assert any(entry.receiver_leaves for entry in entries)
     assert any(entry.receiver_prefixes for entry in entries)
