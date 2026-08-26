@@ -10,6 +10,8 @@
 
 **方案**：不靠静态 apk 标注（需维护、易漂移），改为**评估时动态过滤**——`evaluate_explorer_against_golden` 读该 run 的 `index/manifest.json` 组件清单，`explorer_expected.expectation=hit` 的 case 若其组件（case 的 component 字段）**不存在于 run 组件清单** → 剔除出分母（记入 `excluded_cases`——跨 APK/合成 case 天然被排除）。
 
+> **实施纠偏（F1 核验后回写）**：原方案"case.component 字段精确匹配"不可行——GoldenCase 的 `component` 是类型词（"activity"/"service"）非组件名。实际实现：用 `explorer_expected.source_match_keys` 的类名（词边界）匹配组件清单；核验 V-1 发现撞名组件（两 APK 均有 MainActivity）致反向污染后，引入 **`scope_keys` 独立域键**（职责分离：候选匹配键要泛/域过滤键要准——撞名场景用 FQCN 域键，None 回退匹配键）。
+
 **改动**：
 | 文件 | 内容 |
 |---|---|

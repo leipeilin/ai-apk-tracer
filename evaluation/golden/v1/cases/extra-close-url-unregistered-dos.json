@@ -41,14 +41,16 @@
   "explorer_expected": {
     "expectation": "hit",
     "source_match_keys": [
-      "MainActivity",
       "extra_close_url"
     ],
     "sink_match_keys": [
       "startActivity",
       "go2CloseSet"
     ],
-    "notes": "M2 动态终审成立（shop V-02，manual-verification-report/com.xiaomi.sh）——M3/M4 实施审查 4.1 补标（键派生自 path 类名与 symbol；go2CloseSet 为 finding 中间节点兜底键）"
+    "notes": "M2 动态终审成立（shop V-02）；2026-08-27 F1 核验 V-1：删泛键 'MainActivity' （health 撞名致分母反向污染）+ scope_keys FQCN 域键（候选匹配键与域过滤键职责分离）",
+    "scope_keys": [
+      "com.xiaomi.shop2.activity.MainActivity"
+    ]
   },
   "provenance": [
     {

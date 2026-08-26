@@ -419,9 +419,9 @@ def test_explorer_match_word_boundary() -> None:
         **_load_all_cases()["extra-close-url-unregistered-dos"],
     })
     keys = case.explorer_expected
-    assert keys.matches("MainActivity extras", "startActivityForResult", "") is False
-    assert keys.matches("MainActivity extras", "startActivity:33", "") is True
-    assert keys.matches("MainActivity extras", "调用 startActivity", "") is True
+    assert keys.matches("extra_close_url extras", "startActivityForResult", "") is False
+    assert keys.matches("extra_close_url extras", "startActivity:33", "") is True
+    assert keys.matches("extra_close_url extras", "调用 startActivity", "") is True
 
 
 def test_explorer_hit_qq_sdk_false_positive_regression() -> None:

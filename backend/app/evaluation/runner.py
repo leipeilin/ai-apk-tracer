@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -27,13 +28,57 @@ def _hop_ids_text(chain_proposal: Mapping[str, Any]) -> str:
     )
 
 
+def _run_component_names(run_dir: Path) -> list[str] | None:
+    """run 的组件名清单（index/manifest.json 的 components[].name）。
+
+    缺失/损坏 → None（调用方按"无法分域"处理——全量 case 进分母，
+    兼容无组件清单的合成 run fixture）。
+    """
+
+    path = run_dir / "index" / "manifest.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text("utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    names = [
+        str(component.get("name") or "")
+        for component in payload.get("components") or []
+        if isinstance(component, dict) and component.get("name")
+    ]
+    return names or None
+
+
+def _case_in_run_scope(case, run_components: list[str] | None) -> bool:
+    """组件域过滤（2026-08-27 F1——golden 分母跨 APK 错位修正）。
+
+    优先 ``scope_keys``（V-1 职责分离——候选匹配键要泛/域过滤键要准，
+    撞名组件用 FQCN 域键）；None 回退 ``source_match_keys``。任一键
+    （词边界）出现于 run 组件清单 → in scope；全部不存在 → excluded
+    （另一 APK 目标/合成语义）。组件清单不可得 → 不过滤（保守兼容）。
+    """
+
+    if run_components is None:
+        return True
+    expected = case.explorer_expected
+    keys = (expected.scope_keys or expected.source_match_keys) if expected else []
+    joined = "\n".join(run_components)
+    return any(
+        re.search(rf"\b{re.escape(key)}\b", joined, re.IGNORECASE)
+        for key in keys
+    )
+
+
 def evaluate_explorer_against_golden(
     run_dir: Path, cases: list
 ) -> dict[str, Any]:
     """探索候选 ↔ golden 标注命中率（M4-T4.2——T4.1 explorer_hit 消费）。
 
     conditional 命中经 matches 直调（explorer_hit 对 conditional 恒 False
-    ——评审 R-1）；candidates.json 缺失 → proposals_total=0 容错（A-3）。
+    ——评审 R-1）；candidates.json 缺失 → proposals_total=0 容错（A-3）；
+    **组件域过滤（F1）**：case 的匹配键组件不在 run 组件清单 → 剔除
+    分母并记入 excluded_cases（跨 APK/合成 case 不再稀释命中率）。
     """
 
     candidates_path = run_dir / "explorer" / "candidates.json"
@@ -48,13 +93,19 @@ def evaluate_explorer_against_golden(
             if isinstance(item, dict) and isinstance(item.get("chain_proposal"), Mapping)
         ]
 
+    run_components = _run_component_names(run_dir)
+    annotated = [
+        case for case in cases if case.explorer_expected
+    ]
+    in_scope = [case for case in annotated if _case_in_run_scope(case, run_components)]
+    excluded_cases = sorted(case.id for case in annotated if case not in in_scope)
     hit_cases = [
-        case for case in cases
-        if case.explorer_expected and case.explorer_expected.expectation == "hit"
+        case for case in in_scope
+        if case.explorer_expected.expectation == "hit"
     ]
     conditional_cases = [
-        case for case in cases
-        if case.explorer_expected and case.explorer_expected.expectation == "conditional"
+        case for case in in_scope
+        if case.explorer_expected.expectation == "conditional"
     ]
 
     def _matched(case) -> bool:
@@ -69,8 +120,13 @@ def evaluate_explorer_against_golden(
 
     hit_ids = sorted(case.id for case in hit_cases if _matched(case))
     conditional_ids = sorted(case.id for case in conditional_cases if _matched(case))
+    # V-2：分域状态透明（filtered/unavailable 可区分——防结构漂移静默回退）
+    component_scope = (
+        "unavailable" if run_components is None else f"filtered({len(run_components)})"
+    )
     return {
         "run_id": run_dir.name,
+        "component_scope": component_scope,
         "proposals_total": len(proposals),
         "explorer_hit_total": len(hit_cases),
         "explorer_hits": hit_ids,
@@ -82,6 +138,7 @@ def evaluate_explorer_against_golden(
         "conditional_hit_rate": (
             len(conditional_ids) / len(conditional_cases) if conditional_cases else None
         ),
+        "excluded_cases": excluded_cases,  # F1：跨 APK/合成 case（不在本 run 组件域）
     }
 
 

@@ -99,9 +99,17 @@ class ExplorerExpectation(StrictModel):
 
     expectation: Literal["hit", "miss", "conditional"]
     source_match_keys: list[str] = Field(min_length=1, max_length=8,
-        description="探索候选 source 表达式/组件名匹配键（任一子串命中即 source 命中）")
+        description="探索候选 source 表达式/组件名匹配键（任一词边界命中即 source 命中）")
     sink_match_keys: list[str] = Field(min_length=1, max_length=8,
-        description="探索候选 sink 方法/操作名匹配键（任一子串命中即 sink 命中）")
+        description="探索候选 sink 方法/操作名匹配键（任一词边界命中即 sink 命中）")
+    scope_keys: list[str] | None = Field(
+        default=None, max_length=8,
+        description=(
+            "组件域判定键（2026-08-27 F1 核验 V-1 职责分离：候选匹配键要泛、"
+            "域过滤键要准——同 APK 撞名组件（MainActivity）用 FQCN/包前缀域键；"
+            "None 时回退 source_match_keys 做域判定（兼容键即组件类名的标注）"
+        ),
+    )
     notes: str | None = Field(default=None, description="标注依据（审计引用，不参与评分）")
 
     def matches(self, source_text: str, sink_text: str, hop_method_ids: str) -> bool:
