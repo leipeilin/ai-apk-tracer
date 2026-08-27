@@ -1408,6 +1408,84 @@ def test_duplicate_requests_terminate_no_new_requests(tmp_path: Path) -> None:
     assert orchestrator.read_requests_used == 1
 
 
+def test_no_candidate_cap_when_none(tmp_path: Path) -> None:
+    """P1-1：max_candidates_per_run=None 无上限——50+ 候选不 break、入口全探索。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    # 60 个入口各产 1 候选（每入口 done=True + 1 链；超过旧默认上限 50）
+    fake = FakeAnalyzer([{"done": True, "proposals": [_proposal()]} for _ in range(60)])
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree,
+        ExplorerSettings(max_candidates_per_run=None, max_rounds_per_entry=1),
+        tmp_path)
+    candidates = asyncio_run(orchestrator.explore_all([dict(entry) for _ in range(60)]))
+    assert len(candidates) == 60  # 无上限——60 全收（旧默认 50 会截断）
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    assert len(observations["entries"]) == 60  # 入口全探索（无 break 截断）
+
+
+def test_context_truncation_keeps_recent(tmp_path: Path) -> None:
+    """P1-2：上下文放宽 + 截断方向（保后切前）。
+
+    三层可测事实：常量值（40K）/ ExplorerInput 50K 接受 /
+    真实轮循环 spy 捕获第 2 轮输入（未超限无标记）+ 超限表达式方向断言。
+    """
+    from app.analysis.ai_models import ExplorerInput
+    from app.analysis.explorer import _MAX_EXPLORE_CONTEXT_CHARS
+    assert _MAX_EXPLORE_CONTEXT_CHARS == 40000  # P-1 验证值
+
+    # 模型层：50K 内接受（ExplorerContextText——超旧 LongText 10K）
+    big = "R" * 49000
+    model = ExplorerInput.model_validate({
+        "round_index": 1, "rounds_budget": 4, "requests_budget": 20,
+        "entry_json": json.dumps({"entry_id": "t", "kind": "activity",
+            "component_name": "com.example.A", "source": "manifest",
+            "entry_method": "onCreate"}),
+        "code_context": big,
+    })
+    assert len(model.code_context) == 49000
+
+    # 真实轮循环：spy 捕获第 2 轮输入（第 1 轮请求执行结果未超限——无截断标记）
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    captured: list[ExplorerInput] = []
+
+    async def spy_ai(model_input: ExplorerInput) -> dict[str, Any]:
+        captured.append(model_input)
+        if len(captured) == 1:
+            return {"status": "completed", "analysis": {
+                "read_requests": [
+                    {"operation": "get_method_body",
+                     "target": entry["method_id"], "reason": "取证"}],
+                "chain_proposals": [],
+                "component_summary": {
+                    "component": "com.example.A", "kind": "activity",
+                    "exported": True, "summary": "入口 Activity 分发处理"},
+                "loop": {"done": False, "reason": "需更多上下文"},
+            }, "metadata": {"prompt_version": "1.0.0", "model": "test-model"}}
+        return {"status": "completed", "analysis": {
+            "read_requests": [],
+            "chain_proposals": [],
+            "component_summary": {
+                "component": "com.example.A", "kind": "activity",
+                "exported": True, "summary": "入口 Activity 分发处理"},
+            "loop": {"done": True, "reason": "确认无敏感操作"},
+        }, "metadata": {"prompt_version": "1.0.0", "model": "test-model"}}
+
+    orchestrator = ExplorerOrchestrator(
+        spy_ai, call_tree, ExplorerSettings(max_rounds_per_entry=2), tmp_path)
+    asyncio_run(orchestrator.explore_all([entry]))
+    assert len(captured) == 2
+    assert captured[1].code_context is not None
+    assert "earlier context truncated" not in (captured[1].code_context or "")
+
+    # 截断方向表达式级断言：超限时标记在头部、尾部（最近）完整保留
+    joined = "OLD" + "x" * 45000 + "\n---\n" + "RECENT" + "y" * 5000
+    truncated = "…(earlier context truncated)\n" + joined[-_MAX_EXPLORE_CONTEXT_CHARS:]
+    assert truncated.startswith("…(earlier context truncated)")
+    assert truncated.endswith("RECENT" + "y" * 5000)
+
+
 def test_done_with_redundant_requests_flagged(tmp_path: Path) -> None:
     """核验 O-1：done=true 且请求全重复 → terminated_by 仍 loop_done
     （模型主动终止语义优先），但空转信号并列记入轮记录（统计不低估）。"""

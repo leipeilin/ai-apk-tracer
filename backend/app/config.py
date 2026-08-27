@@ -68,7 +68,7 @@ class AISettings(BaseModel):
     allow_external_code: bool = Field(default=True, description="是否明确允许向模型服务发送方法级代码切片")
     timeout_seconds: int = Field(default=120, ge=1, description="兼容的单次模型 read 超时，单位秒")
     connect_timeout_seconds: float = Field(default=10.0, gt=0, le=600, description="建立模型连接的超时，单位秒")
-    read_timeout_seconds: float = Field(default=120.0, gt=0, le=3600, description="读取模型响应的超时，单位秒")
+    read_timeout_seconds: float = Field(default=240.0, gt=0, le=3600, description="读取模型响应的超时，单位秒（P-1 验证值 240——原 120 对慢推理模型不足，全量数据后回归定参）")
     write_timeout_seconds: float = Field(default=30.0, gt=0, le=600, description="写入模型请求的超时，单位秒")
     pool_timeout_seconds: float = Field(default=10.0, gt=0, le=600, description="等待 HTTP 连接池的超时，单位秒")
     request_timeout_seconds: float | None = Field(
@@ -201,7 +201,7 @@ class ExplorerSettings(BaseModel):
     """探索轨（Agent1）开关与循环预算（方案 §2.4/§5.5）。"""
 
     enabled: bool = Field(default=False, description="是否启用探索轨；默认关闭，开启前须过 M2 三加一验收")
-    max_candidates_per_run: int = Field(default=50, ge=1, description="单次扫描最多纳入 funnel 的探索候选数")
+    max_candidates_per_run: int | None = Field(default=50, ge=1, description="单次扫描最多纳入 funnel 的探索候选数；None = 无上限（P-1 验证阶段临时形态——采集无截断数据后须回归定参恢复，见 docs/todo/ T1）")
     auto_promote: bool = Field(default=False, description="validated 探索候选是否自动升入正式候选池；默认 false（走 L2 复核）")
     allow_external_code: bool = Field(default=True, description="是否允许向模型发送探索检索读回的代码片段（仅方法级片段，非完整代码索引）")
     prompt_version: str = Field(default="explorer/1.0.0", description="探索协议版本；先声明后注册（T2.5），注册前不得运行时解析")

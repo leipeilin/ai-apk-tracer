@@ -105,18 +105,21 @@ context_budget:
 ai:
   enabled: true
   # 例如 http://127.0.0.1:11434/v1；使用外部地址前需确认代码处理边界。
-  base_url: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+  # base_url: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+  # siliconflow
+  base_url: https://api.siliconflow.cn/v1
   # 这里只填写保存密钥的环境变量名，禁止填写真实密钥、Token 或 Cookie。
   # export AI_APK_TRACER_OPENAI_API_KEY="你的实际密钥"设置在环境变量中
   api_key_env: AI_APK_TRACER_OPENAI_API_KEY
   # OpenAI-compatible 服务端可识别的模型 ID；未配置时跳过 AI 阶段。
-  model: deepseek-v4-pro-0813  # token-plan 订阅包含的快照 ID（裸 deepseek-v4-flash 不在订阅内，会 AccessDenied.Unpurchased）
+  # model: deepseek-v4-pro-0813 
+  model: deepseek-ai/DeepSeek-V4-Flash
   # 全局代码外发开关，默认 true；设为 false 会跳过 AI，且不存在额外的逐任务授权步骤。
   allow_external_code: true
   # 旧 timeout_seconds 仅在未显式配置 read_timeout_seconds 时作为读取超时回退。
   timeout_seconds: 120
   connect_timeout_seconds: 10.0
-  read_timeout_seconds: 120.0
+  read_timeout_seconds: 240.0
   write_timeout_seconds: 30.0
   pool_timeout_seconds: 10.0
   # 单次请求总时长兜底（墙钟）——防御中间层 keepalive 重置分项超时的长挂起；
@@ -163,7 +166,8 @@ ai:
 # （2026-08-21-explorer-track-implementation-plan.md §4.3）。
 explorer:
   enabled: false
-  max_candidates_per_run: 50
+  # P-1 验证阶段临时值：null = 无上限（采集 278 入口无截断数据）；定参后恢复（docs/todo/ T1）
+  max_candidates_per_run: null
   auto_promote: false
   allow_external_code: true
   # 协议版本先声明后注册（T2.5 新增 prompts/explorer/1.0.0），注册前不得运行时解析。

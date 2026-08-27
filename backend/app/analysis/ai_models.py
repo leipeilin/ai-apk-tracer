@@ -20,6 +20,10 @@ from pydantic import (
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
 LongText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10_000)]
+# P-1 验证值：探索输入的上下文字段专用上限（50K——code_context 跨轮累积
+# 40K + 截断标注余量；与全局 LongText 10K 区分，仅影响 explorer 输入两字段，
+# 全量数据后随 T1 回归定参恢复）
+ExplorerContextText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50_000)]
 Identifier = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/#@+\-]*$"),
@@ -436,7 +440,7 @@ class ExplorerInput(StrictAIModel):
     rounds_budget: int = Field(ge=1, description="总轮数预算（max_rounds_per_entry）")
     requests_budget: int = Field(ge=0, description="剩余读码请求预算")
     entry_json: LongText = Field(description="本轮入口的 api_entry_table 条目 JSON")
-    attack_surface_json: LongText | None = Field(
+    attack_surface_json: ExplorerContextText | None = Field(
         default=None,
         description="入口所属组件的 attack_surface 条目 JSON（攻击面/索引摘要上下文）",
     )
@@ -461,7 +465,7 @@ class ExplorerInput(StrictAIModel):
         default=None,
         description="前轮累积摘要（component_summary + 已取回代码事实）",
     )
-    code_context: LongText | None = Field(
+    code_context: ExplorerContextText | None = Field(
         default=None,
         description="本轮 read_requests 取回的代码片段/调用关系",
     )

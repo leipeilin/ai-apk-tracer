@@ -47,10 +47,11 @@ LOGGER = logging.getLogger(__name__)
 # 单次读码结果的上下文注入上限（评审 R-1 风险对策：轮间累积膨胀控制）
 _MAX_CONTEXT_BYTES_PER_REQUEST = 8 * 1024
 
-# code_context 跨轮累积总上限（ExplorerInput.code_context 为 LongText max 10000；
-# 探针 v3 实测多轮累积可超限致 ExplorerInput 构造 ValidationError——驱动层防御，
-# 保头部（入口方法体优先），尾部截断并标注）
-_MAX_EXPLORE_CONTEXT_CHARS = 9500
+# code_context 跨轮累积送模型上限（P-1 验证值 40000——schema ExplorerContextText
+# 上限 50000 含截断标注余量；探针 v3 实证多轮累积可超限致 ValidationError——驱动层
+# 防御。截断方向：**保后切前**（P-1 缺陷修复——轮循环逐步聚焦，最近读码结果
+# 优先于早期；原保前切后致第 4 轮模型只见第 1 轮老代码。全量数据后随 T1 回归定参）
+_MAX_EXPLORE_CONTEXT_CHARS = 40000
 
 # 骨架链第一跳上限（M4-SEED-HOPS：构造截断 N=8；schema 上限 16 留余量）
 _MAX_SEED_HOPS = 8
@@ -176,7 +177,10 @@ class ExplorerOrchestrator:
             })
             if terminated_by == "short_circuit":
                 skipped_short_circuit = True
-            if len(candidates) >= self._settings.max_candidates_per_run:
+            if (
+                self._settings.max_candidates_per_run is not None
+                and len(candidates) >= self._settings.max_candidates_per_run
+            ):
                 break
         # F4（2026-08-27）：入口覆盖透明化——上限截断可见（未探索入口计数
         # 入 stage summary，供覆盖率评估与入口策略优化决策）
@@ -230,9 +234,10 @@ class ExplorerOrchestrator:
             requests_budget = self._settings.max_requests_per_entry - self._read_requests_used
             joined_context = "\n---\n".join(code_context) if code_context else None
             if joined_context is not None and len(joined_context) > _MAX_EXPLORE_CONTEXT_CHARS:
+                # P-1：保后切前（最近上下文优先——见 _MAX_EXPLORE_CONTEXT_CHARS 注释）
                 joined_context = (
-                    joined_context[:_MAX_EXPLORE_CONTEXT_CHARS]
-                    + "\n…(earlier context retained, later context truncated)"
+                    "…(earlier context truncated)\n"
+                    + joined_context[-_MAX_EXPLORE_CONTEXT_CHARS:]
                 )
             attack_surface_entry = self._attack_surface.get(
                 str(entry.get("component_name") or ""))

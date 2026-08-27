@@ -14,7 +14,6 @@ from app.analysis.ai_runtime import AIRuntime
 from app.analysis.ai_scheduler import TaskCircuit, provider_controller_registry
 from app.config import AISettings
 
-
 API_KEY_ENV = "AI_RUNTIME_CONTROLS_TEST_KEY"
 BASE_URL = "https://ai-runtime-controls.invalid/v1"
 
@@ -391,7 +390,7 @@ def test_ai_settings_defaults_preserve_two_attempts_and_bounds() -> None:
     assert settings.candidate_concurrency == 4
     assert settings.provider_max_in_flight == 4
     assert settings.connect_timeout_seconds == 10.0
-    assert settings.read_timeout_seconds == 120.0
+    assert settings.read_timeout_seconds == 240.0  # P-1 验证值（原 120——定参后随 T1 恢复）
     assert settings.write_timeout_seconds == 30.0
     assert settings.pool_timeout_seconds == 10.0
     assert settings.provider_max_cooldown_seconds == 60.0
