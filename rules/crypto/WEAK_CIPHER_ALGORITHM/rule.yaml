@@ -1,0 +1,10 @@
+id: WEAK_CIPHER_ALGORITHM
+severity: medium
+version: 1.0.0
+protocol_version: 1.0.0
+component: crypto
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "Cipher.getInstance 弱算法（DES/DESede/3DES/RC4，transformation 前缀匹配）与 MessageDigest.getInstance 弱哈希（MD5/SHA-1/SHA1）。SHA-256/AES-GCM 等现代算法不命中；弱哈希的安全相关性（口令存储 vs 非安全完整性校验）与算法实际用途由 AI 复核定级；密钥强度与实现正确性不在静态判定范围。"

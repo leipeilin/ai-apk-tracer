@@ -7,4 +7,4 @@ evidence_output: L2
 builtin: true
 entrypoint: detect.py
 android_api: "1-36"
-limitations: "Cipher.getInstance(AES/ECB/...) 使用 ECB 模式，明文模式信息泄露"
+limitations: "Cipher.getInstance(AES/ECB/...) 显式 ECB 模式与裸 Cipher.getInstance(\"AES\")（默认 provider 即 AES/ECB/PKCS5Padding——P8/E5 补录的隐式 ECB 形态），明文模式信息泄露；transformation 经变量/常量传递不覆盖（AI 复核兜底）。"

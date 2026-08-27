@@ -7,4 +7,4 @@ evidence_output: L2
 builtin: true
 entrypoint: detect.py
 android_api: "1-36"
-limitations: "X509TrustManager.checkServerTrusted 空实现，接受任意证书 → MITM"
+limitations: "X509TrustManager.checkServerTrusted 空实现（含裸 return; 形态——P7/E6 补录）或纯注释体，接受任意证书 → MITM。P7/E6 起按花括号配对提取完整方法体，嵌套块形态正确处理；含任何实质语句（含 throw）不命中；TrustManager 是否实际安装（SSLContext.init 关联）由 AI 复核确认。"

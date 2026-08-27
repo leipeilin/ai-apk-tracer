@@ -503,3 +503,148 @@ class TestP6VerificationFixes:
         assert candidate is not None
         gap_codes = [g.get("code") for g in candidate.get("coverage_gaps", [])]
         assert "LEGACY_INDEX_SCOPE" in gap_codes
+
+
+class TestP7NestedBlockE6:
+    """P7（E6）：SSL/TrustManager 方法体花括号配对提取——嵌套块形态可检。"""
+
+    def test_ssl_proceed_after_nested_block_hits(self) -> None:
+        # E6 核心漏检形态：proceed 在嵌套块之后（旧正则停在首个 '}'）
+        code = """class Client extends android.webkit.WebViewClient {
+ public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+  if (error.getPrimaryError() == SslError.SSL_UNTRUSTED) { handler.cancel(); }
+  handler.proceed();
+ }
+}
+"""
+        matches = _all_matches("WEBVIEW_SSL_ERROR_IGNORED", code)
+        assert len(matches) == 1
+        assert matches[0]["line"] == 2
+
+    def test_ssl_proceed_inside_nested_block_hits(self) -> None:
+        # proceed 在嵌套块内
+        code = """public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {
+  if (someCondition) { h.proceed(); } else { h.cancel(); }
+}
+"""
+        assert len(_all_matches("WEBVIEW_SSL_ERROR_IGNORED", code)) == 1
+
+    def test_ssl_cancel_only_no_hit(self) -> None:
+        code = "public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {\n h.cancel();\n}\n"
+        assert _all_matches("WEBVIEW_SSL_ERROR_IGNORED", code) == []
+
+    def test_ssl_multiple_methods_all_reported(self) -> None:
+        code = ("public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) { h.proceed(); }\n"
+                "public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) { h.proceed(); }\n")
+        assert len(_all_matches("WEBVIEW_SSL_ERROR_IGNORED", code)) == 2
+
+    def test_trust_manager_bare_return_hits(self) -> None:
+        # E6 补录形态：裸 return; 不抛异常 = 接受任意证书（旧正则不命中）
+        code = "public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {\n return;\n}\n"
+        assert len(_all_matches("TRUST_MANAGER_ALL_ACCEPT", code)) == 1
+
+    def test_trust_manager_empty_body_still_hits(self) -> None:
+        code = "public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {\n}\n"
+        assert len(_all_matches("TRUST_MANAGER_ALL_ACCEPT", code)) == 1
+
+    def test_trust_manager_comment_only_body_hits(self) -> None:
+        code = "public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {\n // trust all\n}\n"
+        assert len(_all_matches("TRUST_MANAGER_ALL_ACCEPT", code)) == 1
+
+    def test_trust_manager_throw_not_hit(self) -> None:
+        code = "public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {\n throw new java.security.cert.CertificateException(\"untrusted\");\n}\n"
+        assert _all_matches("TRUST_MANAGER_ALL_ACCEPT", code) == []
+
+    def test_trust_manager_nested_logic_not_hit(self) -> None:
+        # 有实质逻辑（嵌套 if + throw）→ 交 AI 复核，不命中
+        code = "public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {\n if (c.length == 0) { throw new RuntimeException(); }\n}\n"
+        assert _all_matches("TRUST_MANAGER_ALL_ACCEPT", code) == []
+
+    def test_hostname_verifier_boolean_true_hits(self) -> None:
+        # P8 附带：Boolean.TRUE 恒真形态
+        assert _match("HOSTNAME_VERIFIER_ALWAYS_TRUE",
+                      'public boolean verify(String h, javax.net.ssl.SSLSession s) { return Boolean.TRUE; }') is not None
+
+
+class TestP8WeakCipherE5:
+    """P8（E5）：裸 "AES" 隐式 ECB + 弱算法/弱哈希族。"""
+
+    def test_bare_aes_hits(self) -> None:
+        m = _match("WEAK_CIPHER_ECB", 'Cipher c = Cipher.getInstance("AES");')
+        assert m is not None
+        assert "隐式 ECB" in m["description"]
+
+    def test_explicit_ecb_still_hits(self) -> None:
+        m = _match("WEAK_CIPHER_ECB", 'Cipher c = Cipher.getInstance("AES/ECB/PKCS5Padding");')
+        assert m is not None
+        assert "AES/ECB" in m["description"]
+
+    def test_aes_gcm_not_hit(self) -> None:
+        assert _match("WEAK_CIPHER_ECB", 'Cipher c = Cipher.getInstance("AES/GCM/NoPadding");') is None
+
+    def test_weak_algorithm_des_hits(self) -> None:
+        m = _match("WEAK_CIPHER_ALGORITHM", 'Cipher c = Cipher.getInstance("DES/CBC/PKCS5Padding");')
+        assert m is not None
+
+    def test_weak_algorithm_rc4_hits(self) -> None:
+        assert _match("WEAK_CIPHER_ALGORITHM", 'Cipher c = Cipher.getInstance("RC4");') is not None
+
+    def test_weak_algorithm_desede_hits(self) -> None:
+        assert _match("WEAK_CIPHER_ALGORITHM", 'Cipher c = Cipher.getInstance("DESede/CBC/PKCS5Padding");') is not None
+
+    def test_weak_hash_md5_hits(self) -> None:
+        assert _match("WEAK_CIPHER_ALGORITHM", 'MessageDigest md = MessageDigest.getInstance("MD5");') is not None
+
+    def test_weak_hash_sha1_hits(self) -> None:
+        assert _match("WEAK_CIPHER_ALGORITHM", 'MessageDigest md = MessageDigest.getInstance("SHA-1");') is not None
+
+    def test_sha256_not_hit(self) -> None:
+        assert _match("WEAK_CIPHER_ALGORITHM", 'MessageDigest md = MessageDigest.getInstance("SHA-256");') is None
+
+    def test_weak_cipher_rule_meta_registered(self) -> None:
+        from shared.detector import GLOBAL_CODE_RULES, RULE_META
+
+        assert "WEAK_CIPHER_ALGORITHM" in GLOBAL_CODE_RULES
+        assert RULE_META["WEAK_CIPHER_ALGORITHM"] == ("crypto", "L2", "medium")
+
+    def test_weak_cipher_execute_integration(self, tmp_path) -> None:
+        # 端到端：真实索引 + FTS 初筛（词项 DES/RC4/MD5/SHA）→ L2 候选
+        from app.analysis.indexer import build_code_index
+        from shared.detector import execute
+
+        source_root = tmp_path / "sources"
+        path = source_root / "com/example/LegacyCrypto.java"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            'package com.example;\nimport javax.crypto.Cipher;\n'
+            'class LegacyCrypto {\n Cipher desCipher = Cipher.getInstance("DES/CBC/PKCS5Padding");\n}\n',
+            "utf-8",
+        )
+        descriptor = build_code_index(source_root, tmp_path / "index" / "code-index.json")
+        payload = {
+            "manifest": {"components": [], "custom_permissions": {}, "authority_conflicts": {}},
+            "index": {**descriptor, "allowed_index_root": (tmp_path / "index").resolve().as_posix()},
+        }
+        result = execute("WEAK_CIPHER_ALGORITHM", payload)
+        assert len(result["candidates"]) == 1
+        assert result["candidates"][0]["evidence_level"] == "L2"
+
+    def test_bare_aes_execute_integration(self, tmp_path) -> None:
+        from app.analysis.indexer import build_code_index
+        from shared.detector import execute
+
+        source_root = tmp_path / "sources"
+        path = source_root / "com/example/Crypto.java"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            'package com.example;\nimport javax.crypto.Cipher;\n'
+            'class Crypto {\n Cipher c = Cipher.getInstance("AES");\n}\n',
+            "utf-8",
+        )
+        descriptor = build_code_index(source_root, tmp_path / "index" / "code-index.json")
+        payload = {
+            "manifest": {"components": [], "custom_permissions": {}, "authority_conflicts": {}},
+            "index": {**descriptor, "allowed_index_root": (tmp_path / "index").resolve().as_posix()},
+        }
+        result = execute("WEAK_CIPHER_ECB", payload)
+        assert len(result["candidates"]) == 1

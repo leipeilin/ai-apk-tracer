@@ -48,6 +48,8 @@ RULE_META = {
     "TRUST_MANAGER_ALL_ACCEPT": ("crypto", "L2", "critical"),
     "HOSTNAME_VERIFIER_ALWAYS_TRUE": ("crypto", "L2", "high"),
     "WEAK_CIPHER_ECB": ("crypto", "L2", "medium"),
+    # P8（E5，2026-08-28）：弱算法/弱哈希族（DES/3DES/RC4 + MD5/SHA-1）。
+    "WEAK_CIPHER_ALGORITHM": ("crypto", "L2", "medium"),
     # P5（评审 2026-08-27 第四节）：新增全局代码规则族（L2，AI 复核定级）。
     "PENDING_INTENT_MUTABLE": ("intent", "L2", "medium"),
     "LOG_SENSITIVE_DATA": ("log", "L2", "medium"),
@@ -63,6 +65,8 @@ GLOBAL_CODE_RULES = {
     "TRUST_MANAGER_ALL_ACCEPT",
     "HOSTNAME_VERIFIER_ALWAYS_TRUE",
     "WEAK_CIPHER_ECB",
+    # P8（E5，2026-08-28）：弱算法/弱哈希族（DES/3DES/RC4 + MD5/SHA-1）。
+    "WEAK_CIPHER_ALGORITHM",
     # P5（评审 2026-08-27 第四节）：PendingIntent 可变性 / 日志敏感数据 / 硬编码密钥。
     "PENDING_INTENT_MUTABLE",
     "LOG_SENSITIVE_DATA",
@@ -169,6 +173,26 @@ def _matching_paren_end(content: str, opening: int) -> int | None:
         elif char == "(":
             depth += 1
         elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _matching_brace_end(content: str, opening: int) -> int | None:
+    """P7（E6）：返回与 ``opening`` 处 '{' 配对的 '}' 下标（花括号深度计数）。
+
+    供 SSL/TrustManager 类规则提取**完整方法体**——正则 ``[^}]``/``[^{}]``
+    停在首个 '}'，无法跨嵌套块（if/try 块后放行、嵌套块内的空实现均漏检）。
+    sanitized 文本已剔除注释与字符串字面量（花括号已保真），深度计数安全。
+    """
+
+    depth = 0
+    for index in range(opening, len(content)):
+        char = content[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
             depth -= 1
             if depth == 0:
                 return index
@@ -3122,18 +3146,24 @@ def _webview_crypto_match(rule_id: str, code: str, file: dict) -> list[dict]:
         return matches
 
     if rule_id == "WEBVIEW_SSL_ERROR_IGNORED":
-        pattern = re.compile(
-            r"onReceivedSslError\s*\([^)]*\)\s*\{[^}]{0,800}?\w+\s*\.\s*proceed\s*\(",
-            re.I | re.S,
-        )
-        for match in pattern.finditer(sanitized):
-            matches.append({
-                "line": _line_at(match.start()),
-                "text": code[match.start():match.end()][:160],
-                "description": "onReceivedSslError 内调用 handler.proceed()：证书校验错误被放行，"
-                               "中间人攻击者可注入任意内容（SSL 错误放行）。",
-                "sink_kind": "ssl_bypass",
-            })
+        # P7（E6）：方法头定位 + 花括号配对提取完整方法体——旧正则 [^}]{0,800}?
+        # 停在首个 '}'，"if (cond) { handler.cancel(); } handler.proceed();" 类
+        # 嵌套块后放行（真实 APK 常见写法：先记日志/分支处理再 proceed）漏检。
+        proceed_re = re.compile(r"\w+\s*\.\s*proceed\s*\(")
+        header_re = re.compile(r"onReceivedSslError\s*\([^)]*\)\s*\{", re.I)
+        for header in header_re.finditer(sanitized):
+            closing = _matching_brace_end(sanitized, header.end() - 1)
+            if closing is None:
+                continue
+            body = sanitized[header.end():closing]
+            if proceed_re.search(body):
+                matches.append({
+                    "line": _line_at(header.start()),
+                    "text": code[header.start():header.end()][:160],
+                    "description": "onReceivedSslError 内调用 handler.proceed()：证书校验错误被放行，"
+                                   "中间人攻击者可注入任意内容（SSL 错误放行）。",
+                    "sink_kind": "ssl_bypass",
+                })
         return matches
 
     if rule_id == "WEBVIEW_EXTERNAL_CONTENT":
@@ -3156,25 +3186,31 @@ def _webview_crypto_match(rule_id: str, code: str, file: dict) -> list[dict]:
         return matches
 
     if rule_id == "TRUST_MANAGER_ALL_ACCEPT":
-        pattern = re.compile(
-            r"checkServerTrusted\s*\([^)]*\)\s*\{([^{}]{0,400}?)\}",
-            re.I | re.S,
-        )
-        for match in pattern.finditer(sanitized):
-            body = match.group(1).strip()
-            if not body or re.match(r"^\s*(?:/\*.*?\*/\s*)*$", body):
+        # P7（E6）：方法头定位 + 花括号配对提取完整方法体——旧正则 ([^{}]{0,400}?)
+        # 不跨嵌套块；新增裸 return; 形态识别（不抛异常 = 接受任意证书）。
+        # sanitized 已剔除注释（空/纯注释体均为空串）；含任何实质逻辑（含嵌套空块
+        # 之外的语句、throw）则不命中——交 AI 复核。
+        header_re = re.compile(r"checkServerTrusted\s*\([^)]*\)\s*\{", re.I)
+        for header in header_re.finditer(sanitized):
+            closing = _matching_brace_end(sanitized, header.end() - 1)
+            if closing is None:
+                continue
+            body = sanitized[header.end():closing].strip()
+            if not body or re.fullmatch(r"return\s*;", body):
                 matches.append({
-                    "line": _line_at(match.start()),
-                    "text": code[match.start():match.end()][:160],
-                    "description": "X509TrustManager.checkServerTrusted 实现为空/不抛异常：接受任意"
-                                   "服务器证书，TLS 中间人攻击可完全绕过（TrustManager 空实现）。",
+                    "line": _line_at(header.start()),
+                    "text": code[header.start():header.end()][:160],
+                    "description": "X509TrustManager.checkServerTrusted 实现为空/不抛异常（含裸 "
+                                   "return; 形态）：接受任意服务器证书，TLS 中间人攻击可完全绕过"
+                                   "（TrustManager 空实现）。",
                     "sink_kind": "cert_bypass",
                 })
         return matches
 
     if rule_id == "HOSTNAME_VERIFIER_ALWAYS_TRUE":
+        # P8（E6 附带）：恒真形态扩展 Boolean.TRUE（旧仅字面 true）。
         pattern = re.compile(
-            r"verify\s*\([^)]*\)\s*\{\s*(?:return\s*\(?\s*true\s*\)?\s*;?)\s*\}",
+            r"verify\s*\([^)]*\)\s*\{\s*(?:return\s*\(?\s*(?:true|Boolean\s*\.\s*TRUE)\s*\)?\s*;?)\s*\}",
             re.I | re.S,
         )
         for match in pattern.finditer(sanitized):
@@ -3189,17 +3225,53 @@ def _webview_crypto_match(rule_id: str, code: str, file: dict) -> list[dict]:
 
     if rule_id == "WEAK_CIPHER_ECB":
         # 算法名在字符串内：原文匹配，但需排除注释中的 Cipher.getInstance。
-        pattern = re.compile(r"Cipher\s*\.\s*getInstance\s*\(\s*[\"']AES/ECB/", re.I)
-        for match in pattern.finditer(code):
-            if _comment_line(match.start()):
-                continue
-            matches.append({
-                "line": _line_at(match.start()),
-                "text": match.group(0)[:120],
-                "description": "Cipher.getInstance 使用 AES/ECB 模式：ECB 下相同明文块产生相同"
-                               "密文块，泄露明文模式信息，可被模式分析攻击（弱加密模式）。",
-                "sink_kind": "weak_cipher",
-            })
+        # P8（E5）：两种 ECB 形态——显式 "AES/ECB/..." 与裸 "AES"（默认 provider 下
+        # 即 AES/ECB/PKCS5Padding，最隐蔽的常见写法）。
+        ecb_patterns = [
+            (re.compile(r"Cipher\s*\.\s*getInstance\s*\(\s*[\"']AES/ECB/", re.I),
+             "Cipher.getInstance 使用 AES/ECB 模式：ECB 下相同明文块产生相同密文块，"
+             "泄露明文模式信息，可被模式分析攻击（弱加密模式）。"),
+            (re.compile(r"Cipher\s*\.\s*getInstance\s*\(\s*[\"']AES[\"']\s*\)", re.I),
+             "Cipher.getInstance(\"AES\") 未显式指定模式：默认 provider 下即 "
+             "AES/ECB/PKCS5Padding——隐式 ECB（最隐蔽的常见写法，P8/E5 补录）。"),
+        ]
+        for pattern, description in ecb_patterns:
+            for match in pattern.finditer(code):
+                if _comment_line(match.start()):
+                    continue
+                matches.append({
+                    "line": _line_at(match.start()),
+                    "text": match.group(0)[:120],
+                    "description": description,
+                    "sink_kind": "weak_cipher",
+                })
+        return matches
+
+    if rule_id == "WEAK_CIPHER_ALGORITHM":
+        # P8（E5）：弱算法/弱哈希族——DES/DESede/3DES/RC4（Cipher transformation
+        # 前缀匹配）+ MD5/SHA-1/SHA1（MessageDigest，安全上下文的弱哈希）。
+        # transformation 前缀匹配（"DES/CBC/PKCS5Padding" 类完整形态亦命中）；
+        # SHA-256/AES/GCM 等现代算法不命中。出现率低但属确定性弱配置，
+        # 危害定级（密码存储 vs 完整性校验）由 AI 复核。
+        weak_patterns = [
+            (re.compile(r"Cipher\s*\.\s*getInstance\s*\(\s*[\"'](?:DES|DESede|3DES|RC4)", re.I),
+             "Cipher.getInstance 使用弱算法（DES/DESede/3DES/RC4）：密钥强度不足或算法已被"
+             "密码学社区废弃（NIST 已禁用 DES/3DES，RC4 存在 biases 攻击）——弱加密算法。"),
+            (re.compile(r"MessageDigest\s*\.\s*getInstance\s*\(\s*[\"'](?:MD5|SHA-?1)[\"']\s*\)", re.I),
+             "MessageDigest.getInstance 使用弱哈希（MD5/SHA-1）：存在碰撞攻击（MD5 已实际"
+             "碰撞、SHA-1 SHAttered），安全上下文（口令存储/签名/证书校验）下可被伪造"
+             "——弱哈希算法（MASVS-CRYPTO-1）。"),
+        ]
+        for pattern, description in weak_patterns:
+            for match in pattern.finditer(code):
+                if _comment_line(match.start()):
+                    continue
+                matches.append({
+                    "line": _line_at(match.start()),
+                    "text": match.group(0)[:120],
+                    "description": description,
+                    "sink_kind": "weak_cipher",
+                })
         return matches
 
     if rule_id == "PENDING_INTENT_MUTABLE":

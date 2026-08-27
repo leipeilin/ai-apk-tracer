@@ -71,6 +71,9 @@ GLOBAL_RULE_TERMS = {
         "session_token", "device_token", "push_token", "client_secret", "app_secret",
         "consumer_secret", "db_password", "user_password", "admin_password",
     ],
+    # P8（E5）：弱算法/弱哈希族——DES/RC4/MD5 为正常词形（独立 token）；
+    # SHA-1 在 tokenizer 下切为 SHA 与 1 两个 token，词项用 SHA 由正则精判。
+    "WEAK_CIPHER_ALGORITHM": ["Cipher.getInstance", "MessageDigest.getInstance", "DES", "RC4", "MD5", "SHA"],
 }
 FLOW_INTRINSIC_METHODS = {
     "Intent", "Bundle", "getIntent", "getStringExtra", "getIntExtra", "getLongExtra", "getBooleanExtra",
