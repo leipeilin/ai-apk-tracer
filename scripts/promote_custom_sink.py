@@ -61,6 +61,16 @@ def _sink_anchor_from_run(run_dir: Path, candidate_id: str) -> dict:
     if not hops:
         raise SystemExit("候选无 hops（无法提取 sink 锚点）")
     last_hop = hops[-1]
+    if not last_hop.get("to_method_id") or not last_hop.get("from_method_id"):
+        raise SystemExit("链尾跳 from/to_method_id 缺失（锚点不可靠）")
+    if str(last_hop.get("to_method_id") or "") == str(last_hop.get("from_method_id") or ""):
+        # P1 核验（2026-08-27）：链尾自环（from==to）时 to_method_id 是所在方法本身
+        # 而非 sink 调用——提取出的方法名与真实 sink 无关（如 saveCallback 候选
+        # 提取出 "loading"）。拒绝并要求用法 B 显式指定。
+        raise SystemExit(
+            "链尾跳为自环（from==to）——sink 锚点不可靠；"
+            "请改用 --method 显式指定方法名及 receiver 约束（用法 B）"
+        )
     method = sink_method_from_method_id(last_hop.get("to_method_id"))
     if not method:
         raise SystemExit("链尾 to_method_id 畸形（无法提取方法名）")
@@ -108,6 +118,15 @@ def main() -> int:
         method = anchor["method"]
         receiver_exact = args.receiver_exact or anchor["receiver_exact"]
         receiver_leaves, receiver_prefixes = args.receiver_leaf, args.receiver_prefix
+        if not (receiver_exact or receiver_leaves or receiver_prefixes):
+            # P1 核验（2026-08-27）：run 索引反查 receiver 失败时旧行为静默生成
+            # 无约束条目（任意 receiver 命中，消费端 N-6 语义）——过宽匹配风险。
+            raise SystemExit(
+                "sink 锚点无任何 receiver 约束（run 索引反查失败且未显式提供）——"
+                "拒绝生成任意 receiver 命中的无约束条目；"
+                "请用 --receiver-exact/--receiver-leaf/--receiver-prefix 指定，"
+                "或确认 receiver 与 sink 无关后改用 --method（用法 B）"
+            )
         provenance = {"run_id": Path(args.run_dir).name, "candidate_id": args.candidate_id}
     elif args.method:
         method = args.method

@@ -170,15 +170,20 @@ def _matching_paren_end(content: str, opening: int) -> int | None:
 
 
 def _split_top_level_args(args: str) -> list[str]:
-    """按顶层逗号拆分参数列表（忽略括号内与引号内的逗号）。"""
+    """按顶层逗号拆分参数列表（忽略括号内与引号内的逗号及引号内转义）。"""
     parts: list[str] = []
     depth = 0
     quote: str | None = None
+    escaped = False
     current: list[str] = []
     for char in args:
         if quote:
             current.append(char)
-            if char == quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
                 quote = None
             continue
         if char in {'"', "'"}:
@@ -198,6 +203,28 @@ def _split_top_level_args(args: str) -> list[str]:
     if current:
         parts.append("".join(current).strip())
     return parts
+
+
+def _ordered_broadcast_has_permission(code: str) -> bool:
+    """任一 sendOrderedBroadcast 调用的 receiverPermission（第 2 个顶层参数）非 null 字面量即视为已限制。
+
+    替代旧逐字符否定正则 ``[^,]+,\\s*[^n][^u][^l][^l]``：该写法无法处理第一
+    参数的内嵌逗号——``sendOrderedBroadcast(new Intent("a","b"), null)`` 会被
+    误判为已限制（无权限的有序广播漏报，评审 2026-08-27 E1）。此处按顶层
+    参数拆分后判 ``null`` 字面量；receiverPermission 为变量/常量引用时视为
+    已限制（运行时值未知，保守取"有限制"方向，规则本身为 auxiliary 加权信号）。
+    """
+
+    for match in re.finditer(r"sendOrderedBroadcast\s*\(", code):
+        closing = _matching_paren_end(code, match.end() - 1)
+        if closing is None:
+            continue
+        args = _split_top_level_args(code[match.end():closing])
+        if len(args) >= 2:
+            permission_arg = args[1].strip()
+            if permission_arg and permission_arg != "null":
+                return True
+    return False
 
 
 def _target_decision_is_fixed(match: re.Match[str], content: str) -> bool:
@@ -2953,7 +2980,7 @@ def _global_code_rule(
                 results.append(result)
         elif rule_id == "ORDERED_BROADCAST_UNRESTRICTED":
             ordered = re.search(r"sendOrderedBroadcast\s*\(", code)
-            permission = re.search(r"sendOrderedBroadcast\s*\([^,]+,\s*[^n][^u][^l][^l]", code)
+            permission = _ordered_broadcast_has_permission(code)
             if ordered and not permission:
                 result = _global_base(rule_id, file, "L1", manifest, "有序广播未识别接收权限限制")
                 result["auxiliary"] = True

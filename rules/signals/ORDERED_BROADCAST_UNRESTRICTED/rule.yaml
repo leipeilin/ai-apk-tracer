@@ -7,4 +7,4 @@ builtin: true
 auxiliary: true
 entrypoint: detect.py
 android_api: "1-36"
-limitations: "未限制有序广播必须关联敏感数据或安全结果才能升级。"
+limitations: "未限制有序广播必须关联敏感数据或安全结果才能升级。文件级聚合粒度：同文件并存带权限与无权限调用时只按带权限计（任一调用带权限即不报），候选 locations 固定 line=1（P2 核验 R-5 声明）。"

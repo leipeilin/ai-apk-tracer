@@ -185,6 +185,13 @@ entries:
 - method: getLastLocation
   taxonomy: location_sensor_collection
   receiver_leaves:
+  - FusedLocationProviderClient
+  receiver_prefixes:
+  - com.google.android.gms.location.
+  source: base
+- method: getLastKnownLocation
+  taxonomy: location_sensor_collection
+  receiver_leaves:
   - LocationManager
   source: base
 - method: getCurrentLocation

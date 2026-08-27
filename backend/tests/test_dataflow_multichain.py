@@ -365,6 +365,7 @@ def test_taxonomy_generic_method_names_are_not_sensitive(
     [
         ("android.content.Context", "sendBroadcast", 1, "callback_event_injection", "broadcast"),
         ("android.location.LocationManager", "requestLocationUpdates", 4, "location_sensor_collection", "location"),
+        ("android.location.LocationManager", "getLastKnownLocation", 1, "location_sensor_collection", "location"),
         ("android.hardware.SensorManager", "registerListener", 3, "location_sensor_collection", "sensor"),
         ("android.bluetooth.BluetoothGatt", "writeCharacteristic", 1, "device_protocol_output", "device_protocol_output"),
         ("android.database.sqlite.SQLiteDatabase", "insert", 3, "database_mutation", "database_mutation"),
@@ -1831,3 +1832,77 @@ def test_receiver_flag_tier_classification(tmp_path: Path) -> None:
     assert _receiver_flag_tier(
         "legacy_unspecified", set(),
     ) == "unresolved_flag", "legacy → unresolved（targetSdk≥26 默认 not exported）"
+
+
+def test_ordered_broadcast_nested_intent_null_permission_reports_unrestricted(tmp_path: Path) -> None:
+    """E1（评审 2026-08-27）：第一参数内嵌逗号 + null 权限的有序广播曾漏报。
+
+    旧正则 ``[^,]+,\\s*[^n][^u][^l][^l]`` 在 ``new Intent("a", uri)`` 的内嵌
+    逗号处停止匹配，把 ``"b"), null`` 的前 4 个字符误判为"权限非空"——
+    无权限的有序广播被判为已限制。顶层参数拆分后应正确报 unrestricted。
+    """
+
+    source = """package com.example;
+class SenderActivity {
+ void send(android.content.Context context) {
+  context.sendOrderedBroadcast(
+      new android.content.Intent("action", android.net.Uri.parse("u")), null);
+ }
+}
+"""
+    result = execute("ORDERED_BROADCAST_UNRESTRICTED", _activity_payload(tmp_path, source))
+    assert len(result["candidates"]) == 1
+    assert result["candidates"][0].get("auxiliary") is True
+
+
+@pytest.mark.parametrize(
+    "permission_arg",
+    ['"com.example.ORDERED_PERM"', "PERMISSION_ORDERED", "null"],
+)
+def test_ordered_broadcast_permission_detection_by_second_arg(
+    permission_arg: str, tmp_path: Path
+) -> None:
+    """E1：receiverPermission（第 2 顶层参数）非 null 字面量即视为已限制、不报；
+    显式 null（无论第一参数是否含内嵌逗号）报 unrestricted。"""
+
+    source = f"""package com.example;
+class SenderActivity {{
+ void send(android.content.Context context) {{
+  context.sendOrderedBroadcast(
+      new android.content.Intent("action", android.net.Uri.parse("u")), {permission_arg});
+ }}
+}}
+"""
+    result = execute("ORDERED_BROADCAST_UNRESTRICTED", _activity_payload(tmp_path, source))
+    if permission_arg == "null":
+        assert len(result["candidates"]) == 1
+    else:
+        assert result["candidates"] == []
+
+
+def test_ordered_broadcast_seven_arg_variant_permission_position(tmp_path: Path) -> None:
+    """P2 核验 R-8：7 参版本的第 2 顶层参数同为 receiverPermission——
+    null 报 unrestricted、权限串不报。"""
+
+    head = """package com.example;
+class SenderActivity {
+ void send(android.content.Context context, android.content.BroadcastReceiver receiver,
+           android.os.Handler handler) {
+  context.sendOrderedBroadcast(
+      new android.content.Intent("action"),
+      %s,
+      receiver, handler, 0, "data", null);
+ }
+}
+"""
+    unrestricted = execute(
+        "ORDERED_BROADCAST_UNRESTRICTED",
+        _activity_payload(tmp_path, head % "null"),
+    )
+    assert len(unrestricted["candidates"]) == 1
+
+    restricted = execute(
+        "ORDERED_BROADCAST_UNRESTRICTED",
+        _activity_payload(tmp_path, head % '"com.example.ORDERED_PERM"'),
+    )
+    assert restricted["candidates"] == []

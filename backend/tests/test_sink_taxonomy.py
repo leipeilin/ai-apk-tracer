@@ -516,3 +516,104 @@ def test_versions_yaml_synced_with_dataflow() -> None:
         f"sink taxonomy 双源同步校验失败（exit={result.returncode}）：\n"
         f"{result.stdout}\n{result.stderr}"
     )
+
+
+def _cli_run_dir(tmp_path: Path, candidate_id: str, hops: list[dict]) -> Path:
+    """构造用法 A 所需的最小 run 目录（candidates.json + 可打开索引）。"""
+
+    run_dir = tmp_path / f"run-{candidate_id}"
+    (run_dir / "explorer").mkdir(parents=True)
+    (run_dir / "explorer" / "candidates.json").write_text(
+        json.dumps([{"candidate_id": candidate_id, "chain_proposal": {"hops": hops}}]), "utf-8"
+    )
+    source_root = run_dir / "sources"
+    (source_root / "com" / "example").mkdir(parents=True)
+    (source_root / "com" / "example" / "A.java").write_text(
+        "package com.example;\nclass A { void run(String v) { } }\n", "utf-8"
+    )
+    build_code_index(source_root, run_dir / "index" / "code-index.json")
+    return run_dir
+
+
+def test_promote_cli_rejects_self_loop_anchor(tmp_path: Path) -> None:
+    """P2 核验 R-1：链尾自环（from==to）候选的锚点提取被拒绝——
+    旧行为静默提取所在方法名（如 saveCallback 候选提取出 "loading"）。"""
+
+    import subprocess
+    import sys
+
+    run_dir = _cli_run_dir(tmp_path, "expl_selfloop", [{
+        "from_method_id": "com/example/A.java#A.run:2",
+        "to_method_id": "com/example/A.java#A.run:2",
+        "call_site_line": 3,
+    }])
+    script = WORKSPACE_ROOT / "scripts" / "promote_custom_sink.py"
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            "--run-dir", str(run_dir), "--candidate-id", "expl_selfloop",
+            "--taxonomy", "persistent_state_write", "--operator", "pytest",
+            "--taxonomy-path", str(_taxonomy_file(tmp_path)),
+        ],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode != 0
+    assert "自环" in result.stderr + result.stdout
+
+
+def test_promote_cli_rejects_unconstrained_entry(tmp_path: Path) -> None:
+    """P2 核验 R-1：run 索引反查 receiver 失败且未显式提供约束时拒绝——
+    旧行为静默生成任意 receiver 命中的无约束条目（消费端 N-6 语义）。"""
+
+    import subprocess
+    import sys
+
+    run_dir = _cli_run_dir(tmp_path, "expl_noop", [{
+        "from_method_id": "com/example/A.java#A.run:2",
+        "to_method_id": "com/example/A.java#A.run:2",
+        "call_site_line": 999,
+    }])
+    # to != from 才能走到反查：改 to 为另一方法
+    candidates_path = run_dir / "explorer" / "candidates.json"
+    candidates_path.write_text(json.dumps([{
+        "candidate_id": "expl_noop",
+        "chain_proposal": {"hops": [{
+            "from_method_id": "com/example/A.java#A.run:2",
+            "to_method_id": "com/example/A.java#A.run:3",
+            "call_site_line": 999,
+        }]},
+    }]), "utf-8")
+    script = WORKSPACE_ROOT / "scripts" / "promote_custom_sink.py"
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            "--run-dir", str(run_dir), "--candidate-id", "expl_noop",
+            "--taxonomy", "persistent_state_write", "--operator", "pytest",
+            "--taxonomy-path", str(_taxonomy_file(tmp_path)),
+        ],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode != 0
+    assert "无任何 receiver 约束" in result.stderr + result.stdout
+
+
+def test_promote_cli_usage_b_still_appends(tmp_path: Path) -> None:
+    """P2 核验 R-1 正向对照：用法 B（--method）不受两处拒绝影响。"""
+
+    import subprocess
+    import sys
+
+    taxonomy_path = _taxonomy_file(tmp_path)
+    script = WORKSPACE_ROOT / "scripts" / "promote_custom_sink.py"
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            "--method", "customSink",
+            "--receiver-exact", "com.example.Util",
+            "--taxonomy", "persistent_state_write", "--operator", "pytest",
+            "--taxonomy-path", str(taxonomy_path),
+        ],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0
+    assert "appended" in result.stdout

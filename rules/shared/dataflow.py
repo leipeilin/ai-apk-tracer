@@ -2913,6 +2913,9 @@ def classify_operation_taxonomy(
         result = checked({
             "requestLocationUpdates": frozenset({1, 3, 4, 5, 6, 7}),
             "getLastLocation": frozenset({0, 1}), "getCurrentLocation": frozenset({2, 3}),
+            # 评审 2026-08-27 E2：LocationManager 的真实 API 是 getLastKnownLocation(String)，
+            # getLastLocation 是 FusedLocationProviderClient 的 API（此前张冠李戴）。
+            "getLastKnownLocation": frozenset({1}),
         }, "location_sensor_collection", "location")
         if result:
             return result
