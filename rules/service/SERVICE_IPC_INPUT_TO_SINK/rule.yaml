@@ -1,4 +1,5 @@
 id: SERVICE_IPC_INPUT_TO_SINK
+severity: high
 version: 1.0.0
 protocol_version: 1.0.0
 component: service

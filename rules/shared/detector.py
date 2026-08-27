@@ -102,10 +102,6 @@ SINK_PATTERNS = {
     "sensitive_state": re.compile(r"\b(?:setPassword|setPermission|setAdmin|setEnabled|AccountManager\s*\.|Settings\.(?:Secure|Global)|SharedPreferences\.Editor)\b"),
     "network": re.compile(r"\b(?:HttpURLConnection|OkHttpClient|newCall|enqueue|Call\s*\.\s*execute)\b"),
 }
-# 手动同步点（v2026-08-09）：与 rules/shared/dataflow.py GUARD_METHODS 同源。
-# 当前无调用点（保留供工具/测试引用），但必须与 dataflow.GUARD_METHODS 保持
-# 一致——新增调用者身份校验 API（getNameForUid/getPackageInfo）后此处同步。
-GUARD_RE = re.compile(r"(?:checkCallingPermission|enforceCallingPermission|checkCallingOrSelfPermission|Binder\.getCallingUid|getNameForUid|getPackageInfo|PackageManager\.checkSignatures|enforceReadPermission|enforceWritePermission|SecurityException)")
 SENSITIVE_DATA_RE = re.compile(r"(?:token|password|passwd|secret|credential|account|payment|location|contact|private|auth|device|battery|userId)", re.I)
 SENSITIVE_BINDER_METHOD_RE = re.compile(
     # E7 残留（P4，2026-08-27）：Sport|Workout|Wear 为运动健康域特调词表——Binder 敏感度
@@ -506,7 +502,7 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             files = reader.search_for_rule(rule_id) if reader else legacy_files
             candidates.extend(_global_code_rule(rule_id, files, manifest))
             if rule_id == "WEBVIEW_JS_BRIDGE_EXPOSED":
-                # 产物独立收集（finditer 全枚举同文件多桥——候选单 match 行为不动）
+                # 产物独立收集（P6/E8-3 后候选与产物均 finditer 全枚举——口径一致）
                 for file in files:
                     webview_bridge_records.extend(
                         _webview_bridge_artifact_records(str(file.get("content") or ""), file)
@@ -535,6 +531,16 @@ def execute(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
                         matched_files = []
                     else:
                         matched_files = reader.component_files(component.get("name", "")) if reader else _component_files(component, legacy_files)
+                        if reader is None and rule_id in PROVIDER_FLOW_RULES:
+                            # P6（E8-2）：provider flow 规则无索引时经 else 分支回退
+                            # _component_rule 旧式全文件逻辑（功能可用但语义降级）——与
+                            # COMPONENT_FLOW_ENTRIES 的无索引分支同口径打 LEGACY_INDEX_SCOPE
+                            # gap，降级可观测（gaps 经 _component_rule 的 scope_gaps 链路上报）。
+                            flow_scope = {
+                                "files": matched_files,
+                                "entry_method_ids": [],
+                                "gaps": [{"code": "LEGACY_INDEX_SCOPE", "critical": True}],
+                            }
                 if rule_id == "ACTIVITY_EXTERNAL_ROUTE_INJECTION":
                     candidates.extend(_route_injection_candidates(
                         rule_id, component, matched_files, manifest, flow_scope or {}
@@ -643,7 +649,7 @@ def _binder_bindings_artifact(binder_batch: dict[str, dict[str, Any]]) -> list[d
 
 def _webview_bridge_artifact_records(code: str, file: dict[str, Any]) -> list[dict[str, Any]]:
     """枚举单文件全部 addJavascriptInterface 桥调用点（评审 R-7：finditer
-    全枚举——候选生成的单 match 行为不动，产物与候选收集解耦）。"""
+    全枚举——P6/E8-3 后候选同为 finditer 全枚举，产物与候选收集解耦）。"""
 
     records: list[dict[str, Any]] = []
     pattern = re.compile(r"addJavascriptInterface\s*\(\s*[^,]+,\s*[\"']([^\"']+)[\"']")
@@ -1915,6 +1921,20 @@ def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def _attach_scope_gaps(result: dict, component_flow_scope: dict | None) -> dict:
+    """P6 核验 R-1：flow_scope 携带的 scope gaps 并入候选 coverage_gaps。
+
+    旧行为：`_component_rule` 路径下 LEGACY_INDEX_SCOPE 等构造侧 gap 在
+    早 return 分支与通用尾部均不面市（传递死端）。本 helper 供早 return 分支
+    使用；通用尾部在 coverage_gaps 组装处直接合并。
+    """
+
+    gaps = (component_flow_scope or {}).get("gaps") or []
+    if gaps:
+        result["coverage_gaps"] = [*result.get("coverage_gaps", []), *gaps]
+    return result
+
+
 def _component_rule(
     rule_id: str,
     component: dict,
@@ -1946,11 +1966,26 @@ def _component_rule(
         result["blocking_gaps"].extend(preliminary_authorization["blocking_gaps"])
         return result
     if rule_id == "ACTIVITY_SENSITIVE_NAME_HINT":
-        if not re.search(r"(?:Reset|Password|Admin|Payment|Debug)", component.get("name", ""), re.I):
+        # P6 核验 R-3：驼峰/下划线 token 整词匹配——裸子串匹配下 KeyEvent/Keyboard/
+        # Concert/Author/Repay 类良性组件名会误报。整词比对（词表含 E8-1 扩展的
+        # Login/Token/Account/Pay/Auth/Credential/Cert/Key；与 SENSITIVE_DATA_RE
+        # 词表部分对齐——Login/Pay/Cert/Key 为命名启发式特有词）。
+        name_tokens = {
+            token.lower()
+            for token in re.split(r"(?<=[a-z0-9])(?=[A-Z])|[_.]|(?<=[A-Z])(?=[A-Z][a-z])", str(component.get("name") or ""))
+            if token
+        }
+        sensitive_name_words = {
+            "reset", "password", "admin", "payment", "debug", "login", "token",
+            "account", "pay", "auth", "credential", "cert",
+        }
+        # P6 核验 R-3：key 已从词表移除——KeyEvent/Keyboard/Hotkey 拆词后 Key 为独立
+        # token 仍会整词命中（UI 组件高频词，误报面大于收益）。
+        if not name_tokens & sensitive_name_words:
             return None
         result = _base(rule_id, component, "L1", files, manifest, "组件命名包含敏感业务启发式词")
         result["auxiliary"] = True
-        return result
+        return _attach_scope_gaps(result, component_flow_scope)
     if rule_id == "PROVIDER_LOOSE_URI_MATCH":
         loose_manifest = any("*" in str(value) for row in component.get("path_permissions", []) for value in row.values())
         loose_code = bool(re.search(r"addURI\s*\([^)]*(?:\*|#)", code))
@@ -2139,7 +2174,10 @@ def _component_rule(
     result["dataflow_status"] = "intraprocedural" if same_method else "not_proven"
     result["deterministic_chain_verified"] = bool(same_method or sink.get("effect_verified"))
     result["impact_status"] = "statically_confirmed" if sink.get("effect_verified") else "potential"
-    result["coverage_gaps"] = semantic_gaps
+    # P6 核验 R-1：合并 flow_scope 携带的 scope gaps（provider 无索引回退的
+    # LEGACY_INDEX_SCOPE 经此面市——旧行为在 _component_rule 路径是传递死端）。
+    scope_gaps = (component_flow_scope or {}).get("gaps") or []
+    result["coverage_gaps"] = [*semantic_gaps, *scope_gaps] if scope_gaps else semantic_gaps
     result["authorization_status"] = effective_authorization["status"]
     result["authorization_matrix"] = effective_authorization["rows"]
     result["authorization_operation"] = operation
@@ -2999,10 +3037,10 @@ def _global_code_rule(
                 result["auxiliary"] = True
                 results.append(result)
         elif rule_id in GLOBAL_CODE_RULES:
-            # WebView/密码学族（§12.2 ②③）：按规则专属模式在可执行代码区域匹配，
+            # WebView/密码学/P5 全局族（§12.2 ②③）：按规则专属模式在可执行代码区域匹配，
             # 生成 L2 候选（需 AI 复核可利用性与危害，不走确定性闭链）。
-            matched = _webview_crypto_match(rule_id, code, file)
-            if matched:
+            # P6（E8-3）：同文件多调用点全枚举（旧行为只报首个 match）。
+            for matched in _webview_crypto_match(rule_id, code, file):
                 result = _global_base(rule_id, file, "L2", manifest, matched["description"])
                 result["locations"] = [{
                     "artifact": "code", "path": file["path"], "line": matched["line"],
@@ -3015,8 +3053,8 @@ def _global_code_rule(
     return results
 
 
-def _webview_crypto_match(rule_id: str, code: str, file: dict) -> dict | None:
-    """WebView/密码学规则的单一匹配入口。
+def _webview_crypto_match(rule_id: str, code: str, file: dict) -> list[dict]:
+    """WebView/密码学/P5 全局规则的匹配入口（E8-3：返回**全部**命中）。
 
     两类匹配策略：
     - 方法调用类（FILE_ACCESS/UNIVERSAL/SSL/TRUST/VERIFIER）：先用 _sanitize_executable
@@ -3026,131 +3064,143 @@ def _webview_crypto_match(rule_id: str, code: str, file: dict) -> dict | None:
       用原始 code 匹配，但需先排除注释（sanitize 后做"注释定位"，原文匹配）。
 
     命中仅证明"调用点存在"，可利用性/危害由 AI 阶段判定（evidence_level=L2）。
+    P6（E8-3，2026-08-27）：同文件多调用点全枚举（旧行为只报首个 match）。
     """
+
+    matches: list[dict] = []
 
     def _line_at(offset: int) -> int:
         return code.count("\n", 0, offset) + 1
+
+    def _comment_line(offset: int) -> bool:
+        return bool(re.match(r"\s*//", code[:offset][code.rfind("\n") + 1:]))
 
     sanitized = _sanitize_executable(code)
 
     if rule_id == "WEBVIEW_JS_BRIDGE_EXPOSED":
         # 桥名在字符串内：原文匹配 + 剔除注释（sanitize 后的空白位置对应注释）。
         pattern = re.compile(r"addJavascriptInterface\s*\(\s*[^,]+,\s*[\"']([^\"']+)[\"']")
-        match = pattern.search(code)
-        if match and not re.match(r"\s*//", code[:match.start()][code.rfind("\n") + 1:]):
-            return {
+        for match in pattern.finditer(code):
+            if _comment_line(match.start()):
+                continue
+            matches.append({
                 "line": _line_at(match.start()),
                 "text": match.group(0)[:120],
                 "description": "WebView.addJavascriptInterface 注入 JS 桥：任意加载到该 WebView 的"
                                "网页 JS 均可调用被注入对象的全部导出方法，若桥对象暴露敏感能力则构成"
                                "远程代码/数据访问面（JS 桥注入）。",
                 "sink_kind": "js_bridge",
-            }
-        return None
+            })
+        return matches
 
     if rule_id == "WEBVIEW_FILE_ACCESS_ENABLED":
         pattern = re.compile(r"setAllowFileAccess\s*\(\s*true\s*\)|setAllowFileAccessFromFileURLs\s*\(\s*true\s*\)")
-        match = pattern.search(sanitized)
-        if match:
-            return {
+        for match in pattern.finditer(sanitized):
+            matches.append({
                 "line": _line_at(match.start()),
-                "text": pattern.search(code).group(0)[:120],
+                # P6 核验 R-2：按 sanitized 匹配跨度切原文（sanitize 保字符数）——
+                # 旧行为 pattern.search(code) 取原文首个匹配，多命中时第 2..N 个候选
+                # 的证据文本错误，且注释内首个匹配会取到注释文本。
+                "text": code[match.start():match.end()][:120],
                 "description": "WebView 显式启用 file:// 文件访问：加载的网页可读取应用私有文件"
                                "（setAllowFileAccess(true) 或 setAllowFileAccessFromFileURLs(true)），"
                                "本地文件数据泄露面。",
                 "sink_kind": "file_access",
-            }
-        return None
+            })
+        return matches
 
     if rule_id == "WEBVIEW_UNIVERSAL_ACCESS_FROM_FILE":
         pattern = re.compile(r"setAllowUniversalAccessFromFileURLs\s*\(\s*true\s*\)")
-        match = pattern.search(sanitized)
-        if match:
-            return {
+        for match in pattern.finditer(sanitized):
+            matches.append({
                 "line": _line_at(match.start()),
-                "text": pattern.search(code).group(0)[:120],
+                "text": code[match.start():match.end()][:120],
                 "description": "WebView.setAllowUniversalAccessFromFileURLs(true)：任意来源的网页均可"
                                "跨域访问 file:// 资源，file 域不再隔离，本地文件读取面扩大。",
                 "sink_kind": "file_access",
-            }
-        return None
+            })
+        return matches
 
     if rule_id == "WEBVIEW_SSL_ERROR_IGNORED":
         pattern = re.compile(
             r"onReceivedSslError\s*\([^)]*\)\s*\{[^}]{0,800}?\w+\s*\.\s*proceed\s*\(",
             re.I | re.S,
         )
-        match = pattern.search(sanitized)
-        if match:
-            return {
+        for match in pattern.finditer(sanitized):
+            matches.append({
                 "line": _line_at(match.start()),
-                "text": pattern.search(code).group(0)[:160],
+                "text": code[match.start():match.end()][:160],
                 "description": "onReceivedSslError 内调用 handler.proceed()：证书校验错误被放行，"
                                "中间人攻击者可注入任意内容（SSL 错误放行）。",
                 "sink_kind": "ssl_bypass",
-            }
-        return None
+            })
+        return matches
 
     if rule_id == "WEBVIEW_EXTERNAL_CONTENT":
         js_enabled = re.compile(r"setJavaScriptEnabled\s*\(\s*true\s*\)").search(sanitized)
-        external_load = re.compile(r"loadUrl\s*\(\s*[\"']https?://").search(code)
-        if js_enabled and external_load:
-            return {
-                "line": _line_at(external_load.start()),
-                "text": external_load.group(0)[:120],
+        if not js_enabled:
+            return matches
+        external_load = re.compile(r"loadUrl\s*\(\s*[\"']https?://")
+        for match in external_load.finditer(code):
+            # P6 核验 R-4：loadUrl 为字符串参数类匹配——补注释排除（与其他字符串参数类
+            # 分支策略一致，注释掉的 loadUrl 不构成真实调用点）。
+            if _comment_line(match.start()):
+                continue
+            matches.append({
+                "line": _line_at(match.start()),
+                "text": match.group(0)[:120],
                 "description": "WebView 启用 JavaScript 且加载外部 http(s) URL：若页面内容可被攻击者"
                                "控制则构成反射型 XSS 攻击面（JS 可访问桥/本地资源）。",
                 "sink_kind": "xss_surface",
-            }
-        return None
+            })
+        return matches
 
     if rule_id == "TRUST_MANAGER_ALL_ACCEPT":
         pattern = re.compile(
             r"checkServerTrusted\s*\([^)]*\)\s*\{([^{}]{0,400}?)\}",
             re.I | re.S,
         )
-        match = pattern.search(sanitized)
-        if match:
+        for match in pattern.finditer(sanitized):
             body = match.group(1).strip()
             if not body or re.match(r"^\s*(?:/\*.*?\*/\s*)*$", body):
-                return {
+                matches.append({
                     "line": _line_at(match.start()),
-                    "text": pattern.search(code).group(0)[:160],
+                    "text": code[match.start():match.end()][:160],
                     "description": "X509TrustManager.checkServerTrusted 实现为空/不抛异常：接受任意"
                                    "服务器证书，TLS 中间人攻击可完全绕过（TrustManager 空实现）。",
                     "sink_kind": "cert_bypass",
-                }
-        return None
+                })
+        return matches
 
     if rule_id == "HOSTNAME_VERIFIER_ALWAYS_TRUE":
         pattern = re.compile(
             r"verify\s*\([^)]*\)\s*\{\s*(?:return\s*\(?\s*true\s*\)?\s*;?)\s*\}",
             re.I | re.S,
         )
-        match = pattern.search(sanitized)
-        if match:
-            return {
+        for match in pattern.finditer(sanitized):
+            matches.append({
                 "line": _line_at(match.start()),
-                "text": pattern.search(code).group(0)[:160],
+                "text": code[match.start():match.end()][:160],
                 "description": "HostnameVerifier.verify 恒真返回 true：主机名校验被绕过，"
                                "任何证书对任意主机名均通过（域名校验绕过）。",
                 "sink_kind": "hostname_bypass",
-            }
-        return None
+            })
+        return matches
 
     if rule_id == "WEAK_CIPHER_ECB":
         # 算法名在字符串内：原文匹配，但需排除注释中的 Cipher.getInstance。
         pattern = re.compile(r"Cipher\s*\.\s*getInstance\s*\(\s*[\"']AES/ECB/", re.I)
-        match = pattern.search(code)
-        if match:
-            return {
+        for match in pattern.finditer(code):
+            if _comment_line(match.start()):
+                continue
+            matches.append({
                 "line": _line_at(match.start()),
                 "text": match.group(0)[:120],
                 "description": "Cipher.getInstance 使用 AES/ECB 模式：ECB 下相同明文块产生相同"
                                "密文块，泄露明文模式信息，可被模式分析攻击（弱加密模式）。",
                 "sink_kind": "weak_cipher",
-            }
-        return None
+            })
+        return matches
 
     if rule_id == "PENDING_INTENT_MUTABLE":
         # P5（评审 2026-08-27）：PendingIntent 工厂调用的 flags 不含 FLAG_IMMUTABLE——
@@ -3168,15 +3218,15 @@ def _webview_crypto_match(rule_id: str, code: str, file: dict) -> dict | None:
             # 子串巧合不再视为已加固（PendingIntent.FLAG_IMMUTABLE 经 '.' 边界命中）。
             if re.search(r"\bFLAG_IMMUTABLE\b", call_text):
                 continue
-            return {
+            matches.append({
                 "line": _line_at(match.start()),
                 "text": code[match.start():match.start() + 120],
                 "description": "PendingIntent 工厂调用未声明 FLAG_IMMUTABLE：API 23+ 默认可变"
                                "（mutable），底层 Intent 可被恶意应用篡改（组件重定向/Intent 劫持/"
                                "权限提升面）；Android 12+ 要求显式声明可变性（MASVS-PLATFORM-2）。",
                 "sink_kind": "pending_intent_mutable",
-            }
-        return None
+            })
+        return matches
 
     if rule_id == "LOG_SENSITIVE_DATA":
         # P5：Log.[deviw] 调用参数含敏感标识符（SENSITIVE_DATA_RE 词表复用）——
@@ -3188,15 +3238,15 @@ def _webview_crypto_match(rule_id: str, code: str, file: dict) -> dict | None:
                 continue
             call_text = sanitized[match.start():closing]
             if SENSITIVE_DATA_RE.search(call_text):
-                return {
+                matches.append({
                     "line": _line_at(match.start()),
                     "text": code[match.start():match.start() + 120],
                     "description": "android.util.Log 输出敏感数据：日志参数含敏感标识符"
                                    "（token/密码/位置/账号等），logcat 可被系统组件/其他调试面读取，"
-                                   "敏感信息泄露面（MASVS-STORAGE-1）。",
+                                   "敏感信息泄露面（MASVS-STORAGE-2）。",
                     "sink_kind": "log_leak",
-                }
-        return None
+                })
+        return matches
 
     if rule_id == "HARDCODED_SECRET":
         # P5：敏感命名的字符串常量（值在字符串字面量内——原文匹配 + 行首注释排除）。
@@ -3207,19 +3257,19 @@ def _webview_crypto_match(rule_id: str, code: str, file: dict) -> dict | None:
             re.I,
         )
         for match in pattern.finditer(code):
-            if re.match(r"\s*//", code[:match.start()][code.rfind("\n") + 1:]):
+            if _comment_line(match.start()):
                 continue
-            return {
+            matches.append({
                 "line": _line_at(match.start()),
                 "text": match.group(0)[:120],
                 "description": f"敏感命名字符串常量硬编码（{match.group(1)}）：密钥/凭证编译进"
                                " APK 可被反提取，凭据泄露面（MASVS-CRYPTO-2）——长度与用途需"
                                " AI 复核（可能是测试桩/占位值）。",
                 "sink_kind": "hardcoded_secret",
-            }
-        return None
+            })
+        return matches
 
-    return None
+    return matches
 
 
 # 组件生命周期入口由系统调用，索引中不存在 resolved 调用者——不视为死代码。

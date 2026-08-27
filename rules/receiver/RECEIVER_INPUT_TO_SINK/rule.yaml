@@ -1,4 +1,5 @@
 id: RECEIVER_INPUT_TO_SINK
+severity: medium
 version: 1.0.0
 protocol_version: 1.0.0
 component: receiver

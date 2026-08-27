@@ -1,4 +1,5 @@
 id: PROVIDER_URI_TO_FILE
+severity: high
 version: 1.0.0
 protocol_version: 1.0.0
 component: provider

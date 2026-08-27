@@ -1,4 +1,5 @@
 id: TRUST_MANAGER_ALL_ACCEPT
+severity: critical
 version: 1.0.0
 protocol_version: 1.0.0
 component: crypto

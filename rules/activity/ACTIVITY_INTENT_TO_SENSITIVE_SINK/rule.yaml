@@ -1,4 +1,5 @@
 id: ACTIVITY_INTENT_TO_SENSITIVE_SINK
+severity: medium
 version: 1.0.0
 protocol_version: 1.0.0
 component: activity

@@ -1,4 +1,5 @@
 id: PROVIDER_SQL_STRUCTURE_INJECTION
+severity: high
 version: 1.0.0
 protocol_version: 1.0.0
 component: provider

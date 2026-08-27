@@ -1,4 +1,5 @@
 id: PENDING_INTENT_MUTABLE
+severity: medium
 version: 1.0.0
 protocol_version: 1.0.0
 component: intent

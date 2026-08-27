@@ -1,4 +1,5 @@
 id: WEBVIEW_JS_BRIDGE_EXPOSED
+severity: critical
 version: 1.0.0
 protocol_version: 1.0.0
 component: webview

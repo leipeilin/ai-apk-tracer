@@ -1,4 +1,5 @@
 id: HOSTNAME_VERIFIER_ALWAYS_TRUE
+severity: high
 version: 1.0.0
 protocol_version: 1.0.0
 component: crypto

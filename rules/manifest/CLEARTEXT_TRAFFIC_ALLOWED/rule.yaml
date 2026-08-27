@@ -1,4 +1,5 @@
 id: CLEARTEXT_TRAFFIC_ALLOWED
+severity: medium
 version: 1.0.0
 protocol_version: 1.0.0
 component: manifest

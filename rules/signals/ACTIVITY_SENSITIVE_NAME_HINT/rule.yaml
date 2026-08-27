@@ -1,4 +1,5 @@
 id: ACTIVITY_SENSITIVE_NAME_HINT
+severity: informational
 version: 1.0.0
 protocol_version: 1.0.0
 component: activity

@@ -1,4 +1,5 @@
 id: PROVIDER_LOOSE_URI_MATCH
+severity: informational
 version: 1.0.0
 protocol_version: 1.0.0
 component: provider

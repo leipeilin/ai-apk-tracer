@@ -16,16 +16,25 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import yaml
+
 from app.config import WORKSPACE_ROOT
 
 sys.path.insert(0, str(WORKSPACE_ROOT / "rules"))
 
-from shared.detector import _webview_crypto_match  # noqa: E402
+from shared.detector import RULE_META, _webview_crypto_match  # noqa: E402
 
 FILE = {"path": "com/example/Test.java"}
 
 
 def _match(rule_id: str, code: str) -> dict | None:
+    """E8-3 后 _webview_crypto_match 返回全部命中（list）——helper 取首个（None 语义保持）。"""
+
+    matches = _webview_crypto_match(rule_id, code, FILE)
+    return matches[0] if matches else None
+
+
+def _all_matches(rule_id: str, code: str) -> list[dict]:
     return _webview_crypto_match(rule_id, code, FILE)
 
 
@@ -372,3 +381,125 @@ class TestP5VerificationEdgeCases:
         m = _match("HARDCODED_SECRET", 'String tokenCount = "12345678";')
         assert m is not None
         assert "词干" in m["description"] or "复核" in m["description"] or m["sink_kind"] == "hardcoded_secret"
+
+
+class TestSeveritySingleSource:
+    """P6（E8-5）：severity 单源化——全部 rule.yaml 的 severity 必须与 RULE_META 一致。"""
+
+    def test_all_rule_yaml_severity_matches_rule_meta(self) -> None:
+        missing, mismatched = [], []
+        for rule_yaml in sorted(WORKSPACE_ROOT.glob("rules/*/*/rule.yaml")):
+            meta = yaml.safe_load(rule_yaml.read_text("utf-8"))
+            rule_id = meta.get("id")
+            entry = RULE_META.get(rule_id)
+            assert entry is not None, f"{rule_id} 未注册到 RULE_META"
+            if "severity" not in meta:
+                missing.append(rule_id)
+            elif str(meta["severity"]) != str(entry[2]):
+                mismatched.append(f"{rule_id}: yaml={meta['severity']} meta={entry[2]}")
+        assert not missing, f"缺 severity 字段: {missing}"
+        assert not mismatched, f"severity 双源漂移: {mismatched}"
+
+
+class TestMultiMatchE8_3:
+    """P6（E8-3）：同文件多调用点全枚举（旧行为只报首个 match）。"""
+
+    def test_js_bridge_multiple_bridges_all_reported(self) -> None:
+        matches = _all_matches("WEBVIEW_JS_BRIDGE_EXPOSED", """class A {
+ void setup(android.webkit.WebView w1, android.webkit.WebView w2) {
+  w1.addJavascriptInterface(new Bridge1(), "Android1");
+  w1.addJavascriptInterface(new Bridge2(), "Android2");
+ }
+}
+""")
+        assert len(matches) == 2
+        assert [m["line"] for m in matches] == [3, 4]
+
+    def test_weak_cipher_multiple_instances_all_reported(self) -> None:
+        matches = _all_matches("WEAK_CIPHER_ECB",
+                               'Cipher c1 = Cipher.getInstance("AES/ECB/PKCS5Padding");\n'
+                               'Cipher c2 = Cipher.getInstance("AES/ECB/PKCS7Padding");\n')
+        assert len(matches) == 2
+
+    def test_hardcoded_secret_multiple_constants_all_reported(self) -> None:
+        matches = _all_matches("HARDCODED_SECRET",
+                               'String api_key = "k1abcdefgh";\nString db_password = "p2abcdefgh";\n')
+        assert len(matches) == 2
+
+
+class TestSensitiveNameHintE8_1:
+    """P6（E8-1）：敏感命名启发式词表扩展（Login/Token/Account/Pay 等）。"""
+
+    def test_expanded_vocab_hits_login_token_account(self) -> None:
+        # 经 _component_rule 路径：LoginActivity/TokenService/AccountProvider 命中
+        from shared.detector import _component_rule
+
+        for name in ("com.example.LoginActivity", "com.example.TokenService", "com.example.PayActivity"):
+            component = {"kind": "activity" if "Activity" in name else "service",
+                         "name": name, "exported": "true", "permission": None}
+            candidate = _component_rule("ACTIVITY_SENSITIVE_NAME_HINT", component, [], {"components": [component]})
+            assert candidate is not None, name
+            assert candidate.get("auxiliary") is True
+
+
+class TestP6VerificationFixes:
+    """P6 核验 R-1/R-2/R-7 处置后的回归锚定。"""
+
+    def test_severity_assertion_is_bidirectional(self) -> None:
+        # R-7：反向断言——RULE_META 每条注册都必须有对应 rule.yaml（防死注册）
+        yaml_ids = set()
+        for rule_yaml in sorted(WORKSPACE_ROOT.glob("rules/*/*/rule.yaml")):
+            meta = yaml.safe_load(rule_yaml.read_text("utf-8"))
+            yaml_ids.add(meta["id"])
+        assert yaml_ids == set(RULE_META), (
+            f"yaml-only: {sorted(yaml_ids - set(RULE_META))}; "
+            f"meta-only（死注册）: {sorted(set(RULE_META) - yaml_ids)}"
+        )
+
+    def test_multi_match_texts_are_per_call_site(self) -> None:
+        # R-2：同文件两处调用的证据文本互不相同（旧行为第 2 个候选重复首个匹配文本）
+        matches = _all_matches("WEBVIEW_FILE_ACCESS_ENABLED",
+                               'w1.getSettings().setAllowFileAccess(true);\n'
+                               'w2.getSettings().setAllowFileAccess(true);\n')
+        assert len(matches) == 2
+        assert matches[0]["text"] != matches[1]["text"] or (
+            matches[0]["line"] != matches[1]["line"]
+        )
+
+    def test_sanitize_match_survives_comment_only_source(self) -> None:
+        # R-2 附带鲁棒性：原文 search 为 None 时不再 AttributeError 崩溃
+        assert _match("WEBVIEW_FILE_ACCESS_ENABLED",
+                      '// setAllowFileAccess/*x*/(true);') is None
+
+    def test_external_content_commented_load_url_no_hit(self) -> None:
+        # R-4：注释掉的 loadUrl 不构成真实调用点
+        assert _match("WEBVIEW_EXTERNAL_CONTENT",
+                      'w.getSettings().setJavaScriptEnabled(true);\n// w.loadUrl("http://evil.example");') is None
+
+    def test_sensitive_name_hint_camel_token_word_match(self) -> None:
+        # R-3：KeyEvent/Keyboard 类良性驼峰名不命中（整词匹配）
+        from shared.detector import _component_rule
+
+        for name in ("com.example.KeyEventActivity", "com.example.KeyboardService", "com.example.ConcertProvider"):
+            kind = "activity" if "Activity" in name else ("provider" if "Provider" in name else "service")
+            component = {"kind": kind, "name": name, "exported": "true", "permission": None}
+            assert _component_rule("ACTIVITY_SENSITIVE_NAME_HINT", component, [], {"components": [component]}) is None, name
+
+    def test_scope_gaps_merged_into_candidate_coverage_gaps(self) -> None:
+        # R-1：flow_scope 携带的 gaps（provider 无索引回退的 LEGACY_INDEX_SCOPE）
+        # 必须面市到候选 coverage_gaps——旧行为在 _component_rule 路径是传递死端。
+        from shared.detector import _component_rule
+
+        component = {"kind": "activity", "name": "com.example.LoginActivity",
+                     "exported": "true", "permission": None}
+        manifest = {"components": [component], "custom_permissions": {}, "authority_conflicts": {}}
+        candidate = _component_rule(
+            "ACTIVITY_SENSITIVE_NAME_HINT", component, [], manifest,
+            component_flow_scope={
+                "files": [], "entry_method_ids": [],
+                "gaps": [{"code": "LEGACY_INDEX_SCOPE", "critical": True}],
+            },
+        )
+        assert candidate is not None
+        gap_codes = [g.get("code") for g in candidate.get("coverage_gaps", [])]
+        assert "LEGACY_INDEX_SCOPE" in gap_codes

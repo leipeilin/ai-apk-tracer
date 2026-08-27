@@ -1,4 +1,5 @@
 id: WEBVIEW_FILE_ACCESS_ENABLED
+severity: high
 version: 1.0.0
 protocol_version: 1.0.0
 component: webview

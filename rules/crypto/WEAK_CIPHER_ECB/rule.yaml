@@ -1,4 +1,5 @@
 id: WEAK_CIPHER_ECB
+severity: medium
 version: 1.0.0
 protocol_version: 1.0.0
 component: crypto

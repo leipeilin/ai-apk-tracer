@@ -1,4 +1,5 @@
 id: ACTIVITY_EXPORTED_NO_PERMISSION
+severity: informational
 version: 1.0.0
 protocol_version: 1.0.0
 component: activity

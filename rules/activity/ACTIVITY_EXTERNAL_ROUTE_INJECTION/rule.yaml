@@ -1,4 +1,5 @@
 id: ACTIVITY_EXTERNAL_ROUTE_INJECTION
+severity: medium
 version: 1.0.0
 protocol_version: 1.0.0
 component: activity
