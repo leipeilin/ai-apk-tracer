@@ -317,6 +317,11 @@ class ExplorerOrchestrator:
                 "requests_deduplicated": executed["deduplicated"],
             })
             if observation.loop.done:
+                # 核验 O-1：done 与空转变体并存时 terminated_by 仍记 loop_done
+                # （模型主动终止语义优先），但空转信号并列记入轮记录——
+                # no_new_requests 统计不低估（探针 redundant_done_rounds 可见）
+                if observation.read_requests and executed["new_available"] == 0:
+                    rounds[-1]["done_with_redundant_requests"] = True
                 terminated_by = "loop_done"
                 break
             # F5 附带：本轮有请求但去重后零增量（全重复）——无新信息，

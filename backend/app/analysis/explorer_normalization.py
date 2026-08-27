@@ -210,6 +210,8 @@ def build_known_findings_context(
             continue
         context.setdefault(name, []).append({
             "rule": str(candidate.get("rule_id") or ""),
+            # 核验 O-2：有意的轻量投影——规则候选字段名 severity_hint，
+            # 注入摘要对外字段名 severity（模型侧 {rule, severity} 简洁形状）
             "severity": str(candidate.get("severity_hint") or ""),
         })
     return context

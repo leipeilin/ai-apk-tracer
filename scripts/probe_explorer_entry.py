@@ -293,6 +293,10 @@ async def _run_probe(args: argparse.Namespace) -> int:
                 "read_requests": sum(len(r.get("requests_executed") or []) for r in rounds),
                 # F5 附带：请求去重统计（重复请求跳过 + no_new_requests 终止验证）
                 "requests_deduplicated": sum(r.get("requests_deduplicated") or 0 for r in rounds),
+                # 核验 O-1：done 与空转并存轮（terminated_by=loop_done 但请求
+                # 全重复——空转变体真实频次不因 done 优先语义被低估）
+                "redundant_done_rounds": sum(
+                    1 for r in rounds if r.get("done_with_redundant_requests")),
                 "candidate_count": record.get("candidate_count"),
             })
 
@@ -338,6 +342,8 @@ async def _run_probe(args: argparse.Namespace) -> int:
                     e["requests_deduplicated"] for e in per_entry),
                 "no_new_requests_terminations": sum(
                     1 for e in per_entry if e["terminated_by"] == "no_new_requests"),
+                "redundant_done_rounds": sum(
+                    e["redundant_done_rounds"] for e in per_entry),
             },
             "d3_violations": d3_violations,
             "threshold": {"required_validated_plus_partial": threshold,

@@ -1408,6 +1408,29 @@ def test_duplicate_requests_terminate_no_new_requests(tmp_path: Path) -> None:
     assert orchestrator.read_requests_used == 1
 
 
+def test_done_with_redundant_requests_flagged(tmp_path: Path) -> None:
+    """核验 O-1：done=true 且请求全重复 → terminated_by 仍 loop_done
+    （模型主动终止语义优先），但空转信号并列记入轮记录（统计不低估）。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    request = {"operation": "get_method_body", "target": entry["method_id"]}
+    fake = FakeAnalyzer([
+        {"done": False, "requests": [request]},
+        # done 与完全重复并存（模型声明结束但仍发了重复请求）
+        {"done": True, "proposals": [_proposal()], "requests": [dict(request)]},
+    ])
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(max_rounds_per_entry=4), tmp_path)
+    asyncio_run(orchestrator.explore_all([entry]))
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    record = observations["entries"][0]
+    assert record["terminated_by"] == "loop_done"
+    # 空转变体信号并列可见（第二轮全重复）
+    assert record["rounds"][1]["done_with_redundant_requests"] is True
+    assert record["rounds"][1]["requests_deduplicated"] == 1
+    assert orchestrator.read_requests_used == 1
+
+
 def test_partial_overlap_executes_increment_only(tmp_path: Path) -> None:
     """A5-4 部分重叠：去重执行——只执行增量请求，非重叠部分仍获探索。"""
     call_tree = _service(tmp_path)
