@@ -6,4 +6,4 @@ evidence_output: L1
 builtin: true
 entrypoint: detect.py
 android_api: "1-36"
-limitations: "allowBackup=true + targetSdk>=23（数据可提取）"
+limitations: "allowBackup=true + targetSdk>=23（Auto Backup 云端备份生效、旧平台 adb backup 可提取，medium）；P3 扩展：声明 dataExtractionRules/fullBackupContent 豁免机制时降级 low（规则 XML 内容未解析需复核；两者适用性取决于设备版本而非 targetSdk）；未声明或资源引用未解析（None/unknown）且 targetSdk>=23 报 low 存量（属性默认 true）；targetSdk<23 的旧备份机制风险面不在本规则覆盖范围。"

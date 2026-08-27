@@ -3383,6 +3383,10 @@ def _platform_assumptions(manifest: dict) -> list[str]:
         _fact("debuggable", manifest.get("debuggable", False)),
         _fact("allow_backup", manifest.get("allow_backup")),
         _fact("uses_cleartext_traffic", manifest.get("uses_cleartext_traffic")),
+        # P3（核验 R-5）：备份/明文策略覆盖与豁免入口随候选下发，供 AI 复核降级候选。
+        _fact("network_security_config", manifest.get("network_security_config")),
+        _fact("data_extraction_rules", manifest.get("data_extraction_rules")),
+        _fact("full_backup_content", manifest.get("full_backup_content")),
     ]
 
 
@@ -3475,10 +3479,16 @@ def _manifest_fact_candidates(rule_id: str, manifest: dict) -> list[dict]:
     """本地存储/配置族（§12）：纯 manifest 事实，确定性生成 L1 候选。
 
     - DEBUGGABLE_IN_PRODUCTION: debuggable=true 的生产配置（任意调试器可附加）。
-    - ALLOW_BACKUP_ENABLED: allowBackup=true 且 targetSdk>=23（adb backup 可提取数据）。
-    - CLEARTEXT_TRAFFIC_ALLOWED: usesCleartextTraffic=true 且 targetSdk>=28（明文流量显式放开）。
+    - ALLOW_BACKUP_ENABLED: allowBackup=true 且 targetSdk>=23（adb backup 可提取数据）；
+      P3（评审 E4）扩展：已声明 dataExtractionRules/fullBackupContent 豁免机制时降级
+      low（备份范围以规则内容为准，XML 内容未解析需下游复核）；未声明 allowBackup 且
+      targetSdk>=23 时按默认 true 报 low 存量候选（沉默风险——Auto Backup 生效）。
+    - CLEARTEXT_TRAFFIC_ALLOWED: usesCleartextTraffic=true 且 targetSdk>=28（明文流量
+      显式放开）；P3（评审 E3）扩展：已声明 networkSecurityConfig 时降级 low（按官方
+      语义 manifest 标志被 NSC 覆盖忽略，明文策略以 NSC 内容为准）；0<targetSdk<28 且
+      未显式声明 false 时按平台默认放行报 low 存量候选。
 
-    条件不满足时返回空列表；这些事实是 F2 一期已解析的确定性字段，不依赖代码索引。
+    条件不满足时返回空列表；这些事实是确定性字段，不依赖代码索引。
     """
 
     component = {"name": "application", "exported": "false", "permission": None}
@@ -3499,24 +3509,76 @@ def _manifest_fact_candidates(rule_id: str, manifest: dict) -> list[dict]:
         return [result]
 
     if rule_id == "ALLOW_BACKUP_ENABLED":
-        if manifest.get("allow_backup") is not True or target_sdk < 23:
-            return []
-        result = _base(
-            rule_id, component, "L1", [], manifest,
-            "android:allowBackup=true 且 targetSdk>=23：adb backup 可提取应用私有数据"
-            "（SharedPreferences/数据库/文件），本地数据泄露面。",
+        allow_backup = manifest.get("allow_backup")
+        has_backup_exemption = bool(
+            manifest.get("data_extraction_rules") or manifest.get("full_backup_content")
         )
-        return [result]
+        if allow_backup is True and target_sdk >= 23:
+            if has_backup_exemption:
+                result = _base(
+                    rule_id, component, "L1", [], manifest,
+                    "android:allowBackup=true 且 targetSdk>=23，但已声明 fullBackupContent/"
+                    "dataExtractionRules 豁免机制——备份范围以规则内容为准（XML 内容未解析，"
+                    "需下游/人工复核豁免覆盖面），此处按低危记录。",
+                )
+                result["severity_hint"] = "low"
+                return [result]
+            result = _base(
+                rule_id, component, "L1", [], manifest,
+                "android:allowBackup=true 且 targetSdk>=23：Auto Backup 云端全量备份生效"
+                "（需经用户账号恢复落地），旧平台 adb backup 亦可提取应用私有数据"
+                "（SharedPreferences/数据库/文件），本地数据泄露面。",
+            )
+            return [result]
+        if allow_backup in (None, "unknown") and target_sdk >= 23:
+            # P3 核验 R-2：资源引用（unknown）与未声明（None）同报——allowBackup 默认 true，
+            # 两者运行时行为一致（显式 false 才退出备份）。
+            result = _base(
+                rule_id, component, "L1", [], manifest,
+                "未声明（或资源引用未解析）android:allowBackup 且 targetSdk>=23：属性默认 true，"
+                "Auto Backup 云端备份生效，旧平台 adb backup 亦可提取应用私有数据"
+                "（Android 12+ 平台对非 debuggable 应用默认排除 adb backup 提取），"
+                "存量沉默风险（若已声明 dataExtractionRules/fullBackupContent，"
+                "备份范围以规则内容为准）。",
+            )
+            result["severity_hint"] = "low"
+            return [result]
+        return []
 
     if rule_id == "CLEARTEXT_TRAFFIC_ALLOWED":
-        if manifest.get("uses_cleartext_traffic") is not True or target_sdk < 28:
-            return []
-        result = _base(
-            rule_id, component, "L1", [], manifest,
-            "android:usesCleartextTraffic=true 且 targetSdk>=28：targetSdk>=28 默认禁止明文流量，"
-            "此处显式放开，HTTPS 降级/中间人攻击面扩大。",
-        )
-        return [result]
+        uses_cleartext = manifest.get("uses_cleartext_traffic")
+        has_nsc = bool(manifest.get("network_security_config"))
+        if uses_cleartext is True and target_sdk >= 28:
+            if has_nsc:
+                result = _base(
+                    rule_id, component, "L1", [], manifest,
+                    "android:usesCleartextTraffic=true 且 targetSdk>=28，但已声明 "
+                    "networkSecurityConfig——按 Android 官方语义 manifest 标志被 NSC 覆盖"
+                    "忽略，明文策略以 NSC 内容为准（NSC XML 未解析，需下游/人工复核），"
+                    "此处按低危记录。",
+                )
+                result["severity_hint"] = "low"
+                return [result]
+            result = _base(
+                rule_id, component, "L1", [], manifest,
+                "android:usesCleartextTraffic=true 且 targetSdk>=28：targetSdk>=28 默认禁止明文流量，"
+                "此处显式放开，HTTPS 降级/中间人攻击面扩大。",
+            )
+            return [result]
+        if 0 < target_sdk < 28 and not (uses_cleartext is False and not has_nsc):
+            # P3 核验 R-1：NSC 覆盖语义是双向的——显式 false + NSC 存在时标志同样被忽略，
+            # 而 NSC 对 targetSdk<28 的默认配置允许明文（除非 NSC 显式禁用），
+            # 故"显式 false 且无 NSC"才是不报的充分条件。
+            result = _base(
+                rule_id, component, "L1", [], manifest,
+                "targetSdk<28 且（未显式声明 android:usesCleartextTraffic=false 或声明了 "
+                "networkSecurityConfig——按官方语义标志被 NSC 覆盖忽略，NSC 对 targetSdk<28 "
+                "默认允许明文）：明文流量默认放行（存量风险面，HTTPS 降级/中间人攻击面），"
+                "按低危记录。",
+            )
+            result["severity_hint"] = "low"
+            return [result]
+        return []
 
     return []
 

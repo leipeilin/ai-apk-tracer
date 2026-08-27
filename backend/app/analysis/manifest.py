@@ -83,6 +83,15 @@ def parse_manifest(path: Path, analysis_platform_api: int = 36) -> dict[str, Any
     app_debuggable = _bool(_attr(application, "debuggable")) if application is not None else None
     app_allow_backup = _bool(_attr(application, "allowBackup")) if application is not None else None
     app_cleartext = _bool(_attr(application, "usesCleartextTraffic")) if application is not None else None
+    # P3（评审 2026-08-27 E3/E4）：备份/明文策略的覆盖与豁免机制入口。
+    # networkSecurityConfig 声明后 usesCleartextTraffic 标志被 Android 忽略（官方语义）；
+    # dataExtractionRules（Android 12+ 设备生效）/ fullBackupContent（Android 11- 设备生效，
+    # 12+ 设备上无 dataExtractionRules 时回退生效）约束备份范围——两者适用性取决于
+    # 设备版本而非 app 的 targetSdk，故下游只按属性存在判定、不做 targetSdk 门控。
+    # 此处只解析入口（XML 内容解析不在本期），供规则侧降级与存量分支判定。
+    app_network_security_config = _attr(application, "networkSecurityConfig") if application is not None else None
+    app_data_extraction_rules = _attr(application, "dataExtractionRules") if application is not None else None
+    app_full_backup_content = _attr(application, "fullBackupContent") if application is not None else None
     components: list[dict[str, Any]] = []
     if application is not None:
         for child in application:
@@ -191,6 +200,9 @@ def parse_manifest(path: Path, analysis_platform_api: int = 36) -> dict[str, Any
         "debuggable": False if app_debuggable is None else app_debuggable,
         "allow_backup": app_allow_backup,
         "uses_cleartext_traffic": app_cleartext,
+        "network_security_config": app_network_security_config,
+        "data_extraction_rules": app_data_extraction_rules,
+        "full_backup_content": app_full_backup_content,
         "application_permission": app_permission,
         "application_permission_protection": app_permission_protection,
         "custom_permissions": permissions,

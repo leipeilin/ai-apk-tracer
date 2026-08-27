@@ -6,4 +6,4 @@ evidence_output: L1
 builtin: true
 entrypoint: detect.py
 android_api: "1-36"
-limitations: "usesCleartextTraffic=true + targetSdk>=28（明文流量放开）"
+limitations: "usesCleartextTraffic=true + targetSdk>=28（明文流量放开，medium）；P3 扩展：声明 networkSecurityConfig 时降级 low（官方语义 manifest 标志被 NSC 覆盖，NSC XML 内容未解析）；0<targetSdk<28 报 low 存量（平台默认放行；显式 false 且无 NSC 才不报——NSC 对 targetSdk<28 默认允许明文）；usesCleartextTraffic 为资源引用（unknown）时 targetSdk>=28 不报（引用真值未解析）。"
