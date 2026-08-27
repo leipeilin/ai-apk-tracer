@@ -365,10 +365,10 @@ prompts:
   input_schema_file: ai_explorer_input.schema.json
   output_schema_file: ai_explorer_observation.schema.json
   template_sha256:
-    system: 1a642af53c635975ac43bb49a05ccf8116b00e105495dbb390d5566f7a4cb380
+    system: 6d3ca7177da1c07dd400f103407c691c7315ed03d51d032f9bec9c753def7960
     user: 85ec035cb2ea03c955c124e388af360be38d32e884b596edbc60f65b6c676f66
   schema_sha256:
-    input: 7892832384f01b8ca6dc8d81e37e98ff67eb773fe44ee99eeea2e48fa8374ba0
+    input: a8f1739d0f17bd596b0b250b05bd793da52575ee62779816614f7b194b61c539
     output: d26697ecaf7c517b90a0539a45e6ecdfb75d08bbf05c730acba860b5f2c71d38
 - id: explorer-deep-dive
   version: 1.0.0

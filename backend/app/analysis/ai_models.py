@@ -347,8 +347,14 @@ class ExplorerObservation(StrictAIModel):
 
     @model_validator(mode="after")
     def _done_requires_chain(self) -> ExplorerObservation:
-        if self.loop.done and not self.chain_proposals:
-            raise ValueError("loop.done=True 必须伴随至少一条 chain_proposal（评审 R-3）")
+        # F5 干净出口（F2 核验 V-2 死锁破除）：done=true + 空链合法当且仅当
+        # loop.reason 含"无敏感"结论（确认入口无可达敏感链的合法终止——
+        # v8 探针实证"必须产链或必须新请求"死锁）；无结论关键词仍拒绝
+        if self.loop.done and not self.chain_proposals and "无敏感" not in (self.loop.reason or ""):
+            raise ValueError(
+                "loop.done=True 必须伴随至少一条 chain_proposal，"
+                "或 loop.reason 含'无敏感'结论（干净出口——评审 R-3/F5）"
+            )
         return self
 
 
@@ -441,6 +447,14 @@ class ExplorerInput(StrictAIModel):
             "入口第一跳骨架（驱动层从 call_sites resolved 边确定性构造——"
             "from/to/call_site_line 三要素可直接复制进 chain_proposals 的 hops，"
             "复制即通过跳回查；骨架是起点素材而非结论，source/sink 语义仍由模型判定"
+        ),
+    )
+    known_findings: LongText | None = Field(
+        default=None,
+        description=(
+            "F5 目标组件引导：该组件规则轨已确认 finding 摘要 JSON"
+            "（[{rule, severity}]——确定性事实，定向深挖相邻攻击面的线索；"
+            "无 finding 组件为 None）"
         ),
     )
     prior_observations: LongText | None = Field(

@@ -28,3 +28,4 @@ tools/*/app/build/
 tmp_*.py
 .venv/
 
+backend/.venv-tls/

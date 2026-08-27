@@ -224,7 +224,11 @@ class ScanOrchestrator:
         # 0 条进入正式 finding）。默认关闭。
         if self.settings.explorer.enabled:
             self._stage(run_id, "explorer")
-            normalized_explorer = await self._run_explorer_stage(run_id, run_dir, manifest, code_index)
+            # F5（评审 P1-1 数据源接线）：传入 rule_prescan 产物（此时点
+            # candidates 尚未 extend explorer 结果——纯规则候选），供
+            # 入口优先级排序 + known_findings 注入 + 复读守卫索引构造
+            normalized_explorer = await self._run_explorer_stage(
+                run_id, run_dir, manifest, code_index, candidates)
             candidates.extend(normalized_explorer)
 
         self._stage(run_id, "candidate_funnel")
@@ -1102,7 +1106,8 @@ class ScanOrchestrator:
             current_slice = expanded_slice
 
     async def _run_explorer_stage(
-        self, run_id: str, run_dir: Path, manifest: dict[str, Any], code_index: dict[str, Any] | None
+        self, run_id: str, run_dir: Path, manifest: dict[str, Any], code_index: dict[str, Any] | None,
+        rule_candidates: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """探索轨阶段（T2.5b/T2.7）：入口遍历 → 受控检索循环 → 三档校验 →
         validated 归一化（返回归一化候选，由调用方并入主链 candidates）。
@@ -1110,6 +1115,12 @@ class ScanOrchestrator:
         ai_call 回调经 run 级 AI 预算包装（评审 R-1：直调 analyzer 会绕过
         max_requests_per_run 计费）；stage summary 分记 ai_requests_used /
         read_requests_used（与 ai_analysis 的 requests_used 区分语义）。
+
+        F5 目标组件引导（rule_candidates）：规则轨 finding 组件入口优先
+        （稳定排序——仅影响预算分配顺序，不改变 entries_explored 覆盖
+        口径，无 finding 组件仍被完整探索只是靠后）；known_findings 注入
+        （组件级 finding 摘要——定向深挖线索）；归一化复读守卫（sink 键
+        命中已知 finding → replayed_finding 标记 + confidence 降档 + gap）。
         """
 
         from app.analysis.call_tree import CallTreeService
@@ -1117,6 +1128,7 @@ class ScanOrchestrator:
             ExplorerOrchestrator,
             load_attack_surface_index,
         )
+        from app.analysis.explorer_normalization import build_known_findings_context
 
         budget = self.settings.context_budget
         explorer_settings = self.settings.explorer
@@ -1148,10 +1160,27 @@ class ScanOrchestrator:
             call_tree = CallTreeService(run_dir, reader, explorer_settings.call_tree)
             entries = call_tree.get_entry_points()
             effective = [entry for entry in entries if entry.get("method_id")]
+            # F5：规则轨 finding 组件入口优先（稳定排序——同级保原序，同组件
+            # 入口相邻上下文局部性好；确认性偏差保护：排序不改覆盖口径——
+            # 无 finding 组件入口仍被完整探索（非跳过），仅分配顺序靠后）
+            finding_components = {
+                str(c.get("component_name") or "")
+                for c in (rule_candidates or [])
+                if c.get("component_name") and c.get("candidate_source") != "explorer"
+            }
+            effective.sort(key=lambda e: 0 if str(e.get("component_name") or "") in finding_components else 1)
+            finding_guided_entries = sum(
+                1 for e in effective if str(e.get("component_name") or "") in finding_components
+            )
+            # F5：known_findings 注入上下文（组件名精确匹配——撞名防护）
+            known_findings_context = (
+                build_known_findings_context(rule_candidates) if rule_candidates else {}
+            )
             degraded = bool(entries) and not effective and entries[0].get("degraded")
             orchestrator = ExplorerOrchestrator(
                 budgeted_ai_call, call_tree, explorer_settings, run_dir, budgeted_deep_dive_call,
                 attack_surface=load_attack_surface_index(run_dir),
+                known_findings=known_findings_context,
             )
             candidates = await orchestrator.explore_all(effective)
             # 三档校验（T2.6）：reader 存活期内回查（跳/methods/call_sites）；
@@ -1160,6 +1189,7 @@ class ScanOrchestrator:
             # 正式 Candidate 形状（T0.6 映射表），partial/unverified/other
             # 不产出（留 explorer/candidates.json）。
             from app.analysis.explorer_normalization import (
+                build_known_findings_index,
                 normalize_explorer_candidates,
             )
             from app.analysis.explorer_validation import validate_explorer_candidates
@@ -1187,7 +1217,12 @@ class ScanOrchestrator:
             )
             deep_dive_counts = await orchestrator.deep_dive_partials(candidates, reader)
             orchestrator.save_candidates(candidates)
-            normalized_candidates, normalization_counts = normalize_explorer_candidates(candidates)
+            normalized_candidates, normalization_counts = normalize_explorer_candidates(
+                candidates,
+                known_findings_index=(
+                    build_known_findings_index(rule_candidates) if rule_candidates else None
+                ),
+            )
         finally:
             if reader is not None:
                 reader.close()
@@ -1216,6 +1251,10 @@ class ScanOrchestrator:
             # F4：入口覆盖透明化——上限截断可见（73/278 类覆盖率的机器口径）
             "entries_explored": orchestrator.entries_explored,
             "entries_unexplored": len(effective) - orchestrator.entries_explored,
+            # F5：目标组件引导透明化——优先入口数与复读守卫命中（引导
+            # 有效性评估的机器口径：探针/全量 run 对照 finding_guided_entries
+            # 的候选产出率）
+            "finding_guided_entries": finding_guided_entries,
             "validation_counts": validation_counts,
             "deep_dive_counts": deep_dive_counts,
             "normalization_counts": normalization_counts,

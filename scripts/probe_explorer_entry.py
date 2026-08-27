@@ -69,6 +69,7 @@ except ImportError:  # pragma: no cover
 from app.analysis.ai_models import ExplorerInput
 from app.analysis.call_tree import CallTreeService
 from app.analysis.explorer import ExplorerOrchestrator, load_attack_surface_index
+from app.analysis.explorer_normalization import build_known_findings_context
 from app.analysis.explorer_validation import validate_explorer_candidates
 from app.analysis.index_store import SQLiteCodeIndexReader
 from app.analysis.sink_taxonomy import load_sink_taxonomy
@@ -80,12 +81,41 @@ LOGGER = logging.getLogger("probe_explorer_entry")
 _PER_KIND_SAMPLE = 2
 _KIND_ORDER = ("activity", "service", "receiver", "provider")
 
+# rule-results 里的非候选产物（配套事实文件——known_findings 构造排除）
+_RULE_SIDE_PRODUCTS = frozenset({
+    "binder_bindings.json", "receiver_registrations.json", "webview_js_bridges.json",
+})
+
 
 def _load_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text("utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         raise SystemExit(f"[probe-explorer] 无法读取 {path}: {exc}") from exc
+
+
+def _load_rule_candidates(run_dir: Path) -> list[dict[str, Any]]:
+    """F5：rule-results 规则候选提取（known_findings 构造源）。
+
+    复刻主链数据源形状（component_name/severity_hint/sinks——orchestrator
+    从 rule_prescan 内存产物直接传入；探针从落盘产物重建）。
+    """
+
+    rule_root = run_dir / "rule-results"
+    if not rule_root.is_dir():
+        return []
+    candidates: list[dict[str, Any]] = []
+    for path in sorted(rule_root.glob("*.json")):
+        if path.name in _RULE_SIDE_PRODUCTS:
+            continue
+        try:
+            payload = json.loads(path.read_text("utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        items = payload.get("candidates") if isinstance(payload, dict) else None
+        if isinstance(items, list):
+            candidates.extend(c for c in items if isinstance(c, dict))
+    return candidates
 
 
 def _select_entries(entries: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -154,6 +184,12 @@ async def _run_probe(args: argparse.Namespace) -> int:
             return 2
         selected = _select_entries(entries, args)
         kind_dist = Counter(str(e.get("kind") or "other") for e in selected)
+        # F5：known_findings 注入上下文（rule-results 重建——主链同构）
+        rule_candidates = _load_rule_candidates(run_dir)
+        known_findings = build_known_findings_context(rule_candidates)
+        guided_entries = sum(
+            1 for e in selected if str(e.get("component_name") or "") in known_findings
+        )
 
         probe_dir = run_dir / "probe-explorer" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         plan = {
@@ -166,6 +202,9 @@ async def _run_probe(args: argparse.Namespace) -> int:
                 for e in selected
             ],
             "kind_distribution": dict(kind_dist),
+            # F5：引导注入透明化（A5-6 基线可用性——含 finding 组件入口数）
+            "finding_guided_entries": guided_entries,
+            "finding_component_count": len(known_findings),
             "manifest_facts": manifest_facts,
             "explorer_settings": {
                 "max_rounds_per_entry": settings.explorer.max_rounds_per_entry,
@@ -207,6 +246,7 @@ async def _run_probe(args: argparse.Namespace) -> int:
                 "entry_id": json.loads(model_input.entry_json).get("entry_id"),
                 "round_index": model_input.round_index,
                 "code_context_is_none": context_is_none,
+                "known_findings_is_none": model_input.known_findings is None,
                 "status": result.get("status"),
                 "chain_proposals_count": chain_count,
                 "seed_hops_count": len(model_input.seed_hops),
@@ -221,6 +261,7 @@ async def _run_probe(args: argparse.Namespace) -> int:
         orchestrator = ExplorerOrchestrator(
             probed_ai_call, call_tree, settings.explorer, probe_dir,
             attack_surface=load_attack_surface_index(run_dir),
+            known_findings=known_findings,
         )
         candidates = await orchestrator.explore_all(selected)
         validation_counts = validate_explorer_candidates(
@@ -250,6 +291,8 @@ async def _run_probe(args: argparse.Namespace) -> int:
                 "rounds": len(rounds),
                 "rounds_completed": sum(1 for r in rounds if r.get("status") == "completed"),
                 "read_requests": sum(len(r.get("requests_executed") or []) for r in rounds),
+                # F5 附带：请求去重统计（重复请求跳过 + no_new_requests 终止验证）
+                "requests_deduplicated": sum(r.get("requests_deduplicated") or 0 for r in rounds),
                 "candidate_count": record.get("candidate_count"),
             })
 
@@ -284,6 +327,17 @@ async def _run_probe(args: argparse.Namespace) -> int:
                 "first_hops_total": first_hops_total,
                 "seed_first_hop_hits": seed_first_hop_hits,
                 "seed_hit_rate": seed_hit_rate,
+            },
+            # F5：引导注入行为统计（A5-6——引导有效性/对照保护数据源）
+            "guidance_usage": {
+                "finding_guided_entries": guided_entries,
+                "rounds_with_findings": sum(
+                    1 for p in round_probes if not p["known_findings_is_none"]),
+                "rounds_total": len(round_probes),
+                "requests_deduplicated_total": sum(
+                    e["requests_deduplicated"] for e in per_entry),
+                "no_new_requests_terminations": sum(
+                    1 for e in per_entry if e["terminated_by"] == "no_new_requests"),
             },
             "d3_violations": d3_violations,
             "threshold": {"required_validated_plus_partial": threshold,

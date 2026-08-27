@@ -226,7 +226,8 @@ def test_read_requests_execution(tmp_path: Path) -> None:
 def test_requests_budget_truncation(tmp_path: Path) -> None:
     call_tree = _service(tmp_path)
     entry = _entry(call_tree)
-    requests = [{"operation": "search_symbol", "target": "run"} for _ in range(8)]
+    # F5 后请求增量去重——预算截断用 8 个互异请求构造（同请求会被去重跳过）
+    requests = [{"operation": "search_symbol", "target": f"run_{index}"} for index in range(8)]
     fake = FakeAnalyzer([
         {"done": False, "requests": requests},
         {"done": True, "proposals": [_proposal()]},
@@ -414,10 +415,16 @@ class FakeExploreAI:
         self._dive_rounds = list(dive_rounds or [{"complete": True, "facts": []}])
         self.calls = 0
         self.dive_calls = 0
+        self.inputs: list[Any] = []  # F5：轮输入捕获（known_findings 注入断言）
 
     async def explore_entry(self, model_input: Any) -> dict[str, Any]:
         self.calls += 1
-        spec = self._rounds.pop(0) if self._rounds else {"done": True, "proposals": []}
+        self.inputs.append(model_input)
+        spec = self._rounds.pop(0) if self._rounds else {
+            # F5 干净出口兜底：队列尽默认 done=True + 空链须带"无敏感"结论
+            # （校验器拒绝无结论空链——多入口测试的后续入口默认正常终止）
+            "done": True, "proposals": [], "reason": "确认无敏感操作",
+        }
         return {
             "status": "completed",
             "analysis": {
@@ -427,7 +434,7 @@ class FakeExploreAI:
                     "component": "com.example.A", "kind": "activity",
                     "exported": True, "summary": "入口 Activity 分发处理",
                 },
-                "loop": {"done": spec.get("done", True), "reason": "测试"},
+                "loop": {"done": spec.get("done", True), "reason": spec.get("reason", "测试")},
             },
             "metadata": {"prompt_version": "1.0.0", "model": "test-model"},
         }
@@ -1334,3 +1341,184 @@ def test_entry_coverage_transparency(tmp_path: Path) -> None:
         fake2, call_tree, ExplorerSettings(), tmp_path)
     asyncio_run(orchestrator2.explore_all(entries))
     assert orchestrator2.entries_explored == len(entries)  # 正例：全覆盖
+
+
+# ---------------------------------------------------------------------------
+# F5：目标组件引导（known_findings 注入 A5-2 / 请求增量执行 A5-4 /
+# 入口优先级 + 复读守卫集成 A5-1 + A5-5）
+# ---------------------------------------------------------------------------
+
+
+def test_known_findings_injected_into_model_input(tmp_path: Path) -> None:
+    """A5-2：有 finding 组件注入摘要 JSON；无 finding 组件为 None。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    fake = FakeAnalyzer([{"done": True, "proposals": [_proposal()]}])
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(), tmp_path,
+        known_findings={"com.example.A": [
+            {"rule": "ACTIVITY_INTENT_TO_SENSITIVE_SINK", "severity": "medium"},
+        ]},
+    )
+    asyncio_run(orchestrator.explore_all([entry]))
+    assert fake.inputs[0].known_findings is not None
+    payload = json.loads(fake.inputs[0].known_findings)
+    assert payload == [{"rule": "ACTIVITY_INTENT_TO_SENSITIVE_SINK", "severity": "medium"}]
+
+
+def test_known_findings_absent_for_unguided_component(tmp_path: Path) -> None:
+    """A5-2：known_findings 无该组件条目（或空映射）→ 输入为 None（不注入）。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    fake = FakeAnalyzer([{"done": True, "proposals": [_proposal()]}])
+    # 空映射（rule_prescan 零候选形态）
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(), tmp_path, known_findings={})
+    asyncio_run(orchestrator.explore_all([entry]))
+    assert fake.inputs[0].known_findings is None
+    # 映射有其他组件（撞名不同包）——精确匹配不命中 com.example.A
+    fake2 = FakeAnalyzer([{"done": True, "proposals": [_proposal()]}])
+    orchestrator2 = ExplorerOrchestrator(
+        fake2, call_tree, ExplorerSettings(), tmp_path,
+        known_findings={"other.example.A": [{"rule": "R", "severity": "low"}]},
+    )
+    asyncio_run(orchestrator2.explore_all([entry]))
+    assert fake2.inputs[0].known_findings is None
+
+
+def test_duplicate_requests_terminate_no_new_requests(tmp_path: Path) -> None:
+    """A5-4 完全重叠：轮请求与历史完全重复 → no_new_requests 干净终止。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    request = {"operation": "get_method_body", "target": entry["method_id"]}
+    fake = FakeAnalyzer([
+        {"done": False, "requests": [request]},
+        {"done": False, "requests": [dict(request)]},  # 完全重复（零增量）
+    ])
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(max_rounds_per_entry=4), tmp_path)
+    asyncio_run(orchestrator.explore_all([entry]))
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    record = observations["entries"][0]
+    assert record["terminated_by"] == "no_new_requests"
+    assert len(record["rounds"]) == 2  # 第二轮零增量即终止（第三轮不执行）
+    assert record["rounds"][1]["requests_deduplicated"] == 1
+    assert record["rounds"][1]["requests_executed"] == []
+    # 重复请求不消耗读码预算（只首执行计 1 次）
+    assert orchestrator.read_requests_used == 1
+
+
+def test_partial_overlap_executes_increment_only(tmp_path: Path) -> None:
+    """A5-4 部分重叠：去重执行——只执行增量请求，非重叠部分仍获探索。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    b_run = _method_id(call_tree, "com.example.B", "run")
+    first = {"operation": "get_method_body", "target": entry["method_id"]}
+    fake = FakeAnalyzer([
+        {"done": False, "requests": [first]},
+        # 部分重叠：重复 first + 新增 B.run 方法体请求
+        {"done": False, "requests": [dict(first), {"operation": "get_method_body", "target": b_run}]},
+        {"done": True, "proposals": [_proposal()]},
+    ])
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(max_rounds_per_entry=4), tmp_path)
+    asyncio_run(orchestrator.explore_all([entry]))
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    record = observations["entries"][0]
+    assert record["terminated_by"] == "loop_done"
+    assert len(record["rounds"]) == 3
+    second = record["rounds"][1]
+    assert second["requests_deduplicated"] == 1  # 重复项跳过
+    assert len(second["requests_executed"]) == 1  # 只执行增量（B.run）
+    assert orchestrator.read_requests_used == 2  # 总消耗 = 首轮 1 + 次轮增量 1
+
+
+def test_explorer_stage_entry_priority_and_replay_guard(tmp_path: Path) -> None:
+    """A5-1 + A5-5 集成：finding 组件入口优先（覆盖口径不变）+ 复读守卫。"""
+
+    orchestrator, storage, run_id, run_dir, descriptor = _instance_orchestrator(tmp_path)
+    # 加 D 组件入口（真实 Activity lifecycle 可解析 method_id；原序在 A 前——
+    # 排序后 A 应反超到首位）
+    source_root = tmp_path / "sources"
+    (source_root / "com/example/D.java").write_text("""package com.example;
+public class D extends android.app.Activity {
+  protected void onCreate(android.os.Bundle savedInstanceState) {
+  }
+}
+""", "utf-8")
+    descriptor = build_code_index(source_root, tmp_path / "index" / "code-index.json")
+    (run_dir / "api-surface" / "api_entry_table.json").write_text(json.dumps({
+        "api_entries": [
+            {
+                "entry_id": "act_com_example_D_onCreate",
+                "kind": "activity",
+                "component_name": "com.example.D",
+                "source": "manifest",
+                "entry_method": "onCreate",
+            },
+            {
+                "entry_id": "act_com_example_A_onCreate",
+                "kind": "activity",
+                "component_name": "com.example.A",
+                "source": "manifest",
+                "entry_method": "onCreate",
+            },
+        ],
+    }), "utf-8")
+    orchestrator.ai = FakeExploreAI(proposal=_real_proposal(descriptor))
+
+    # 规则候选：com.example.A 有 finding，sink 与探索链尾 C.write 同键
+    # （method_id 从索引提取——_sink_keys method 键命中即复读）
+    reader = SQLiteCodeIndexReader(descriptor)
+    try:
+        row = reader.db.execute(
+            "SELECT id FROM methods WHERE qualified_class = ? AND name = ?",
+            ("com.example.C", "write"),
+        ).fetchone()
+        c_write_id = str(row["id"])
+    finally:
+        reader.close()
+    rule_candidates = [{
+        "candidate_id": "rule_001",
+        "candidate_source": "rule_engine",
+        "rule_id": "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+        "severity_hint": "medium",
+        "component_name": "com.example.A",
+        "sinks": [{"kind": "sink_call", "path": "com/example/C.java", "line": 6,
+                   "method_id": c_write_id}],
+    }]
+
+    normalized = asyncio_run(orchestrator._run_explorer_stage(
+        run_id, run_dir, {"debuggable": False, "target_sdk": 36}, descriptor,
+        rule_candidates,
+    ))
+
+    # A5-1 排序：A（有 finding）入口先于 D（原序在前被反超）
+    observations = json.loads((run_dir / "explorer" / "observations.json").read_text("utf-8"))
+    entry_ids = [e["entry_id"] for e in observations["entries"]]
+    assert entry_ids == ["act_com_example_A_onCreate", "act_com_example_D_onCreate"]
+    # 覆盖口径不变：无 finding 组件 D 仍被探索（非跳过——干净出口正常终止）
+    assert len(observations["entries"]) == 2
+    assert all(e["terminated_by"] != "short_circuited" for e in observations["entries"])
+
+    # A5-2 集成：A 入口轮输入注入 known_findings 摘要
+    a_input = orchestrator.ai.inputs[0]
+    assert a_input.known_findings is not None
+    assert json.loads(a_input.known_findings) == [
+        {"rule": "ACTIVITY_INTENT_TO_SENSITIVE_SINK", "severity": "medium"}]
+
+    # A5-5 复读守卫：探索候选 sink 命中 finding sink → 标记 + 降档 + gap
+    assert len(normalized) == 1
+    replay = normalized[0]
+    assert replay["replayed_finding"] is True
+    assert replay["replayed_rule_id"] == "ACTIVITY_INTENT_TO_SENSITIVE_SINK"
+    assert replay["confidence_tier"] == "low"
+    gap_codes = [g["code"] for g in replay["blocking_gaps"]]
+    assert "EXPLORER_FINDING_REPLAY" in gap_codes
+
+    # stage summary：引导透明化（F4 先例模式）
+    manifest = storage.read_manifest(run_id)
+    stage = next(s for s in manifest["stages"] if s["name"] == "explorer")
+    summary = stage["summary"]
+    assert summary["finding_guided_entries"] == 1
+    assert summary["normalization_counts"]["finding_replays"] == 1

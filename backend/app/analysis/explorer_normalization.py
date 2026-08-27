@@ -97,11 +97,19 @@ def _strip_sources_prefix(path: Any) -> Any:
 
 def normalize_explorer_candidates(
     candidates: list[dict[str, Any]],
+    known_findings_index: dict[str, list[dict[str, Any]]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """T2.6 校验后的 ExplorerCandidate 列表 → (归一化 Candidate 列表, 计数摘要)。
 
     只归一化 validation.status == "validated" 且 component.kind 可映射的候选；
     单候选异常跳过 + 计数（阶段主链保护，同 T2.6 模式），不中断批次。
+
+    F5 复读守卫（known_findings_index）：组件名 → [{rule_id, sink_keys}]——
+    归一化候选 sink 键命中该组件已知 finding 的 sink 键（三键口径：组件 +
+    隐含 rule + sink——`_sink_keys` 同链口径）→ 标记 replayed_finding +
+    confidence 降 low + gap EXPLORER_FINDING_REPLAY（候选仍产出：独立复现
+    信号保留，L2 复核经 gap 知晓复读属性）。相邻新 sink 不算复读（复发
+    检测的合法产出——探索候选无 rule 维度，sink 未命中即新发现）。
     """
 
     counts = {
@@ -112,6 +120,7 @@ def normalize_explorer_candidates(
         "partial_kept": 0,
         "unverified_kept": 0,
         "normalization_errors": 0,
+        "finding_replays": 0,
     }
     normalized: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -139,9 +148,98 @@ def normalize_explorer_candidates(
             continue
         if result.get("guard_blocked"):
             counts["guard_blocked_promoted"] += 1
+        replayed_rule = _finding_replay(result, known_findings_index)
+        if replayed_rule is not None:
+            result["replayed_finding"] = True
+            result["replayed_rule_id"] = replayed_rule or None
+            result["confidence_tier"] = "low"
+            result.setdefault("blocking_gaps", []).append({
+                "code": "EXPLORER_FINDING_REPLAY",
+                "message": f"复述规则轨已知问题（{replayed_rule or 'unknown rule'}）——非新发现",
+                "critical": False,
+                "evidence_refs": [],
+            })
+            counts["finding_replays"] += 1
         normalized.append(result)
         counts["normalized"] += 1
     return normalized, counts
+
+
+def _finding_replay(
+    normalized: dict[str, Any],
+    known_findings_index: dict[str, list[dict[str, Any]]] | None,
+) -> str | None:
+    """F5 复读判定：返回被复读 finding 的 rule_id（未复读返回 None）。
+
+    三键口径（实施方案 3.5，评审 P1-2 缺口 1 修正版）：component_name 相同
+    + sink 键一致（`_sink_keys`——method_id 精确匹配，缺失退化 (path, line)，
+    与 link_related_candidates 同链判定同源）；探索候选无 rule 维度，sink
+    键命中即隐含被复读的 finding（返回其 rule_id 供 gap 记录）。
+    """
+
+    if not known_findings_index:
+        return None
+    findings = known_findings_index.get(str(normalized.get("component_name") or ""))
+    if not findings:
+        return None
+    candidate_keys = set(_sink_keys(normalized))
+    if not candidate_keys:
+        return None
+    for finding in findings:
+        sink_keys = finding.get("sink_keys")
+        if isinstance(sink_keys, (set, frozenset)) and candidate_keys & sink_keys:
+            return str(finding.get("rule_id") or "")
+    return None
+
+
+def build_known_findings_context(
+    rule_candidates: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """F5：规则候选 → 探索注入摘要（组件名 → [{rule, severity}]）。
+
+    组件名精确字符串匹配（F1 撞名教训——不污染同名组件）；explorer 源
+    候选排除（防御——正常时点传入的是纯 rule_prescan 产物）。
+    """
+
+    context: dict[str, list[dict[str, Any]]] = {}
+    for candidate in rule_candidates:
+        if candidate.get("candidate_source") == "explorer":
+            continue
+        name = str(candidate.get("component_name") or "")
+        if not name:
+            continue
+        context.setdefault(name, []).append({
+            "rule": str(candidate.get("rule_id") or ""),
+            "severity": str(candidate.get("severity_hint") or ""),
+        })
+    return context
+
+
+def build_known_findings_index(
+    rule_candidates: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """F5：规则候选 → 复读守卫索引（组件名 → [{rule_id, sink_keys: set}]）。
+
+    评审观察 1 确认：rule_prescan 候选是完整 Candidate 形状（含 sinks），
+    `_sink_keys` 直接提取无需适配（known_findings 注入摘要与守卫索引是
+    两个数据结构——前者轻量给模型，后者含 sink 键给归一化层）。
+    """
+
+    index: dict[str, list[dict[str, Any]]] = {}
+    for candidate in rule_candidates:
+        if candidate.get("candidate_source") == "explorer":
+            continue
+        name = str(candidate.get("component_name") or "")
+        if not name:
+            continue
+        sink_keys = set(_sink_keys(candidate))
+        if not sink_keys:
+            continue
+        index.setdefault(name, []).append({
+            "rule_id": str(candidate.get("rule_id") or ""),
+            "sink_keys": sink_keys,
+        })
+    return index
 
 
 def _normalize_one(candidate: dict[str, Any], validation: Mapping[str, Any]) -> dict[str, Any] | None:

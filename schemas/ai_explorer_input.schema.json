@@ -74,6 +74,21 @@
       "title": "Entry Json",
       "type": "string"
     },
+    "known_findings": {
+      "anyOf": [
+        {
+          "maxLength": 10000,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "F5 目标组件引导：该组件规则轨已确认 finding 摘要 JSON（[{rule, severity}]——确定性事实，定向深挖相邻攻击面的线索；无 finding 组件为 None）",
+      "title": "Known Findings"
+    },
     "prior_observations": {
       "anyOf": [
         {

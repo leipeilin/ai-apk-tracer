@@ -121,7 +121,7 @@ def test_observation_round_trip() -> None:
 
 
 def test_observation_done_requires_chain() -> None:
-    """R-3 决断回归锚定：done=true 必须伴随链；done=false + 空提案合法。"""
+    """R-3 决断回归锚定 + F5 干净出口：done=true 须伴随链或"无敏感"结论。"""
     with pytest.raises(ValidationError):
         ExplorerObservation.model_validate(
             _observation(chain_proposals=[], loop={"done": True, "reason": "x"})
@@ -131,6 +131,12 @@ def test_observation_done_requires_chain() -> None:
         _observation(chain_proposals=[], loop={"done": False, "reason": "需更多上下文"})
     )
     assert model.loop.done is False
+    # F5 干净出口（F2 核验 V-2）：done=true + 空链 + reason 含"无敏感"结论
+    # → 合法（确认入口无可达敏感链的合法终止——打破"必须产链或必须新请求"死锁）
+    clean = ExplorerObservation.model_validate(
+        _observation(chain_proposals=[], loop={"done": True, "reason": "确认无敏感操作"})
+    )
+    assert clean.loop.done is True and clean.chain_proposals == []
 
 
 def test_read_request_four_operations() -> None:
@@ -258,3 +264,17 @@ def test_prompt_declares_required_and_enums() -> None:
         "data_disclosure",
     }, f"taxonomy 类别集漂移: {sorted(taxonomies)}"
     assert len(taxonomies) == 9, "九类语义与 taxonomy 类别数不一致"
+    # F5（2026-08-27）：目标组件引导——约束 14（known_findings 定向深挖 +
+    # 探索独立性红线）+ 约束 5 改写（干净出口——旧硬性"必须伴随链"语义解除）
+    assert "目标组件引导" in system, "prompt 缺少'目标组件引导'约束"
+    assert "known_findings" in system, "prompt 缺少 known_findings 输入声明"
+    assert "相邻攻击面" in system, "prompt 缺少定向深挖方向声明"
+    assert "探索独立性红线" in system, "prompt 缺少探索独立性红线声明"
+    assert "不得复读 known_findings" in system, "prompt 缺少复读禁令"
+    assert "新链/新 sink/新数据流路径" in system, "prompt 缺少合法产出判定声明"
+    # 约束 5 改写（干净出口）：旧表述解除 + 新双分支语义
+    assert '**或** loop.reason 含"无敏感"结论' in system, "prompt 缺少干净出口分支"
+    assert "干净出口" in system, "prompt 缺少干净出口语义声明"
+    assert "两者皆无的 done=true 无效" in system, "prompt 缺少 done=true 无效条件收口"
+    # 输入说明同步（known_findings 条目）
+    assert "确定性事实" in system, "prompt 缺少 known_findings 事实性声明"

@@ -14,6 +14,8 @@ import jsonschema
 
 from app.analysis.candidate_funnel import CandidateFunnel
 from app.analysis.explorer_normalization import (
+    build_known_findings_context,
+    build_known_findings_index,
     link_related_candidates,
     normalize_explorer_candidates,
     severity_hint_for_impact,
@@ -386,3 +388,125 @@ def test_link_related_location_fallback_without_method_id() -> None:
     processed = _funnel_processed(explorer, rule)
     counts = link_related_candidates(processed)
     assert counts["pair_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# F5：复读守卫（A5-5——三键口径：组件 + 隐含 rule + sink 键）与
+# known_findings 构造函数（注入上下文 / 守卫索引）
+# ---------------------------------------------------------------------------
+
+
+def _rule_candidate(
+    *,
+    component_name: str = "com.example.SplashActivity",
+    rule_id: str = "ACTIVITY_INTENT_TO_SENSITIVE_SINK",
+    sink_method_id: str | None = "sources/com/example/Store.java#write:80",
+    sink_path: str = "sources/com/example/Store.java",
+    sink_line: int = 40,
+) -> dict:
+    return {
+        "candidate_id": f"rule_{rule_id}",
+        "candidate_source": "rule_engine",
+        "rule_id": rule_id,
+        "severity_hint": "medium",
+        "component_name": component_name,
+        "sinks": [{
+            "kind": "sink_call", "status": "fact",
+            "path": sink_path, "line": sink_line, "method_id": sink_method_id,
+        }],
+    }
+
+
+def test_finding_replay_guard_marks_replay() -> None:
+    """A5-5：sink 键命中已知 finding → replayed 标记 + 降档 + gap + 计数。"""
+    index = build_known_findings_index([_rule_candidate()])
+    normalized, counts = normalize_explorer_candidates(
+        [_explorer_candidate()], known_findings_index=index)
+
+    assert len(normalized) == 1
+    replay = normalized[0]
+    assert replay["replayed_finding"] is True
+    assert replay["replayed_rule_id"] == "ACTIVITY_INTENT_TO_SENSITIVE_SINK"
+    # 降档：confidence high → low（复述非新发现）
+    assert replay["confidence_tier"] == "low"
+    gap_codes = [g["code"] for g in replay["blocking_gaps"]]
+    assert "EXPLORER_FINDING_REPLAY" in gap_codes
+    replay_gap = next(g for g in replay["blocking_gaps"] if g["code"] == "EXPLORER_FINDING_REPLAY")
+    assert replay_gap["critical"] is False
+    assert counts["finding_replays"] == 1
+    # 候选仍产出（独立复现信号保留——L2 复核经 gap 知晓复读属性）
+    assert counts["normalized"] == 1
+
+
+def test_finding_replay_adjacent_sink_not_flagged() -> None:
+    """A5-5：相邻新 sink（method_id 不同）不算复读——复发检测合法产出。"""
+    index = build_known_findings_index([_rule_candidate()])
+    # 探索候选链尾换新 sink（相邻攻击面——F5 引导的目标行为）
+    adjacent = _explorer_candidate(hops=[
+        _hop("sources/com/example/SplashActivity.java#onCreate:20",
+             "sources/com/example/SplashActivity.java#handleIntent:35", 28),
+        _hop("sources/com/example/SplashActivity.java#handleIntent:35",
+             "sources/com/example/Store.java#writeOther:99", 41),
+    ])
+    normalized, counts = normalize_explorer_candidates(
+        [adjacent], known_findings_index=index)
+    assert len(normalized) == 1
+    assert "replayed_finding" not in normalized[0]
+    assert normalized[0]["confidence_tier"] == "high"  # 不降档
+    assert counts["finding_replays"] == 0
+
+
+def test_finding_replay_other_component_not_flagged() -> None:
+    """A5-5：组件不同（sink 同方法名）不算复读——组件键是判定前提。"""
+    index = build_known_findings_index([
+        _rule_candidate(component_name="com.example.OtherActivity"),
+    ])
+    normalized, counts = normalize_explorer_candidates(
+        [_explorer_candidate()], known_findings_index=index)
+    assert len(normalized) == 1
+    assert "replayed_finding" not in normalized[0]
+    assert counts["finding_replays"] == 0
+
+
+def test_finding_replay_index_absent_keeps_behavior() -> None:
+    """A5-5 兼容：known_findings_index=None（旧调用形态）——守卫不激活。"""
+    normalized, counts = normalize_explorer_candidates([_explorer_candidate()])
+    assert len(normalized) == 1
+    assert "replayed_finding" not in normalized[0]
+    assert counts["finding_replays"] == 0
+
+
+def test_build_known_findings_context_and_index() -> None:
+    """A5-2 构造：摘要与守卫索引的提取口径（撞名精确匹配/explorer 源排除）。"""
+    rule_a = _rule_candidate()
+    # 撞名组件（不同包同名——F1 教训：精确字符串匹配不互相污染）
+    rule_other = _rule_candidate(
+        component_name="other.example.SplashActivity", rule_id="OTHER_RULE")
+    # explorer 源候选（防御排除）与无 sink 键候选（index 跳过）
+    explorer_source = {
+        "candidate_id": "expl_x", "candidate_source": "explorer",
+        "rule_id": "EXPLORER_AGENT", "component_name": "com.example.SplashActivity",
+        "sinks": [{"path": "x", "line": 1}],
+    }
+    no_sink = {
+        "candidate_id": "rule_n", "candidate_source": "rule_engine",
+        "rule_id": "R_N", "component_name": "com.example.NoSink", "sinks": [],
+    }
+
+    context = build_known_findings_context([rule_a, rule_other, explorer_source, no_sink])
+    assert context == {
+        "com.example.SplashActivity": [
+            {"rule": "ACTIVITY_INTENT_TO_SENSITIVE_SINK", "severity": "medium"}],
+        "other.example.SplashActivity": [{"rule": "OTHER_RULE", "severity": "medium"}],
+        # 无 sink 候选仍注入（组件有 finding 事实对引导有效——rule/severity
+        # 可用；仅守卫索引跳过：无 sink 键可判复读——注入与守卫分工）
+        "com.example.NoSink": [{"rule": "R_N", "severity": ""}],
+    }
+
+    index = build_known_findings_index([rule_a, rule_other, explorer_source, no_sink])
+    assert set(index) == {"com.example.SplashActivity", "other.example.SplashActivity"}
+    splash = index["com.example.SplashActivity"]
+    assert len(splash) == 1  # explorer 源排除——不混入 EXPLORER_AGENT
+    assert splash[0]["rule_id"] == "ACTIVITY_INTENT_TO_SENSITIVE_SINK"
+    assert ("method", "sources/com/example/Store.java#write:80") in splash[0]["sink_keys"]
+    assert ("location", "sources/com/example/Store.java", 40) in splash[0]["sink_keys"]

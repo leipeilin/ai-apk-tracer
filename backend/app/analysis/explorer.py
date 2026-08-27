@@ -112,6 +112,7 @@ class ExplorerOrchestrator:
         run_dir: Path,
         deep_dive_call: Callable[[DeepDiveInput], Awaitable[dict[str, Any]]] | None = None,
         attack_surface: dict[str, dict[str, Any]] | None = None,
+        known_findings: dict[str, list[dict[str, Any]]] | None = None,
     ) -> None:
         self._ai_call = ai_call
         self._call_tree = call_tree
@@ -121,6 +122,10 @@ class ExplorerOrchestrator:
         # M2 收尾-3：组件名 → attack_surface 条目（load_attack_surface_index
         # 构造）；None = 降级为不注入（attack_surface_json 保持 null）
         self._attack_surface = attack_surface or {}
+        # F5 目标组件引导：组件名 → 规则轨 finding 摘要列表（[{rule,
+        # severity}]——orchestrator 从 rule_prescan 候选构造，精确字符串
+        # 匹配防撞名）；None = 降级为不注入（known_findings 保持 null）
+        self._known_findings = known_findings or {}
         self._ai_requests_used = 0
         self._read_requests_used = 0
         self._deep_dive_requests_used = 0
@@ -201,7 +206,8 @@ class ExplorerOrchestrator:
 
         终止原因：loop_done（模型声明链已形成）/ budget（轮或请求预算耗尽）/
         error（AI 失败——非熔断类）/ short_circuit（熔断类失败——剩余入口跳过）/
-        no_method（入口无方法起点）。
+        no_method（入口无方法起点）/ no_new_requests（F5 附带：请求全重复零
+        增量——重复请求检测干净终止）。
         """
 
         method_id = entry.get("method_id")
@@ -216,6 +222,9 @@ class ExplorerOrchestrator:
         code_context: list[str] = []
         prior_summary: str | None = None
         terminated_by = "budget"
+        # F5 附带（F2 核验 V-2）：已执行请求规范键集合（跨轮累积——请求
+        # 增量执行，重复请求跳过不消耗预算；零增量轮触发 no_new_requests）
+        executed_request_keys: set[tuple] = set()
 
         for round_index in range(1, self._settings.max_rounds_per_entry + 1):
             requests_budget = self._settings.max_requests_per_entry - self._read_requests_used
@@ -234,6 +243,14 @@ class ExplorerOrchestrator:
             if attack_surface_json is not None and len(attack_surface_json) > _MAX_EXPLORE_CONTEXT_CHARS:
                 attack_surface_json = (
                     attack_surface_json[:_MAX_EXPLORE_CONTEXT_CHARS] + "…(truncated)")
+            # F5：该组件规则轨 finding 摘要注入（每轮幂等——与
+            # attack_surface_json/seed_hops 同模式，轮输入自包含可审计）
+            component_findings = self._known_findings.get(
+                str(entry.get("component_name") or ""))
+            known_findings_json = (
+                json.dumps(component_findings, ensure_ascii=False)
+                if component_findings else None
+            )
             model_input = ExplorerInput.model_validate({
                 "round_index": round_index,
                 "rounds_budget": self._settings.max_rounds_per_entry,
@@ -243,6 +260,7 @@ class ExplorerOrchestrator:
                 "seed_hops": seed_hops,
                 "prior_observations": prior_summary,
                 "code_context": joined_context,
+                "known_findings": known_findings_json,
             })
             result = await self._ai_call(model_input)
             self._ai_requests_used += 1
@@ -281,7 +299,8 @@ class ExplorerOrchestrator:
                 return self._to_candidates(entry, proposals, prompt_version, model), "error", rounds
 
             proposals.extend(observation.chain_proposals and [p.model_dump(mode="json") for p in observation.chain_proposals] or [])
-            executed = self._execute_read_requests(observation, max(requests_budget, 0))
+            executed = self._execute_read_requests(
+                observation, max(requests_budget, 0), executed_request_keys)
             # 评审 R-4（T2.8）：explorer.allow_external_code=False 时不外发读回
             # 内容（合规门禁；读码仍执行留审计轨迹，模型轮输入可见预算扣减）
             if self._settings.allow_external_code:
@@ -295,9 +314,16 @@ class ExplorerOrchestrator:
                 "status": "completed",
                 "observation": observation.model_dump(mode="json"),
                 "requests_executed": executed["records"],
+                "requests_deduplicated": executed["deduplicated"],
             })
             if observation.loop.done:
                 terminated_by = "loop_done"
+                break
+            # F5 附带：本轮有请求但去重后零增量（全重复）——无新信息，
+            # 继续轮循环只会空转（v8 探针实证 4 轮重复相同 read_requests
+            # 零增益）；干净终止（干净出口结论由模型 loop.reason 承载）
+            if observation.read_requests and executed["new_available"] == 0:
+                terminated_by = "no_new_requests"
                 break
 
         return (
@@ -643,20 +669,39 @@ class ExplorerOrchestrator:
     # read_requests 执行（本地检索——模型不自循环）
     # ------------------------------------------------------------------
 
-    def _execute_read_requests(self, observation: ExplorerObservation, requests_budget: int) -> dict[str, Any]:
-        """执行本轮读码请求（限额 = min(剩余预算, 8)；未命中统一 not_found 结构）"""
+    def _execute_read_requests(
+        self, observation: ExplorerObservation, requests_budget: int,
+        executed_keys: set[tuple],
+    ) -> dict[str, Any]:
+        """执行本轮读码请求（增量去重 + 限额 = min(剩余预算, 8)）。
+
+        F5 附带（F2 核验 V-2）：请求增量执行——与历史已执行键完全相同的请求
+        跳过（不消耗预算/上下文，部分重叠轮只跑增量）；未命中统一 not_found
+        结构。返回 new_available = 去重后可执行的增量请求数（供驱动层
+        no_new_requests 终止判定——预算截断不计入去重）。
+        """
 
         records: list[dict[str, Any]] = []
         texts: list[str] = []
-        for request in observation.read_requests[: max(min(requests_budget, len(observation.read_requests)), 0)]:
+        deduplicated = 0
+        new_available = 0
+        for request in observation.read_requests:
+            key = (request.operation, request.target, request.path, request.line)
+            if key in executed_keys:
+                deduplicated += 1
+                continue
+            new_available += 1
+            if len(records) >= max(min(requests_budget, 8), 0):
+                continue  # 预算截断（new_available 已计入——区分去重与预算）
             payload = self._dispatch_read(request.operation, request.target, request.path, request.line)
             self._read_requests_used += 1
+            executed_keys.add(key)
             records.append({"operation": request.operation, "target": request.target})
             serialized = json.dumps(payload, ensure_ascii=False)
             if len(serialized) > _MAX_CONTEXT_BYTES_PER_REQUEST:
                 serialized = serialized[:_MAX_CONTEXT_BYTES_PER_REQUEST] + '…", "truncated": true}'
             texts.append(serialized)
-        return {"records": records, "texts": texts}
+        return {"records": records, "texts": texts, "deduplicated": deduplicated, "new_available": new_available}
 
     def _dispatch_read(self, operation: str, target: str, path: str | None, line: int | None) -> dict[str, Any]:
         return dispatch_read(self._call_tree, operation, target, path, line)
