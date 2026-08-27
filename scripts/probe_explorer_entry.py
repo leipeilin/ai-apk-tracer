@@ -148,6 +148,34 @@ def _select_entries(entries: list[dict[str, Any]], args: argparse.Namespace) -> 
     return selected[: args.max_entries]
 
 
+def _extract_error_detail(result: dict[str, Any]) -> dict[str, Any] | None:
+    """T1 排查（2026-08-28）：失败调用的 error 详情 + 空响应诊断字段。
+
+    status == completed 时返回 None（成功轮无详情）；失败轮记录
+    classification/http_status/message + metadata 诊断（empty_initial_content
+    / finish_reason / reasoning_tokens——DeepSeek 思维模式推理 token 挤占
+    max_tokens 致 content 空的关键判据）。
+    """
+
+    if not isinstance(result, dict) or result.get("status") == "completed":
+        return None
+    error = result.get("error") or {}
+    metadata = result.get("metadata") or {}
+    return {
+        "classification": error.get("classification"),
+        "http_status": error.get("http_status"),
+        "message": str(error.get("message") or "")[:200],
+        "empty_initial_content": metadata.get("empty_initial_content"),
+        "finish_reason": metadata.get("finish_reason"),
+        "reasoning_tokens": metadata.get("reasoning_tokens"),
+        "completion_tokens": metadata.get("completion_tokens"),
+        "protocol_relaxed": metadata.get("protocol_relaxed"),
+        # 原始违规字段（ai.py:747 initial_validation_errors——repair 前的
+        # ValidationError 消息，定位模型输出违反哪条协议）
+        "initial_validation_errors": (metadata.get("initial_validation_errors") or [])[:8],
+    }
+
+
 def _classify_d3_violation(context_is_none: bool, status: Any, chain_count: int) -> bool:
     """D-3 断言（纯函数可测）：无 code_context 且模型完成但产链即违规。"""
 
@@ -256,6 +284,11 @@ async def _run_probe(args: argparse.Namespace) -> int:
                 "first_hops_total": first_hops_total,
                 "d3_violation": _classify_d3_violation(
                     context_is_none, result.get("status"), chain_count),
+                # T1 排查（2026-08-28）：失败轮的 error 详情 + 空响应诊断
+                # metadata（DeepSeek 思维模式推理 token 挤占 max_tokens 时
+                # content 为空——empty_initial_content/finish_reason/
+                # reasoning_tokens 为关键判据）
+                "error_detail": _extract_error_detail(result),
             })
             return result
 

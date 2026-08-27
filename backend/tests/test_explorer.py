@@ -118,7 +118,7 @@ class FakeAnalyzer:
         }
 
     @staticmethod
-    def _observation(loop_done: bool, proposals: list, requests: list) -> dict:
+    def _observation(loop_done: bool, proposals: list, requests: list, reason: str = "测试") -> dict:
         return {
             "read_requests": [
                 {"operation": item["operation"], "target": item["target"], "reason": "取证"}
@@ -129,7 +129,7 @@ class FakeAnalyzer:
                 "component": "com.example.A", "kind": "activity",
                 "exported": True, "summary": "入口 Activity 分发处理",
             },
-            "loop": {"done": loop_done, "reason": "测试"},
+            "loop": {"done": loop_done, "reason": reason},
         }
 
 
@@ -1822,3 +1822,174 @@ public class D extends android.app.Activity {
     summary = stage["summary"]
     assert summary["finding_guided_entries"] == 1
     assert summary["normalization_counts"]["finding_replays"] == 1
+
+
+# ---------------------------------------------------------------------------
+# P-3：探索输出协议违规修复（L1 reason 放宽 / L2 关键词集 / L3 轮级重试）
+# ---------------------------------------------------------------------------
+
+
+def test_reason_text_field_widened() -> None:
+    """P3-1：reason 放宽 256→2000（Explorer 与 Verify 两协议同步）。"""
+    from app.analysis.ai_models import ExplorerLoopState, VerifyLoopState
+    # 1500 字符通过（旧 ShortText 256 拒绝）
+    long_reason = "无敏感操作：" + "探" * 1500
+    assert len(ExplorerLoopState.model_validate(
+        {"done": True, "reason": long_reason}).reason) > 1500
+    assert len(VerifyLoopState.model_validate(
+        {"done": True, "reason": long_reason}).reason) > 1500
+    # 2001 仍拒（上限边界）
+    import pytest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ExplorerLoopState.model_validate({"done": True, "reason": "a" * 2001})
+
+
+def test_clean_exit_keyword_variants() -> None:
+    """P3-2：干净出口关键词集——中英变体通过；偷懒 reason 仍拒。"""
+    from app.analysis.ai_models import ExplorerObservation
+
+    def _obs(reason: str) -> dict:
+        return {
+            "read_requests": [], "chain_proposals": [],
+            "component_summary": {
+                "component": "com.example.A", "kind": "activity",
+                "exported": True, "summary": "入口 Activity 分发处理"},
+            "loop": {"done": True, "reason": reason},
+        }
+
+    # 中文变体
+    for reason in ("确认无敏感操作", "未发现敏感行为", "无危险操作链", "无可达敏感 sink"):
+        ExplorerObservation.model_validate(_obs(reason))
+    # 英文变体（小写化匹配）
+    for reason in ("No sensitive operations found", "no security issue in this entry",
+                   "None found after full exploration"):
+        ExplorerObservation.model_validate(_obs(reason))
+    # 偷懒 reason 仍拒（不含敏感缺失语义标记）
+    import pytest
+    from pydantic import ValidationError as VE
+    for reason in ("需要更多上下文", "more context needed", "任务完成"):
+        with pytest.raises(VE):
+            ExplorerObservation.model_validate(_obs(reason))
+
+
+def test_schema_invalid_retry_recovers(tmp_path: Path) -> None:
+    """P3-3：schema_invalid 轮级重试——首败后成，入口不弃 + schema_retry 标记 + 叠加计费。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    # 首轮 schema_invalid，重试后 completed（done+空链+干净出口 reason）
+    call_sequence = [
+        {"fail": "failed", "schema_invalid": True},
+        {"done": True, "proposals": [], "reason": "确认无敏感操作"},
+    ]
+    fake = _SchemaRetryFake(call_sequence)
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(max_rounds_per_entry=2), tmp_path)
+    candidates = asyncio_run(orchestrator.explore_all([entry]))
+    assert candidates == []
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    record = observations["entries"][0]
+    assert record["terminated_by"] == "loop_done"  # 重试成功——入口正常终止
+    assert record["rounds"][0]["schema_retry"] is True  # 重试可审计
+    # 叠加计费：首次 + 重试 = 2（评审 O-2）
+    assert orchestrator.ai_requests_used == 2
+
+
+def test_schema_invalid_retry_exhausted_keeps_error(tmp_path: Path) -> None:
+    """P3-4：重试耗尽——原 error 语义不变 + 无熔断（其他入口不受影响）。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    other = dict(entry)
+    other["entry_id"] = "act_com_example_A_other"
+    fake = _SchemaRetryFake([
+        {"fail": "failed", "schema_invalid": True},
+        {"fail": "failed", "schema_invalid": True},  # 重试也失败
+    ])
+    # 第二入口正常完成（证明无熔断）
+    fake2_calls = {"done": True, "proposals": [_proposal()]}
+    orchestrator = ExplorerOrchestrator(
+        _SequenceConcat(fake, fake2_calls), call_tree,
+        ExplorerSettings(max_rounds_per_entry=1, entry_concurrency=1), tmp_path)
+    asyncio_run(orchestrator.explore_all([entry, other]))
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    by_id = {e["entry_id"]: e for e in observations["entries"]}
+    assert by_id[entry["entry_id"]]["terminated_by"] == "error"  # 重试耗尽原语义
+    assert by_id[entry["entry_id"]]["rounds"][0]["schema_retry"] is True
+    # 第二入口不受影响（无熔断短路）
+    assert by_id["act_com_example_A_other"]["terminated_by"] == "loop_done"
+
+
+def test_transient_failure_no_round_retry(tmp_path: Path) -> None:
+    """P3-5：非 schema_invalid 失败不进轮级重试（transient 走 transport 层）。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    # transient 失败（无 classification=schema_invalid）——驱动层不重试
+    fake = _SchemaRetryFake([
+        {"fail": "failed", "schema_invalid": False},
+    ])
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(max_rounds_per_entry=2), tmp_path)
+    asyncio_run(orchestrator.explore_all([entry]))
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    record = observations["entries"][0]
+    assert record["terminated_by"] == "error"
+    assert "schema_retry" not in record["rounds"][0]  # 未发生轮级重试
+    assert orchestrator.ai_requests_used == 1  # 单次调用（无重试叠加）
+
+
+class _SchemaRetryFake:
+    """P-3 专用：按序返回指定形态的调用结果（schema_invalid/transient/成功）。"""
+
+    def __init__(self, sequence: list[dict]):
+        self._sequence = list(sequence)
+        self._extra: list[dict] = []
+
+    def append(self, spec: dict) -> None:
+        self._extra.append(spec)
+
+    async def __call__(self, model_input):
+        if self._extra:
+            spec = self._extra.pop(0)
+        elif self._sequence:
+            spec = self._sequence.pop(0)
+        else:
+            spec = {"done": True, "proposals": [_proposal()]}
+        if spec.get("fail"):
+            result = {"status": "failed", "metadata": {},
+                      "circuit_breaking": spec.get("circuit", False)}
+            if spec.get("schema_invalid"):
+                result["classification"] = "schema_invalid"
+            else:
+                result["classification"] = "transient_failure"
+            return result
+        return {
+            "status": "completed",
+            "analysis": FakeAnalyzer._observation(
+                loop_done=spec["done"],
+                proposals=spec.get("proposals", []),
+                requests=spec.get("requests", []),
+                reason=spec.get("reason", "测试"),
+            ),
+            "metadata": {"prompt_version": "1.0.0", "model": "test"},
+        }
+
+
+class _SequenceConcat:
+    """两个 fake 串联（首入口用 A 耗尽后用 B 的附加序列）。"""
+
+    def __init__(self, primary: _SchemaRetryFake, then_spec: dict):
+        self._primary = primary
+        self._then_spec = then_spec
+
+    async def __call__(self, model_input):
+        if self._primary._sequence or self._primary._extra:
+            return await self._primary(model_input)
+        # 首入口序列耗尽——返回 then_spec
+        spec = self._then_spec
+        return {
+            "status": "completed",
+            "analysis": FakeAnalyzer._observation(
+                loop_done=spec["done"], proposals=spec.get("proposals", []),
+                requests=[]),
+            "metadata": {"prompt_version": "1.0.0", "model": "test"},
+        }

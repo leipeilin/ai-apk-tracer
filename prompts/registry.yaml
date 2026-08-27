@@ -369,7 +369,7 @@ prompts:
     user: 85ec035cb2ea03c955c124e388af360be38d32e884b596edbc60f65b6c676f66
   schema_sha256:
     input: d0d3915abe9a6eebe06299bf1a265e02bb8f65896dae9d40a6b32eece9d3ed00
-    output: d26697ecaf7c517b90a0539a45e6ecdfb75d08bbf05c730acba860b5f2c71d38
+    output: bf1b70cc9f3cd297454ad1e531443fc99da14a27cfc41229c6377ddef961af59
 - id: explorer-deep-dive
   version: 1.0.0
   system_file: explorer-deep-dive/1.0.0/system.md
@@ -401,7 +401,7 @@ prompts:
     user: 55dd1888bb824946405b427ff2dbad3106d83191bd8b421af1262ec185f28c29
   schema_sha256:
     input: 21608b57507d5a42615e817f24638c5d24910f5f3c09db029a3221d715ee8b79
-    output: 323ac68ccf1ecad7339f56dc57dd5bffa2a1deae4feb7d5cf656b3d800e6a5fc
+    output: 8b1f99d3d96d0257d8da0307b40c41bb02ae509afbc888ca3eb1a0de9e4f685e
 - id: report
   version: 1.0.0
   system_file: report/1.0.0/system.md

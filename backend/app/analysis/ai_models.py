@@ -20,6 +20,10 @@ from pydantic import (
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
 LongText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10_000)]
+# P-3 L1（T1 error 根因①）：轮末状态说明专用上限——原 ShortText(256) 对第 3/4 轮
+# 复杂探索总结不足（T1 实证 string_too_long → schema_invalid → 入口弃掉）；
+# 2000 = 审计说明合理上限（非证据文本——10K LongText 过宽）
+ReasonText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)]
 # P-1 验证值：探索输入的上下文字段专用上限（50K——code_context 跨轮累积
 # 40K + 截断标注余量；与全局 LongText 10K 区分，仅影响 explorer 输入两字段，
 # 全量数据后随 T1 回归定参恢复）
@@ -332,11 +336,27 @@ class ComponentSummary(StrictAIModel):
     summary: LongText = Field(description="组件/代码功能描述")
 
 
+# P-3 L2（T1 error 根因②）：干净出口关键词集——中英变体（flash 模型常写英文
+# 表述被"无敏感"单串误拒——T1 实证 50% 入口弃掉）。集合克制：偷懒 reason
+# （"需更多上下文"/"more context"）不含敏感语义标记，仍被拒绝
+_CLEAN_EXIT_MARKERS: tuple[str, ...] = (
+    "无敏感", "无危险", "无安全风险", "未发现敏感", "无可达敏感",
+    "no sensitive", "not sensitive", "no security", "none found",
+)
+
+
+def _is_clean_exit(reason: str | None) -> bool:
+    """done=true + 空链的干净出口判定（reason 含任一敏感缺失语义标记）。"""
+
+    lowered = (reason or "").lower()
+    return any(marker in lowered for marker in _CLEAN_EXIT_MARKERS)
+
+
 class ExplorerLoopState(StrictAIModel):
     """探索循环轮末状态（评审 §4.3：终止由代码判定，模型只声明意图）。"""
 
     done: bool = Field(description="是否已形成完整 sink 链、可结束循环")
-    reason: ShortText = Field(description="结束或继续的原因说明（必填，便于审计）")
+    reason: ReasonText = Field(description="结束或继续的原因说明（必填，便于审计）")
 
 
 class ExplorerObservation(StrictAIModel):
@@ -353,11 +373,14 @@ class ExplorerObservation(StrictAIModel):
     def _done_requires_chain(self) -> ExplorerObservation:
         # F5 干净出口（F2 核验 V-2 死锁破除）：done=true + 空链合法当且仅当
         # loop.reason 含"无敏感"结论（确认入口无可达敏感链的合法终止——
-        # v8 探针实证"必须产链或必须新请求"死锁）；无结论关键词仍拒绝
-        if self.loop.done and not self.chain_proposals and "无敏感" not in (self.loop.reason or ""):
+        # v8 探针实证"必须产链或必须新请求"死锁）；无结论关键词仍拒绝。
+        # P-3 L2（T1 error 根因②）：单串"无敏感"过窄——flash 模型常写英文/
+        # 变体被误拒（T1 实证 value_error → 50% 入口弃掉）——扩为中英变体集；
+        # 偷懒 reason（"需更多上下文"等）不含敏感语义标记仍拒（预算三层兜底）
+        if self.loop.done and not self.chain_proposals and not _is_clean_exit(self.loop.reason):
             raise ValueError(
                 "loop.done=True 必须伴随至少一条 chain_proposal，"
-                "或 loop.reason 含'无敏感'结论（干净出口——评审 R-3/F5）"
+                "或 loop.reason 含'无敏感'结论（干净出口——评审 R-3/F5/P-3 L2）"
             )
         return self
 
@@ -580,7 +603,7 @@ class VerifyLoopState(StrictAIModel):
     """核验循环轮末状态（独立于 ExplorerLoopState：done 语义=全部命题已判定；T0.9 评审 R-6）。"""
 
     done: bool = Field(description="是否全部命题已判定、可结束核验循环（终止由代码判定）")
-    reason: ShortText = Field(description="结束或继续的原因说明（必填，便于审计）")
+    reason: ReasonText = Field(description="结束或继续的原因说明（必填，便于审计）")
 
 
 class VerifyClaimVerdict(StrictAIModel):

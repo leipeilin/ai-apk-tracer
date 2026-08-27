@@ -238,7 +238,7 @@
         },
         "reason": {
           "description": "结束或继续的原因说明（必填，便于审计）",
-          "maxLength": 256,
+          "maxLength": 2000,
           "minLength": 1,
           "title": "Reason",
           "type": "string"

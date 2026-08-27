@@ -319,6 +319,18 @@ class ExplorerOrchestrator:
             })
             result = await self._ai_call(model_input)
             self._ai_requests_used += 1
+            # P-3 L3（T1 error 根因③）：schema_invalid 是单轮输出问题（ai.py
+            # 定位"单入口问题不短路"——驱动层兑现）——重试本轮一次而非弃整个
+            # 入口（T1 实证 100/198 入口带 2-3 轮读码投入被弃、零候选）。
+            # 仅 schema_invalid 重试（transient 走 transport 层既有重试——不叠加）
+            schema_retried = False
+            if (
+                result.get("status") != "completed"
+                and result.get("classification") == "schema_invalid"
+            ):
+                result = await self._ai_call(model_input)
+                self._ai_requests_used += 1  # 叠加自增（评审 O-2：首次+重试共 2）
+                schema_retried = True
             status = result.get("status")
             metadata = result.get("metadata") or {}
             prompt_version = f"explorer/{metadata.get('prompt_version') or '1.0.0'}"
@@ -339,6 +351,8 @@ class ExplorerOrchestrator:
                     "status": status,
                     "observation": None,
                     "requests_executed": [],
+                    # P-3 L3：重试耗尽仍失败（重试发生可审计）
+                    **({"schema_retry": True} if schema_retried else {}),
                 })
                 return self._to_candidates(entry, proposals, prompt_version, model), terminated_by, rounds
 
@@ -372,6 +386,8 @@ class ExplorerOrchestrator:
                 "observation": observation.model_dump(mode="json"),
                 "requests_executed": executed["records"],
                 "requests_deduplicated": executed["deduplicated"],
+                # P-3 L3：本轮曾因 schema_invalid 重试（成功——可审计）
+                **({"schema_retry": True} if schema_retried else {}),
             })
             if observation.loop.done:
                 # 核验 O-1：done 与空转变体并存时 terminated_by 仍记 loop_done
