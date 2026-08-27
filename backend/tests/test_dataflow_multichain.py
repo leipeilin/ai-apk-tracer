@@ -1906,3 +1906,142 @@ class SenderActivity {
         _activity_payload(tmp_path, head % '"com.example.ORDERED_PERM"'),
     )
     assert restricted["candidates"] == []
+
+
+class TestManualSinkFallback:
+    """P4（E7 迁移）：per-APK 自定义 sink 经 versions.yaml manual 条目回退检出。
+
+    原 dataflow 硬编码的 sport_family 与伪平台类 write 分支迁出 shared 层后，
+    检出能力经 _manual_sink_table 回退保持等价（v04 真机验证成果不回退）。
+    """
+
+    def test_sport_methods_via_manual_fallback(self) -> None:
+        operation = classify_operation_taxonomy({
+            "method_name": "startSport",
+            "receiver_type": "com.xiaomi.fitness.sport_manager_export.SportApiStub",
+            "receiver_text": "sport",
+            "method_descriptor": "(?)->?",
+        })
+        assert operation["is_effect"] is True
+        assert operation["taxonomy"] == "location_sensor_collection"
+        assert operation["kind"] == "custom_sink"
+        # 带 verified_arity 的迁移条目走确定性路径（arity 1 ∈ {0,1,2,3}）
+        assert operation["verified"] is True
+        assert "gap" not in operation
+
+    def test_sport_descriptor_missing_reports_signature_gap(self) -> None:
+        # descriptor 缺失 → OPERATION_SIGNATURE_GAP（与内置 family 三态语义一致）
+        operation = classify_operation_taxonomy({
+            "method_name": "startSport",
+            "receiver_type": "SportManager",
+            "receiver_text": "sport",
+        })
+        assert operation["is_effect"] is True
+        assert operation["verified"] is False
+        assert operation["gap"]["code"] == "OPERATION_SIGNATURE_GAP"
+        assert operation["gap"]["allowed_arities"] == [0, 1, 2, 3]
+
+    def test_sport_wrong_arity_rejected(self) -> None:
+        # arity 越界（5 ∉ {0,1,2,3}）→ not_sensitive
+        operation = classify_operation_taxonomy({
+            "method_name": "startSport",
+            "receiver_type": "SportManager",
+            "receiver_text": "sport",
+            "method_descriptor": "(?,?,?,?,?)->?",
+        })
+        assert operation["kind"] == "not_sensitive"
+
+    def test_sport_pause_resume_finish_via_manual_fallback(self) -> None:
+        for method in ("pauseSport", "resumeSport", "finishSport"):
+            operation = classify_operation_taxonomy({
+                "method_name": method,
+                "receiver_type": "SportManager",
+                "receiver_text": "sport",
+                "method_descriptor": "(?)->?",
+            })
+            assert operation["taxonomy"] == "connection_session_control", method
+            assert operation["kind"] == "custom_sink"
+
+    def test_pseudo_platform_write_via_manual_fallback(self) -> None:
+        operation = classify_operation_taxonomy({
+            "method_name": "write",
+            "receiver_type": "BluetoothOutputStream",
+            "receiver_text": "out",
+            "method_descriptor": "(?)->?",
+        })
+        assert operation["is_effect"] is True
+        assert operation["taxonomy"] == "device_protocol_output"
+        assert operation["kind"] == "custom_sink"
+
+    def test_shop_manual_entry_via_rules_track_fallback(self) -> None:
+        # 既有 4 条 shop manual 条目（76ac2c4）同样经规则轨回退检出
+        operation = classify_operation_taxonomy({
+            "method_name": "getPrefEncryptedUserId",
+            "receiver_type": "com.xiaomi.shop2.account.lib.SubProcessLoginManager",
+            "receiver_text": "login",
+            "method_descriptor": "(?)->?",
+        })
+        assert operation["is_effect"] is True
+        assert operation["taxonomy"] == "data_disclosure"
+        assert operation["kind"] == "custom_sink"
+
+    def test_manual_fallback_requires_receiver_match(self) -> None:
+        # receiver 不匹配 manual 条目证据时不命中（防止过宽匹配）
+        operation = classify_operation_taxonomy({
+            "method_name": "startSport",
+            "receiver_type": "com.example.Unrelated",
+            "receiver_text": "x",
+            "method_descriptor": "(?)->?",
+        })
+        assert operation["kind"] == "not_sensitive"
+
+    def test_manual_table_degrades_gracefully_when_yaml_missing(self, monkeypatch) -> None:
+        import shared.dataflow as dataflow_module
+
+        monkeypatch.setattr(dataflow_module, "_MANUAL_SINK_TABLE_CACHE", None)
+        monkeypatch.setattr(
+            "pathlib.Path.read_text", lambda self, *a, **k: (_ for _ in ()).throw(FileNotFoundError())
+        )
+        assert dataflow_module._manual_sink_table() == []
+        operation = classify_operation_taxonomy({
+            "method_name": "startSport",
+            "receiver_type": "SportManager",
+            "receiver_text": "sport",
+            "method_descriptor": "(?)->?",
+        })
+        assert operation["kind"] == "not_sensitive"
+
+    def test_manual_fallback_rejects_cross_package_spoofing(self) -> None:
+        # P4 核验 R-4①：跨包含名类（spoofing 形态）在 manual 回退路径被排除——
+        # same_package_leaf 要求 receiver FQCN 与 containing_class 同包
+        operation = classify_operation_taxonomy({
+            "method_name": "startSport",
+            "receiver_type": "com.attacker.SportManager",
+            "receiver_text": "sport",
+            "method_descriptor": "(?)->?",
+        }, containing_class="com.example.Victim")
+        assert operation["kind"] == "not_sensitive"
+
+    def test_manual_fallback_prefix_widening_within_vendor_domain(self) -> None:
+        # P4 核验 R-4②：前缀放宽到 com.xiaomi.fitness.——域内非 sport_manager_export
+        # 子包（如 sport_xms）的 receiver 经前缀命中（entry 形态召回）
+        operation = classify_operation_taxonomy({
+            "method_name": "finishSport",
+            "receiver_type": "com.xiaomi.fitness.sport_xms.SportXmsApiImpl",
+            "receiver_text": "impl",
+            "method_descriptor": "(?,?,?)->?",
+        })
+        assert operation["is_effect"] is True
+        assert operation["taxonomy"] == "connection_session_control"
+        assert operation["verified"] is True
+
+    def test_manual_table_cache_reused_across_calls(self, monkeypatch) -> None:
+        # P4 核验 R-4③：二次调用命中进程级缓存（首次加载后 yaml 不可读仍返回缓存表）
+        import shared.dataflow as dataflow_module
+
+        first = dataflow_module._manual_sink_table()
+        assert first, "manual 表应非空（versions.yaml 在位）"
+        monkeypatch.setattr(
+            "pathlib.Path.read_text", lambda self, *a, **k: (_ for _ in ()).throw(FileNotFoundError())
+        )
+        assert dataflow_module._manual_sink_table() is first

@@ -33,6 +33,8 @@ SLOT_PUT_METHODS = {
 SLOT_MERGE_METHODS = {"putExtras", "putAll", "fillIn"}
 FRAGMENT_REFLECTION_METHODS = {"forName", "instantiate", "newInstance", "getDeclaredConstructor"}
 VALIDATOR_METHODS = {
+    # E7 残留（P4 核验 R-1，2026-08-27）：shop APK 的 URL 校验 wrapper 名（index_reader.py
+    # FLOW_INTRINSIC_METHODS 的副本，_is_validator 消费）——特调依赖，迁移落点待架构演进。
     "isallowedhttps", "isvalidurl", "validateurl", "allowedscheme", "isallowedscheme",
     "ishttpsurl", "istrustedurl",
 }
@@ -2745,6 +2747,56 @@ def _call_has_confirmed_gap_exemption(
     return False
 
 
+_MANUAL_SINK_TABLE_CACHE: list[tuple[str, str, frozenset[str], tuple[str, ...], frozenset[str], frozenset[int]]] | None = None
+
+
+def _manual_sink_table() -> list[tuple[str, str, frozenset[str], tuple[str, ...], frozenset[str], frozenset[int]]]:
+    """加载 rules/sink_taxonomy/versions.yaml 的 manual 条目（per-APK 自定义 sink）。
+
+    返回 ``(method, taxonomy, leaves, prefixes, exacts, verified_arities)`` 元组列表；
+    ``verified_arities`` 来自条目的可选 ``verified_arity`` 字段（如 E7 迁移的 v04
+    真机验证条目）——非空时回退路径做与内置 family 等价的 arity 三态校验
+    （verified / OPERATION_SIGNATURE_GAP / not_sensitive），保持确定性闭链能力。
+    进程级缓存；yaml 缺失/解析失败时优雅降级为空表。
+    """
+
+    global _MANUAL_SINK_TABLE_CACHE
+    if _MANUAL_SINK_TABLE_CACHE is not None:
+        return _MANUAL_SINK_TABLE_CACHE
+    entries: list[tuple[str, str, frozenset[str], tuple[str, ...], frozenset[str], frozenset[int]]] = []
+    try:
+        from pathlib import Path
+
+        import yaml
+
+        path = Path(__file__).resolve().parents[1] / "sink_taxonomy" / "versions.yaml"
+        document = yaml.safe_load(path.read_text("utf-8")) or {}
+        for entry in document.get("entries") or []:
+            if not isinstance(entry, dict) or entry.get("source") != "manual":
+                continue
+            method = str(entry.get("method") or "")
+            taxonomy = str(entry.get("taxonomy") or "")
+            if not method or not taxonomy:
+                continue
+            raw_arities = entry.get("verified_arity") or []
+            try:
+                arities = frozenset(int(value) for value in raw_arities)
+            except (TypeError, ValueError):
+                arities = frozenset()
+            entries.append((
+                method,
+                taxonomy,
+                frozenset(str(value) for value in (entry.get("receiver_leaves") or [])),
+                tuple(str(value) for value in (entry.get("receiver_prefixes") or [])),
+                frozenset(str(value) for value in (entry.get("receiver_exact") or [])),
+                arities,
+            ))
+    except Exception:
+        entries = []
+    _MANUAL_SINK_TABLE_CACHE = entries
+    return entries
+
+
 def classify_operation_taxonomy(
     call: dict[str, Any],
     containing_method_name: str = "",
@@ -2926,6 +2978,11 @@ def classify_operation_taxonomy(
         prefixes=("android.hardware.",),
         leaves=sensor_leaves,
     ) or same_package_leaf(sensor_leaves):
+        # E7 迁移残留（P4 核验 R-2 修订，2026-08-27）：startGymSensor 等自研方法与平台
+        # registerListener 共用本 family 分支，且 versions.yaml 回退已实现 same_package_leaf
+        # 语义（可表达）——保留的真实原因是拆分收益低（需为 5 个方法单独建条目并
+        # 依赖 containing_class 传导），完整迁移待架构演进；registerListener 为平台 API
+        # 正常保留。
         result = checked({
             "registerListener": frozenset({3, 4}), "startGymSensor": frozenset({0, 1, 2}),
             "startStepSensor": frozenset({0, 1, 2}), "startAccSensor": frozenset({0, 1, 2}),
@@ -2934,27 +2991,10 @@ def classify_operation_taxonomy(
         if result:
             return result
 
-    sport_leaves = frozenset({
-        "SportManager", "WorkoutManager", "FitnessManager", "SportService",
-        "SportApiStub", "WorkoutApiStub", "FitnessApiStub",
-        # v2026-08-16（S1/S3）：小米运动导出接口（SportXms 等）的运动控制/数据面。
-        "ISportRemoteState", "ISportRemoteData", "SportRemoteState", "SportRemoteData",
-    })
-    sport_family = (
-        family(leaves=sport_leaves)
-        or same_package_leaf(sport_leaves)
-        or family(prefixes=("com.xiaomi.fitness.sport_manager_export.",))
-    )
-    if sport_family:
-        result = checked({"startSport": frozenset({0, 1, 2, 3})}, "location_sensor_collection", "sport_state")
-        if result:
-            return result
-        result = checked({
-            "pauseSport": frozenset({0, 1, 2}), "resumeSport": frozenset({0, 1, 2}),
-            "finishSport": frozenset({0, 1, 2, 3}),
-        }, "connection_session_control", "sport_state")
-        if result:
-            return result
+    # E7 迁移（P4，2026-08-27）：原 sport_family 分支（sport_leaves 硬编码 +
+    # com.xiaomi.fitness.sport_manager_export. 前缀）整体迁出 shared 层，数据落
+    # rules/sink_taxonomy/versions.yaml 的 manual 条目（单一事实源，explorer 轨
+    # 与规则轨共享），经本函数尾部的 _manual_sink_table 回退检出。
 
     connection_family = family(
         exact=frozenset({
@@ -3007,12 +3047,9 @@ def classify_operation_taxonomy(
         return _signature_checked_effect(
             call, frozenset({1}), "device_protocol_output", "device_protocol_output"
         )
-    if family(
-        leaves=frozenset({"BluetoothOutputStream", "UsbOutputStream", "NfcOutputStream", "ProtocolWriter"})
-    ) and method_name == "write":
-        return _signature_checked_effect(
-            call, frozenset({1, 3}), "device_protocol_output", "device_protocol_output"
-        )
+    # E7 迁移（P4，2026-08-27）：原伪平台类 write 分支（BluetoothOutputStream 等为特定
+    # APK 自定义类、SDK 中不存在）迁出 shared 层，落 versions.yaml manual 条目，
+    # 经本函数尾部的 _manual_sink_table 回退检出。
 
     if family(
         exact=frozenset({
@@ -3173,6 +3210,64 @@ def classify_operation_taxonomy(
         if _operation_descriptor_arity(str(call.get("method_descriptor") or "")) == 2:
             return {"is_effect": False, "taxonomy": "unknown_effect", "kind": "container_mutation", "verified": True}
         return {"is_effect": False, "taxonomy": "unknown_effect", "kind": "not_sensitive", "verified": False}
+
+    # E7 迁移（P4，2026-08-27）：per-APK 自定义 sink 回退——内置平台 family 不命中时
+    # 查 versions.yaml 的 manual 条目（method × receiver 匹配），与 explorer 轨
+    # custom_sink_proposal 共用同一事实源。带 verified_arity 的条目（v04 真机验证
+    # 迁移）做与内置 family 等价的 arity 三态校验（确定性闭链能力保持）；无
+    # verified_arity 的条目产出 custom_sink 提案形态（verified=False + critical=False
+    # 的 gap，供下游知悉非确定性分类）。
+    for (
+        manual_method, manual_taxonomy, manual_leaves, manual_prefixes, manual_exacts, manual_arities,
+    ) in _manual_sink_table():
+        if manual_method != method_name:
+            continue
+        # same_package_leaf 与内置 sport/sensor 分支同款语义：索引把同包字段类型解析为
+        # FQCN（如 com.example.SportManager），裸名 leaves 无法命中——同包 leaf 放行，
+        # 跨包含名类（spoofing 形态）仍被排除。
+        if not (
+            _receiver_family_matches(
+                receiver_type, exact=manual_exacts, prefixes=manual_prefixes, leaves=manual_leaves
+            )
+            or same_package_leaf(manual_leaves)
+        ):
+            continue
+        if manual_arities:
+            descriptor = str(call.get("method_descriptor") or "")
+            arity = _operation_descriptor_arity(descriptor)
+            if arity is not None and arity not in manual_arities:
+                return {
+                    "is_effect": False, "taxonomy": "unknown_effect",
+                    "kind": "not_sensitive", "verified": False,
+                }
+            if arity is None:
+                return {
+                    "is_effect": True, "taxonomy": manual_taxonomy,
+                    "kind": "custom_sink", "verified": False,
+                    "gap": {
+                        "code": "OPERATION_SIGNATURE_GAP", "critical": True,
+                        "method_name": method_name,
+                        "receiver_type": receiver_type or None,
+                        "method_descriptor": descriptor or None,
+                        "allowed_arities": sorted(manual_arities),
+                    },
+                }
+            return {
+                "is_effect": True, "taxonomy": manual_taxonomy,
+                "kind": "custom_sink", "verified": True,
+            }
+        return {
+            "is_effect": True,
+            "taxonomy": manual_taxonomy,
+            "kind": "custom_sink",
+            "verified": False,
+            "gap": {
+                "code": "CUSTOM_SINK_PROPOSAL",
+                "critical": False,
+                "method_name": method_name,
+                "receiver_type": receiver_type or None,
+            },
+        }
     return {"is_effect": False, "taxonomy": "unknown_effect", "kind": "not_sensitive", "verified": False}
 
 

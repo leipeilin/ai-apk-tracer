@@ -100,6 +100,8 @@ SINK_PATTERNS = {
 GUARD_RE = re.compile(r"(?:checkCallingPermission|enforceCallingPermission|checkCallingOrSelfPermission|Binder\.getCallingUid|getNameForUid|getPackageInfo|PackageManager\.checkSignatures|enforceReadPermission|enforceWritePermission|SecurityException)")
 SENSITIVE_DATA_RE = re.compile(r"(?:token|password|passwd|secret|credential|account|payment|location|contact|private|auth|device|battery|userId)", re.I)
 SENSITIVE_BINDER_METHOD_RE = re.compile(
+    # E7 残留（P4，2026-08-27）：Sport|Workout|Wear 为运动健康域特调词表——Binder 敏感度
+    # 启发式（非 sink taxonomy），versions.yaml 无对应落点，暂保留于 shared 层待架构演进。
     r"\b(?:start|stop|finish|pause|resume|delete|set|register|get)(?:Sport|Workout|Sensor|Account|User|Device|Battery|Location|Wear|Data|State)\w*\s*\(",
     re.I,
 )
@@ -2532,6 +2534,9 @@ def _provider_query_effect(files: list[dict]) -> dict | None:
 
 
 _SERVICE_SENSITIVE_BINDER_PATTERNS = (
+    # E7 残留（P4 核验 R-1，2026-08-27）：sport 系方法名与 getDid/issueStart/issueEnd/
+    # updateFindDeviceStatus 为小米运动健康域特调词表（Binder 事务敏感度判定启发式，
+    # 非 sink taxonomy）——versions.yaml 无对应落点，完整迁移待架构演进。
     re.compile(r"\b(?:startSport|pauseSport|resumeSport|finishSport|restartSport|abnormalChangeSportStateTo(?:Finish|Pause))\b"),
     re.compile(r"\b(?:getDeviceInfo|getDeviceBattery|getCurrentDeviceModel|getDeviceName|getMac|getDid|getBattery)\b"),
     re.compile(r"\b(?:set\w*Listener|add\w*Listener|register\w*(?:Callback|Listener))\b"),
@@ -3459,6 +3464,8 @@ def _review_priority(rule_id: str, component: dict, files: list[dict]) -> int:
         return 95
     if component.get("kind") == "service" and re.search(r"\bonBind\s*\(", code):
         return 90
+    # E7 残留（P4 核验 R-1，2026-08-27）：Sport|Workout 为运动健康域特调词表（评审 E7
+    # 点名项，评分启发式——非 sink taxonomy），versions.yaml 无对应落点，待架构演进。
     if component.get("kind") == "service" and re.search(r"(?:Location|Sensor|startForeground|Sport|Workout|Account)", code, re.I):
         return 85
     if component.get("kind") == "provider" and re.search(r"\b(?:MatrixCursor|rawQuery|query)\b", code):

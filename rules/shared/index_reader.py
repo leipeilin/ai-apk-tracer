@@ -73,7 +73,12 @@ FLOW_INTRINSIC_METHODS = {
     "addJavascriptInterface", "startActivity", "startService", "startForegroundService",
     "bindService", "sendBroadcast", "sendOrderedBroadcast", "execSQL", "rawQuery", "insert",
     "update", "delete", "open", "write", "startForeground", "requestLocationUpdates", "registerListener",
-    "startSport", "pauseSport", "resumeSport", "finishSport", "isAllowedHttps", "isValidUrl",
+    # E7 残留（P4 核验 R-1，2026-08-27）：sport 系方法名为运动健康域特调（跳回查豁免，
+    # dataflow 侧检出已迁 versions.yaml manual，此处豁免清单保留防 gap 噪声）。
+    "startSport", "pauseSport", "resumeSport", "finishSport",
+    # E7 残留（P4，2026-08-27）：以下为 shop APK 的 URL 校验 wrapper 名（跳回查豁免清单，
+    # 移除会使该 run 的回查通过率回退）——特调依赖，完整迁移待架构演进。
+    "isAllowedHttps", "isValidUrl",
     "validateUrl", "allowedScheme", "isAllowedScheme", "isHttpsUrl", "isTrustedUrl",
     "equals", "contains", "forName", "instantiate", "newInstance", "getDeclaredConstructor",
     "getConstructor", "apply", "commit", "notify", "onChanged", "postValue", "dispatch", "emit",

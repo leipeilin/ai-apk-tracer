@@ -1,5 +1,5 @@
 schema_version: '1.0'
-taxonomy_version: 1.0.5
+taxonomy_version: 1.0.6
 description: sink taxonomy 版本化文件（T2.9）——backend custom_sink_proposal 判定数据源；种子（base）自
   rules/shared/dataflow.py 提炼，人工扩展（manual）经 scripts/promote_custom_sink.py 追加；单人操作约定，版本冲突
   git 层解决。
@@ -474,7 +474,13 @@ entries:
   - NfcOutputStream
   - ProtocolWriter
   - UsbOutputStream
-  source: base
+  verified_arity:
+  - 1
+  - 3
+  source: manual
+  confirmed_at: '2026-08-27'
+  confirmed_by: p4-e7-migration
+  note: E7 迁移——原 dataflow 伪平台类分支（SDK 中不存在的自定义类），v04 真机验证保留检出
 - method: truncate
   taxonomy: file_mutation
   receiver_leaves:
@@ -529,3 +535,101 @@ entries:
   confirmed_by: leipeilin-20260827
   run_id: 20260826T141857Z_1c55d3fb9f95_eada0e71
   candidate_id: expl_9171c5bb4e4f4ee19e69
+- method: startSport
+  taxonomy: location_sensor_collection
+  receiver_leaves:
+  - SportManager
+  - WorkoutManager
+  - FitnessManager
+  - SportService
+  - SportApiStub
+  - WorkoutApiStub
+  - FitnessApiStub
+  - ISportRemoteState
+  - ISportRemoteData
+  - SportRemoteState
+  - SportRemoteData
+  receiver_prefixes:
+  - com.xiaomi.fitness.
+  verified_arity:
+  - 0
+  - 1
+  - 2
+  - 3
+  source: manual
+  confirmed_at: '2026-08-27'
+  confirmed_by: p4-e7-migration
+  note: E7 迁移——原 dataflow sport_family（v04 真机验证 S1/S3，小米运动导出接口）；前缀较原 sport_manager_export. 放宽一级，动机为 sport_xms 跨子包/entry 形态召回（P4 核验 R-6）
+- method: pauseSport
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - SportManager
+  - WorkoutManager
+  - FitnessManager
+  - SportService
+  - SportApiStub
+  - WorkoutApiStub
+  - FitnessApiStub
+  - ISportRemoteState
+  - ISportRemoteData
+  - SportRemoteState
+  - SportRemoteData
+  receiver_prefixes:
+  - com.xiaomi.fitness.
+  verified_arity:
+  - 0
+  - 1
+  - 2
+  source: manual
+  confirmed_at: '2026-08-27'
+  confirmed_by: p4-e7-migration
+  note: E7 迁移——原 dataflow sport_family（v04 真机验证 S1/S3）；前缀较原 sport_manager_export. 放宽一级，动机为 sport_xms 跨子包/entry 形态召回（P4 核验 R-6）
+- method: resumeSport
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - SportManager
+  - WorkoutManager
+  - FitnessManager
+  - SportService
+  - SportApiStub
+  - WorkoutApiStub
+  - FitnessApiStub
+  - ISportRemoteState
+  - ISportRemoteData
+  - SportRemoteState
+  - SportRemoteData
+  receiver_prefixes:
+  - com.xiaomi.fitness.
+  verified_arity:
+  - 0
+  - 1
+  - 2
+  source: manual
+  confirmed_at: '2026-08-27'
+  confirmed_by: p4-e7-migration
+  note: E7 迁移——原 dataflow sport_family（v04 真机验证 S1/S3）；前缀较原 sport_manager_export. 放宽一级，动机为 sport_xms 跨子包/entry 形态召回（P4 核验 R-6）
+- method: finishSport
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - SportManager
+  - WorkoutManager
+  - FitnessManager
+  - SportService
+  - SportApiStub
+  - WorkoutApiStub
+  - FitnessApiStub
+  - ISportRemoteState
+  - ISportRemoteData
+  - SportRemoteState
+  - SportRemoteData
+  receiver_prefixes:
+  - com.xiaomi.fitness.
+  verified_arity:
+  - 0
+  - 1
+  - 2
+  - 3
+  source: manual
+  confirmed_at: '2026-08-27'
+  confirmed_by: p4-e7-migration
+  note: E7 迁移——原 dataflow sport_family（v04 真机验证 S1/S3）；前缀较原 sport_manager_export. 放宽一级，动机为 sport_xms 跨子包/entry 形态召回（P4 核验 R-6）
