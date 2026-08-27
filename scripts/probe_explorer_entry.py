@@ -211,6 +211,8 @@ async def _run_probe(args: argparse.Namespace) -> int:
                 "max_requests_per_entry": settings.explorer.max_requests_per_entry,
                 "max_candidates_per_run": settings.explorer.max_candidates_per_run,
                 "allow_external_code": settings.explorer.allow_external_code,
+                # P-2 D3：入口并行度透传（探针统计口径并行下不变——按 entry 聚合）
+                "entry_concurrency": settings.explorer.entry_concurrency,
             },
             "dry_run": args.dry_run,
         }

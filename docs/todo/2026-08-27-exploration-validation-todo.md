@@ -5,12 +5,24 @@
 
 ---
 
-## T1【高】全量 run 启动 + 三参数**恢复**定参（临时放开后回归）
+## T1【高】全量 run 启动 + 四参数**恢复**定参（临时放开后回归）
 
-- **内容**：用 P-1 参数包（候选无上限 / 上下文 40K+保后切前 / read_timeout 240s）+ `.venv-tls` 跑 shop 全量（278 入口，~1-2h）；
-- **产出**：三分布数据（上下文尺寸 / 单次调用时长 / 各轮失败率）——**据数据把三参数恢复为合理值**（验证阶段放开是临时的：无上限候选/超大上下文不是常态运行形态——数据到位后定参恢复，如候选上限按产出分布定、上下文按实际使用尺寸定、超时按时长分位数定）；
-- **强调**：`max_candidates_per_run: null`、40K 上下文、240s 超时均为**临时验证值**，定参后必须恢复——本项不闭合则参数永久裸奔；
-- **前置**：P-1 实施（`2026-08-27-p1-validation-params-implementation-plan.md`）。
+- **内容**：用 P-1 + P-2 参数包（候选无上限 / 上下文 40K+保后切前 / read_timeout 240s /
+  **AI 请求无上限** / 并行 entry_concurrency=4）+ `.venv-tls` 跑 shop 全量（278 入口，
+  并行预估 ~1.5h）；
+- **产出**：分布数据（上下文尺寸 / 单次调用时长 / 各轮失败率 / 各入口读码请求量）——
+  **据数据把参数恢复为合理值**（验证阶段放开是临时的，数据到位后定参恢复）；
+- **强调**：`max_candidates_per_run: null`、`max_requests_per_run: null`、40K 上下文、
+  240s 超时均为**临时验证值**，定参后必须恢复——本项不闭合则参数永久裸奔；
+- **前置**：P-1 + P-2 实施（`2026-08-27-p1-validation-params-implementation-plan.md` /
+  `2026-08-27-p2-parallel-exploration-implementation-plan.md`）。
+
+## T10【中】探索并发治理定参（P-2 新增）
+
+- **内容**：`explorer.entry_concurrency`（默认 4）与 `ai.candidate_concurrency`（4）、
+  provider in-flight（4）的统一治理——全量 run 的 429/Retry-After 冷却频率数据定参
+  （持续冷却则回调 entry_concurrency）；
+- **前置**：T1 全量 run。
 
 ## T2【高】A5-8 golden 判决 + 引导域产出观察
 

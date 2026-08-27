@@ -93,7 +93,9 @@ context_budget:
   # 候选墙钟预算阻止发起后续逻辑调用，但不会主动取消已在途的 HTTP 请求。
   max_candidate_wall_seconds: 300
   # 同样统计单次扫描的逻辑调用数，而非底层 HTTP 发送次数。
-  max_requests_per_run: 500
+  # P-2 验证阶段临时值：null = 无上限（全轨共享池——explorer/deep_dive/L1L2 统一放开）；
+  # 全量数据后恢复定参（docs/todo/ T1）
+  max_requests_per_run: null
   max_contexts_per_slice: 24
   max_additions_per_request: 8
   max_context_bytes_per_slice: 96000

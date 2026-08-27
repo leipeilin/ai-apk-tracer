@@ -182,7 +182,7 @@ class ContextBudgetSettings(BaseModel):
     max_requests_per_candidate: int = Field(default=4, ge=1, description="单候选最多 AI 请求次数，含最终收尾")
     max_expansions_per_candidate: int = Field(default=2, ge=0, description="单候选最多成功或失败的扩片次数")
     max_candidate_wall_seconds: int = Field(default=300, ge=1, description="单候选 AI 与扩片阶段墙钟上限")
-    max_requests_per_run: int = Field(default=140, ge=1, description="单次扫描最多 AI 请求次数")
+    max_requests_per_run: int | None = Field(default=140, ge=1, description="单次扫描最多 AI 请求次数（context_budget 全轨共享池——explorer/deep_dive/L1L2 三处消费）；None = 无上限（P-2 验证阶段临时形态——全量数据后随 T1 恢复定参，见 docs/todo/）")
     max_contexts_per_slice: int = Field(default=24, ge=1, description="送入单次 AI 请求的上下文数量上限")
     max_additions_per_request: int = Field(default=8, ge=1, description="单轮上下文扩片最多新增的上下文数量")
     max_context_bytes_per_slice: int = Field(default=96_000, ge=1, description="单个切片中 contexts 的确定性 UTF-8 JSON 字节上限")
@@ -206,7 +206,10 @@ class ExplorerSettings(BaseModel):
     allow_external_code: bool = Field(default=True, description="是否允许向模型发送探索检索读回的代码片段（仅方法级片段，非完整代码索引）")
     prompt_version: str = Field(default="explorer/1.0.0", description="探索协议版本；先声明后注册（T2.5），注册前不得运行时解析")
     max_rounds_per_entry: int = Field(default=4, ge=1, description="单入口检索循环轮数上限（评审 §4.3）")
-    max_requests_per_entry: int = Field(default=20, ge=1, description="单入口读码请求总数上限（评审 §4.3）")
+    max_requests_per_entry: int = Field(default=20, ge=1, description="单入口读码请求总数上限（评审 §4.3；P-2 D1 修复后为真入口级预算——原实现为全局池）")
+    # P-2 D3：入口并行度（复用 BoundedJobScheduler——L1/L2 candidate_concurrency 先例；
+    # 默认 4 对齐 provider in-flight=4 恰好饱和管道；=1 语义等价串行回退位）
+    entry_concurrency: int = Field(default=4, ge=1, le=16, description="探索轨入口并行探索数（P-2 D3——BoundedJobScheduler worker 数；1 = 串行等价")
     max_requests_per_candidate: int = Field(default=4, ge=1, description="单探索候选的 AI 请求上限")
     deep_dive_prompt_version: str = Field(default="explorer-deep-dive/1.0.0", description="partial 候选深挖协议版本（T0.3 已注册）")
     custom_sink_taxonomy_path: Path | None = Field(

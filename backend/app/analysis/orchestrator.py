@@ -1134,8 +1134,12 @@ class ScanOrchestrator:
         explorer_settings = self.settings.explorer
 
         async def budgeted_ai_call(model_input: Any) -> dict[str, Any]:
+            # P-2 D2：None = 无上限（验证阶段临时——全轨共享池三处消费点统一短路）
             async with self._ai_budget_lock:
-                if self._ai_requests_used >= budget.max_requests_per_run:
+                if (
+                    budget.max_requests_per_run is not None
+                    and self._ai_requests_used >= budget.max_requests_per_run
+                ):
                     return {"status": "skipped", "circuit_breaking": True,
                             "metadata": {"reason": "run_request_budget_exhausted"}}
                 self._ai_requests_used += 1
@@ -1146,7 +1150,10 @@ class ScanOrchestrator:
             # 深挖账本 = explorer stage 的 deep_dive_requests_used（复核账
             # 组成部分——三本账公式见任务方案 §3.3）
             async with self._ai_budget_lock:
-                if self._ai_requests_used >= budget.max_requests_per_run:
+                if (
+                    budget.max_requests_per_run is not None
+                    and self._ai_requests_used >= budget.max_requests_per_run
+                ):
                     return {"status": "skipped", "circuit_breaking": True,
                             "metadata": {"reason": "run_request_budget_exhausted"}}
                 self._ai_requests_used += 1
@@ -1283,7 +1290,11 @@ class ScanOrchestrator:
         if time.monotonic() - started >= budget.max_candidate_wall_seconds:
             return None, budgeted_slice, "candidate_wall_time_exhausted"
         async with self._ai_budget_lock:
-            if self._ai_requests_used >= budget.max_requests_per_run:
+            # P-2 D2：None = 无上限（验证阶段临时——三处消费点统一短路）
+            if (
+                budget.max_requests_per_run is not None
+                and self._ai_requests_used >= budget.max_requests_per_run
+            ):
                 return None, budgeted_slice, "run_request_budget_exhausted"
             self._ai_requests_used += 1
         if finalization:

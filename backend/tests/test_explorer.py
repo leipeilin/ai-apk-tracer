@@ -7,6 +7,7 @@ R-1~R-10 修订）。FakeAnalyzer 按队列逐轮弹出 Observation；真实 ind
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import zipfile
@@ -1319,7 +1320,7 @@ def test_seed_hops_degrade_to_empty(tmp_path: Path) -> None:
 
 
 def test_entry_coverage_transparency(tmp_path: Path) -> None:
-    """F4：入口覆盖透明化——截断与全探索两态（核验 V-2 正例补强）。"""
+    """F4：入口覆盖透明化——截断（entry_concurrency=1 串行等价）与全探索两态。"""
     call_tree = _service(tmp_path)
     entries = [_entry(call_tree), _entry(call_tree)]
     # 上限 1：首入口产链后截断——第二入口不探索
@@ -1328,7 +1329,8 @@ def test_entry_coverage_transparency(tmp_path: Path) -> None:
         {"done": True, "proposals": [_proposal()]},
     ])
     orchestrator = ExplorerOrchestrator(
-        fake, call_tree, ExplorerSettings(max_candidates_per_run=1), tmp_path)
+        fake, call_tree,
+        ExplorerSettings(max_candidates_per_run=1, entry_concurrency=1), tmp_path)
     asyncio_run(orchestrator.explore_all(entries))
     assert orchestrator.entries_explored == 1  # 截断态：只探索了首入口
 
@@ -1341,6 +1343,178 @@ def test_entry_coverage_transparency(tmp_path: Path) -> None:
         fake2, call_tree, ExplorerSettings(), tmp_path)
     asyncio_run(orchestrator2.explore_all(entries))
     assert orchestrator2.entries_explored == len(entries)  # 正例：全覆盖
+
+
+# ---------------------------------------------------------------------------
+# P-2：读码预算入口局部化（D1）+ 并行探索（D3）
+# ---------------------------------------------------------------------------
+
+
+def test_read_budget_per_entry_local(tmp_path: Path) -> None:
+    """P2-1：读码预算入口局部化——2 入口各执行至 max_requests_per_entry。
+
+    修复前全局池封顶 20（8/22 run 实证 131 入口仅前 4 个有素材）；
+    run 级统计 read_requests_used = 各入口执行数之和。
+    """
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    other = dict(entry)
+    other["entry_id"] = "act_com_example_A_other"
+    # 每入口 3 轮 × 每轮 8 请求（互异 target）→ 入口级截断在 20
+    def _rounds(entry_id: str) -> list[dict]:
+        return [
+            {"done": False, "requests": [
+                {"operation": "search_symbol", "target": f"{entry_id}_r{r}_t{i}"}
+                for i in range(8)]}
+            for r in range(3)
+        ] + [{"done": True, "proposals": [_proposal()]}]
+    fake = FakeAnalyzer(_rounds("a") + _rounds("b"))
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree, ExplorerSettings(max_rounds_per_entry=4), tmp_path)
+    asyncio_run(orchestrator.explore_all([entry, other]))
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    per_entry_executed = [
+        sum(len(r.get("requests_executed") or []) for r in e["rounds"])
+        for e in observations["entries"]
+    ]
+    # 每入口各 20（入口级预算独立——修复前第二入口 0）
+    assert per_entry_executed == [20, 20]
+    # run 级统计 = 和 = 40
+    assert orchestrator.read_requests_used == 40
+
+
+def test_parallel_concurrency_and_ordering(tmp_path: Path) -> None:
+    """P2-4：并行执行（峰值 ≤ entry_concurrency）+ 输出按入口序保序。"""
+    call_tree = _service(tmp_path)
+    entries = []
+    for i in range(6):
+        e = dict(_entry(call_tree))
+        e["entry_id"] = f"act_com_example_A_{i}"
+        entries.append(e)
+
+    active = 0
+    peak = 0
+    call_order: list[str] = []
+
+    class SlowFake:
+        async def __call__(self, model_input):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            entry_id = json.loads(model_input.entry_json).get("entry_id")
+            call_order.append(entry_id)
+            await asyncio.sleep(0.005)  # 制造真实并发交错（同步返回 peak 恒 1）
+            try:
+                return {"status": "completed", "analysis": FakeAnalyzer._observation(
+                    loop_done=True, proposals=[_proposal()], requests=[]),
+                    "metadata": {"prompt_version": "1.0.0", "model": "test"}}
+            finally:
+                active -= 1
+
+    orchestrator = ExplorerOrchestrator(
+        SlowFake(), call_tree, ExplorerSettings(entry_concurrency=2), tmp_path)
+    candidates = asyncio_run(orchestrator.explore_all(entries))
+    assert peak == 2  # 并发峰值精确 = entry_concurrency
+    assert len(candidates) == 6
+    # 执行时序确实交错（非串行序）
+    assert call_order != [e["entry_id"] for e in entries] or peak > 1
+    # 输出保序：observations 按入口序（与串行版输出形状一致）
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    assert [e["entry_id"] for e in observations["entries"]] == [e["entry_id"] for e in entries]
+
+
+def test_parallel_circuit_semantics(tmp_path: Path) -> None:
+    """P2-5：并行熔断——未启动入口记 short_circuited；in-flight 入口保留完整轮记录。"""
+    call_tree = _service(tmp_path)
+    entries = []
+    for i in range(4):
+        e = dict(_entry(call_tree))
+        e["entry_id"] = f"act_com_example_A_{i}"
+        entries.append(e)
+
+    started: set[str] = set()
+
+    class CircuitFake:
+        """首入口熔断（circuit_breaking），其余慢速完成——验证 in-flight 保留。"""
+        async def __call__(self, model_input):
+            entry_id = json.loads(model_input.entry_json).get("entry_id")
+            started.add(entry_id)
+            await asyncio.sleep(0.005)
+            if entry_id == entries[0]["entry_id"]:
+                return {"status": "failed", "circuit_breaking": True, "metadata": {}}
+            return {"status": "completed", "analysis": FakeAnalyzer._observation(
+                loop_done=True, proposals=[_proposal()], requests=[]),
+                "metadata": {"prompt_version": "1.0.0", "model": "test"}}
+
+    orchestrator = ExplorerOrchestrator(
+        CircuitFake(), call_tree, ExplorerSettings(entry_concurrency=2), tmp_path)
+    asyncio_run(orchestrator.explore_all(entries))
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    by_id = {e["entry_id"]: e for e in observations["entries"]}
+    assert by_id[entries[0]["entry_id"]]["terminated_by"] == "short_circuit"
+    # in-flight 入口（与熔断入口并发启动的 entries[1]）保留完整结果（loop_done + 候选）
+    assert by_id[entries[1]["entry_id"]]["terminated_by"] == "loop_done"
+    assert by_id[entries[1]["entry_id"]]["candidate_count"] == 1
+    # 未启动入口（熔断开启后）记 short_circuited
+    late = [by_id[e["entry_id"]] for e in entries[2:]]
+    assert all(r["terminated_by"] == "short_circuited" for r in late)
+
+
+def test_read_budget_isolated_under_parallel(tmp_path: Path) -> None:
+    """P2-6：并发交错下两入口预算独立（D1 修复的并行验证）。"""
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    other = dict(entry)
+    other["entry_id"] = "act_com_example_A_other"
+    # 每轮 2 请求 × 4 轮 → 每入口截断在 max_requests_per_entry=4
+    def _rounds(tag: str) -> list[dict]:
+        return [
+            {"done": False, "requests": [
+                {"operation": "search_symbol", "target": f"{tag}_r{r}_t{i}"}
+                for i in range(2)]}
+            for r in range(4)
+        ] + [{"done": True, "proposals": [_proposal()]}]
+    fake = FakeAnalyzer(_rounds("a") + _rounds("b"))
+    orchestrator = ExplorerOrchestrator(
+        fake, call_tree,
+        ExplorerSettings(max_rounds_per_entry=5, max_requests_per_entry=4,
+                         entry_concurrency=2),
+        tmp_path)
+    asyncio_run(orchestrator.explore_all([entry, other]))
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    per_entry = [
+        sum(len(r.get("requests_executed") or []) for r in e["rounds"])
+        for e in observations["entries"]
+    ]
+    assert per_entry == [4, 4]  # 并发下各自达 4（互不抢预算）
+    assert orchestrator.read_requests_used == 8
+
+
+def test_soft_cap_parallel(tmp_path: Path) -> None:
+    """P2-7：并行软上限——已启动入口候选全收（小幅超限），未启动入口跳过。"""
+    call_tree = _service(tmp_path)
+    entries = []
+    for i in range(4):
+        e = dict(_entry(call_tree))
+        e["entry_id"] = f"act_com_example_A_{i}"
+        entries.append(e)
+
+    class SlowFake:
+        async def __call__(self, model_input):
+            await asyncio.sleep(0.005)
+            return {"status": "completed", "analysis": FakeAnalyzer._observation(
+                loop_done=True, proposals=[_proposal()], requests=[]),
+                "metadata": {"prompt_version": "1.0.0", "model": "test"}}
+
+    # 上限 1 + 并发 2：两个 worker 同时通过检查（启动时累计 0）→ 各产 1 → 总 2（软超限 1）
+    orchestrator = ExplorerOrchestrator(
+        SlowFake(), call_tree,
+        ExplorerSettings(max_candidates_per_run=1, entry_concurrency=2), tmp_path)
+    candidates = asyncio_run(orchestrator.explore_all(entries))
+    assert len(candidates) == 2  # 已启动入口候选全收（软上限语义）
+    observations = json.loads((tmp_path / "explorer" / "observations.json").read_text("utf-8"))
+    recorded = [e for e in observations["entries"] if e["terminated_by"] != "short_circuited"]
+    assert len(recorded) == 2  # 未启动（超限后）入口不记 observations
 
 
 # ---------------------------------------------------------------------------

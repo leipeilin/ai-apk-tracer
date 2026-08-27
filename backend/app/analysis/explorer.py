@@ -40,6 +40,11 @@ from app.analysis.ai_models import (
     ExplorerObservation,
     SeedHop,
 )
+from app.analysis.ai_scheduler import (
+    IndexedJob,
+    JobStatus,
+    run_indexed_jobs,
+)
 from app.config import ExplorerSettings
 
 LOGGER = logging.getLogger(__name__)
@@ -152,36 +157,75 @@ class ExplorerOrchestrator:
         return self._entries_explored
 
     async def explore_all(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """逐入口探索：method_id 非 None 者为有效起点（no_method 跳过并记录）；
-        候选累计达 max_candidates_per_run 即止（剩余入口记 skipped）。"""
+        """并行探索（P-2 D3）：entry_concurrency 路 worker 消费入口队列。
+
+        复用 BoundedJobScheduler（L1/L2 candidate_concurrency 先例）：
+        - 熔断映射：仅 terminated_by == "short_circuit"（AI 熔断类）触发 TaskCircuit
+          ——未启动入口记 short_circuited（与串行版语义一致）；error（单入口
+          AI 失败，非熔断）不触发——其余入口继续；
+        - 保序：scheduler 按入口序返回——observations/candidates 输出形状与串行一致；
+        - 候选上限（非 None）：worker 内、_explore_entry 之前检查（"软上限"——
+          并行下已启动入口候选全收，超限 ≤ entry_concurrency × 单入口峰值）。
+        """
 
         candidates: list[dict[str, Any]] = []
         observations = self._load_observations()
-        skipped_short_circuit = False
         entries_explored = 0
-        for entry in entries:
-            if skipped_short_circuit:
-                observations["entries"].append({
-                    "entry_id": entry.get("entry_id"), "terminated_by": "short_circuited",
-                    "rounds": [], "candidate_count": 0,
-                })
-                continue
-            entries_explored += 1
-            entry_candidates, terminated_by, rounds = await self._explore_entry(entry)
-            candidates.extend(entry_candidates)
-            observations["entries"].append({
-                "entry_id": entry.get("entry_id"),
-                "terminated_by": terminated_by,
-                "rounds": rounds,
-                "candidate_count": len(entry_candidates),
-            })
-            if terminated_by == "short_circuit":
-                skipped_short_circuit = True
+        candidate_total = 0  # 软上限检查的共享计数（事件循环单线程——worker 间读一致）
+
+        async def worker(job: IndexedJob[dict[str, Any]]) -> tuple[
+            list[dict[str, Any]] | None, str, list[dict[str, Any]]
+        ]:
+            nonlocal candidate_total
+            entry = job.value
+            # 软上限：worker 内、探索之前（评审 P1-3——超限入口不启动不记 observations，
+            # 与串行版 break 后剩余入口不记录的口径一致）
             if (
                 self._settings.max_candidates_per_run is not None
-                and len(candidates) >= self._settings.max_candidates_per_run
+                and candidate_total >= self._settings.max_candidates_per_run
             ):
-                break
+                return None, "skipped_max_cap", []
+            entry_candidates, terminated_by, rounds = await self._explore_entry(entry)
+            candidate_total += len(entry_candidates)
+            return entry_candidates, terminated_by, rounds
+
+        jobs = [IndexedJob(index, entry) for index, entry in enumerate(entries)]
+        scheduled = await run_indexed_jobs(
+            jobs,
+            worker,
+            max_concurrency=max(self._settings.entry_concurrency, 1),
+            opens_circuit=lambda result: result[1] == "short_circuit",
+            circuit_reason="explorer_short_circuit",
+        )
+        for scheduled_result in scheduled.results:
+            if scheduled_result.status == JobStatus.SUCCEEDED:
+                entry_candidates, terminated_by, rounds = scheduled_result.value
+                if entry_candidates is None:  # 软上限跳过（未启动探索——不计数不记录）
+                    continue
+                entries_explored += 1
+                candidates.extend(entry_candidates)
+                observations["entries"].append({
+                    "entry_id": entries[scheduled_result.index].get("entry_id"),
+                    "terminated_by": terminated_by,
+                    "rounds": rounds,
+                    "candidate_count": len(entry_candidates),
+                })
+            elif scheduled_result.status == JobStatus.FAILED:
+                # worker 异常（scheduler 捕获不中断批次）——记 error 并保留
+                # 异常信息（不静默吞——区别于熔断 SKIPPED，可审计）
+                observations["entries"].append({
+                    "entry_id": entries[scheduled_result.index].get("entry_id"),
+                    "terminated_by": "error",
+                    "rounds": [], "candidate_count": 0,
+                    "worker_error": str(scheduled_result.error),
+                })
+                entries_explored += 1
+            else:  # SKIPPED（熔断未启动）——与串行版 short_circuited 记录一致
+                observations["entries"].append({
+                    "entry_id": entries[scheduled_result.index].get("entry_id"),
+                    "terminated_by": "short_circuited",
+                    "rounds": [], "candidate_count": 0,
+                })
         # F4（2026-08-27）：入口覆盖透明化——上限截断可见（未探索入口计数
         # 入 stage summary，供覆盖率评估与入口策略优化决策）
         self._entries_explored = entries_explored
@@ -229,9 +273,15 @@ class ExplorerOrchestrator:
         # F5 附带（F2 核验 V-2）：已执行请求规范键集合（跨轮累积——请求
         # 增量执行，重复请求跳过不消耗预算；零增量轮触发 no_new_requests）
         executed_request_keys: set[tuple] = set()
+        # P-2 D1（缺陷修复）：读码预算入口局部化——原实现用 run 级
+        # _read_requests_used 抵扣"单入口上限"配置，实为全局池（8/22 run
+        # 实证 131 入口仅前 4 个有读码素材，3+7+8+2=20 封顶——127 入口零
+        # 上下文盲探）。_read_requests_used 保留为 run 级统计（探针/summary
+        # 口径不变），预算判定改用本局部计数。
+        entry_read_used = 0
 
         for round_index in range(1, self._settings.max_rounds_per_entry + 1):
-            requests_budget = self._settings.max_requests_per_entry - self._read_requests_used
+            requests_budget = self._settings.max_requests_per_entry - entry_read_used
             joined_context = "\n---\n".join(code_context) if code_context else None
             if joined_context is not None and len(joined_context) > _MAX_EXPLORE_CONTEXT_CHARS:
                 # P-1：保后切前（最近上下文优先——见 _MAX_EXPLORE_CONTEXT_CHARS 注释）
@@ -306,6 +356,8 @@ class ExplorerOrchestrator:
             proposals.extend(observation.chain_proposals and [p.model_dump(mode="json") for p in observation.chain_proposals] or [])
             executed = self._execute_read_requests(
                 observation, max(requests_budget, 0), executed_request_keys)
+            # P-2 D1：入口局部预算扣减（执行数——预算截断与去重跳过均不入 records）
+            entry_read_used += len(executed["records"])
             # 评审 R-4（T2.8）：explorer.allow_external_code=False 时不外发读回
             # 内容（合规门禁；读码仍执行留审计轨迹，模型轮输入可见预算扣减）
             if self._settings.allow_external_code:
