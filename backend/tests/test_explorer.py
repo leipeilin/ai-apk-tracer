@@ -692,6 +692,31 @@ def test_explorer_stage_budget_cap_rejects_beyond_limit(tmp_path: Path) -> None:
     assert stage["summary"]["candidate_count"] == 0
 
 
+def test_budgeted_protocol_call_none_unlimited(tmp_path: Path) -> None:
+    """P-2 评审 C-1：max_requests_per_run=None 时 verify 轨预算包装不抛 TypeError。
+
+    第 4 处消费点（_budgeted_protocol_call——verify 协议调用）原遗漏 None 短路：
+    None >= int 直接 TypeError（verify 默认关闭故全量回归未暴露）。
+    """
+
+    orchestrator, *_ = _instance_orchestrator(tmp_path, max_requests_per_run=None)
+    calls: list[Any] = []
+
+    async def protocol_call(model_input: Any) -> dict[str, Any]:
+        calls.append(model_input)
+        return {"status": "completed", "analysis": {}}
+
+    budgeted = orchestrator._budgeted_protocol_call(
+        protocol_call, counter_attr="_verify_requests_used")
+    # 多次调用全部放行（None 无上限；修复前首次调用即抛 TypeError）
+    for index in range(3):
+        result = asyncio_run(budgeted({"i": index}))
+        assert result["status"] == "completed"
+    assert len(calls) == 3
+    assert orchestrator._ai_requests_used == 3
+    assert orchestrator._verify_requests_used == 3
+
+
 # ---------------------------------------------------------------------------
 # T2.8：explorer_deep_dive（partial 候选深挖——补齐事实，禁止改写链）
 # ---------------------------------------------------------------------------

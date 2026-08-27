@@ -738,7 +738,12 @@ class ScanOrchestrator:
 
         async def budgeted(model_input: Any) -> dict[str, Any]:
             async with self._ai_budget_lock:
-                if self._ai_requests_used >= self.settings.context_budget.max_requests_per_run:
+                # P-2 D2（评审 C-1 补漏）：None = 无上限——verify 轨消费点
+                # 与 explorer/deep_dive/L1L2 三处统一短路（第 4 处，原遗漏）
+                if (
+                    self.settings.context_budget.max_requests_per_run is not None
+                    and self._ai_requests_used >= self.settings.context_budget.max_requests_per_run
+                ):
                     return {"status": "skipped", "circuit_breaking": True,
                             "metadata": {"reason": "run_request_budget_exhausted"}}
                 self._ai_requests_used += 1
