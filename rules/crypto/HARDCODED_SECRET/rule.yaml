@@ -1,0 +1,9 @@
+id: HARDCODED_SECRET
+version: 1.0.0
+protocol_version: 1.0.0
+component: crypto
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "敏感命名字符串常量（变量名含 secret/api_key/token/password 等词干且字面量值 >=8 字符）。词干无边界：tokenCount/passwordEncoder 类非密钥变量名只要赋 >=8 字符字符串即命中（词干误报由 AI 复核排除）；测试桩/占位值由 AI 复核排除；非 String 类型（byte[]/char[]）与运行时拼接不覆盖；FTS 初筛按整词词项匹配，驼峰（mSecretKey）与未列入词项的中缀复合名不保证召回。"

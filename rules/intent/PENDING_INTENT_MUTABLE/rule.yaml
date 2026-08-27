@@ -1,0 +1,9 @@
+id: PENDING_INTENT_MUTABLE
+version: 1.0.0
+protocol_version: 1.0.0
+component: intent
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "23-36"
+limitations: "PendingIntent 工厂调用（getActivity/getActivities/getBroadcast/getService/getForegroundService）的 flags 参数不含 FLAG_IMMUTABLE——API 23+ 默认 mutable。flags 为变量/常量引用时同样报（无法静态判定，AI 复核兜底——误报方向）；调用文本内 FLAG_IMMUTABLE 按词边界判定已加固（EXTRA_FLAG_IMMUTABLE_STATE 类子串巧合不误判安全）。"

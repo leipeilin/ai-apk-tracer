@@ -1,0 +1,9 @@
+id: LOG_SENSITIVE_DATA
+version: 1.0.0
+protocol_version: 1.0.0
+component: log
+evidence_output: L2
+builtin: true
+entrypoint: detect.py
+android_api: "1-36"
+limitations: "Log.[deviw]/wtf 调用参数区含敏感标识符（token/password/location/account 等词表）。字符串字面量已剔除（按标识符/方法名匹配），TAG 变量名含敏感词会产生误报（L2 AI 复核兜底）；release 混淆/日志裁剪不在静态判定范围（MASVS-STORAGE-2 日志专项）。"

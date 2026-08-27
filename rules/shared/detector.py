@@ -48,6 +48,10 @@ RULE_META = {
     "TRUST_MANAGER_ALL_ACCEPT": ("crypto", "L2", "critical"),
     "HOSTNAME_VERIFIER_ALWAYS_TRUE": ("crypto", "L2", "high"),
     "WEAK_CIPHER_ECB": ("crypto", "L2", "medium"),
+    # P5（评审 2026-08-27 第四节）：新增全局代码规则族（L2，AI 复核定级）。
+    "PENDING_INTENT_MUTABLE": ("intent", "L2", "medium"),
+    "LOG_SENSITIVE_DATA": ("log", "L2", "medium"),
+    "HARDCODED_SECRET": ("crypto", "L2", "high"),
 }
 # WebView/密码学全局代码规则（§12.2 ②③）：不绑定清单组件，走 _global_code_rule 分支。
 GLOBAL_CODE_RULES = {
@@ -59,6 +63,10 @@ GLOBAL_CODE_RULES = {
     "TRUST_MANAGER_ALL_ACCEPT",
     "HOSTNAME_VERIFIER_ALWAYS_TRUE",
     "WEAK_CIPHER_ECB",
+    # P5（评审 2026-08-27 第四节）：PendingIntent 可变性 / 日志敏感数据 / 硬编码密钥。
+    "PENDING_INTENT_MUTABLE",
+    "LOG_SENSITIVE_DATA",
+    "HARDCODED_SECRET",
 }
 AUXILIARY = {
     "ACTIVITY_SENSITIVE_NAME_HINT",
@@ -3141,6 +3149,73 @@ def _webview_crypto_match(rule_id: str, code: str, file: dict) -> dict | None:
                 "description": "Cipher.getInstance 使用 AES/ECB 模式：ECB 下相同明文块产生相同"
                                "密文块，泄露明文模式信息，可被模式分析攻击（弱加密模式）。",
                 "sink_kind": "weak_cipher",
+            }
+        return None
+
+    if rule_id == "PENDING_INTENT_MUTABLE":
+        # P5（评审 2026-08-27）：PendingIntent 工厂调用的 flags 不含 FLAG_IMMUTABLE——
+        # API 23+ 默认 mutable（隐式 Intent 被劫持/重定向面），Android 12 强制显式声明。
+        # 调用文本经顶层括号界定，flags 含 FLAG_IMMUTABLE（任意位置）即视为已加固。
+        pattern = re.compile(
+            r"PendingIntent\s*\.\s*(?:getActivity|getActivities|getBroadcast|getService|getForegroundService)\s*\("
+        )
+        for match in pattern.finditer(sanitized):
+            closing = _matching_paren_end(sanitized, match.end() - 1)
+            if closing is None:
+                continue
+            call_text = sanitized[match.start():closing]
+            # P5 核验 R-3：词边界匹配——EXTRA_FLAG_IMMUTABLE_STATE 类无关标识符的
+            # 子串巧合不再视为已加固（PendingIntent.FLAG_IMMUTABLE 经 '.' 边界命中）。
+            if re.search(r"\bFLAG_IMMUTABLE\b", call_text):
+                continue
+            return {
+                "line": _line_at(match.start()),
+                "text": code[match.start():match.start() + 120],
+                "description": "PendingIntent 工厂调用未声明 FLAG_IMMUTABLE：API 23+ 默认可变"
+                               "（mutable），底层 Intent 可被恶意应用篡改（组件重定向/Intent 劫持/"
+                               "权限提升面）；Android 12+ 要求显式声明可变性（MASVS-PLATFORM-2）。",
+                "sink_kind": "pending_intent_mutable",
+            }
+        return None
+
+    if rule_id == "LOG_SENSITIVE_DATA":
+        # P5：Log.[deviw] 调用参数含敏感标识符（SENSITIVE_DATA_RE 词表复用）——
+        # sanitize 已剔除字符串字面量与方法体注释，参数区剩余的标识符/方法名匹配即命中。
+        pattern = re.compile(r"\bLog\s*\.\s*(?:[deviw]|wtf)\s*\(")
+        for match in pattern.finditer(sanitized):
+            closing = _matching_paren_end(sanitized, match.end() - 1)
+            if closing is None:
+                continue
+            call_text = sanitized[match.start():closing]
+            if SENSITIVE_DATA_RE.search(call_text):
+                return {
+                    "line": _line_at(match.start()),
+                    "text": code[match.start():match.start() + 120],
+                    "description": "android.util.Log 输出敏感数据：日志参数含敏感标识符"
+                                   "（token/密码/位置/账号等），logcat 可被系统组件/其他调试面读取，"
+                                   "敏感信息泄露面（MASVS-STORAGE-1）。",
+                    "sink_kind": "log_leak",
+                }
+        return None
+
+    if rule_id == "HARDCODED_SECRET":
+        # P5：敏感命名的字符串常量（值在字符串字面量内——原文匹配 + 行首注释排除）。
+        pattern = re.compile(
+            r'(?:static\s+)?(?:final\s+)?(?:String|java\.lang\.String)\s+'
+            r'(\w*(?:secret|api_?key|access_?key|private_?key|token|password|passwd)\w*)'
+            r'\s*=\s*"([^"\n]{8,})"',
+            re.I,
+        )
+        for match in pattern.finditer(code):
+            if re.match(r"\s*//", code[:match.start()][code.rfind("\n") + 1:]):
+                continue
+            return {
+                "line": _line_at(match.start()),
+                "text": match.group(0)[:120],
+                "description": f"敏感命名字符串常量硬编码（{match.group(1)}）：密钥/凭证编译进"
+                               " APK 可被反提取，凭据泄露面（MASVS-CRYPTO-2）——长度与用途需"
+                               " AI 复核（可能是测试桩/占位值）。",
+                "sink_kind": "hardcoded_secret",
             }
         return None
 

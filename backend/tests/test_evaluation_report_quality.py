@@ -151,10 +151,11 @@ def test_locations_bucket_checked() -> None:
 
 
 class TestComponentDomainR3:
-    """2026-08-26 审查 R-3：webview/crypto/manifest 组件域合法（真实 finding 域）。"""
+    """2026-08-26 审查 R-3：webview/crypto/manifest 组件域合法（真实 finding 域）；
+    P5 核验 R-1 扩 intent/log（新规则域）。"""
 
     def test_webview_and_crypto_components_pass(self) -> None:
-        for component in ("webview", "crypto", "manifest"):
+        for component in ("webview", "crypto", "manifest", "intent", "log"):
             doc = _document()
             doc["poc_skeleton"]["component_kind"] = component
             result = check_report_document(doc)
@@ -165,5 +166,5 @@ class TestComponentDomainR3:
         from app.reporting.poc import FINDING_COMPONENT_KINDS
 
         assert _LEGAL_COMPONENT_KINDS is FINDING_COMPONENT_KINDS  # 共享单一常量
-        for component in ("webview", "crypto", "manifest"):
+        for component in ("webview", "crypto", "manifest", "intent", "log"):
             assert component in FINDING_COMPONENT_KINDS

@@ -60,6 +60,17 @@ GLOBAL_RULE_TERMS = {
     "TRUST_MANAGER_ALL_ACCEPT": ["checkServerTrusted", "X509TrustManager"],
     "HOSTNAME_VERIFIER_ALWAYS_TRUE": ["HostnameVerifier", "verify"],
     "WEAK_CIPHER_ECB": ["Cipher.getInstance", "AES/ECB"],
+    # P5（评审 2026-08-27 第四节）：新增全局代码规则族。
+    "PENDING_INTENT_MUTABLE": ["PendingIntent"],
+    "LOG_SENSITIVE_DATA": ["Log"],
+    "HARDCODED_SECRET": [
+        # P5 核验 R-2：unicode61 tokenchars '_$' 下 SCREAMING_SNAKE 复合名整体成单 token
+        # （ACCESS_TOKEN/client_secret/db_password 等），须按整词扩词项防初筛漏检。
+        "secret", "secret_key", "password", "token", "api_key", "apikey", "access_key",
+        "private_key", "passwd", "access_token", "refresh_token", "auth_token",
+        "session_token", "device_token", "push_token", "client_secret", "app_secret",
+        "consumer_secret", "db_password", "user_password", "admin_password",
+    ],
 }
 FLOW_INTRINSIC_METHODS = {
     "Intent", "Bundle", "getIntent", "getStringExtra", "getIntExtra", "getLongExtra", "getBooleanExtra",

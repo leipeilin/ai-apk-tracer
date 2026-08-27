@@ -182,8 +182,8 @@ def test_rules_use_lightweight_readonly_shared_index(tmp_path: Path) -> None:
     assert any(candidate["rule_id"] == "IMPLICIT_BROADCAST_SENSITIVE_DATA" for candidate in candidates)
     assert sha256(database_path) == database_hash
     input_paths = list((run_dir / "rule-work").glob("*/input.json"))
-    # 内置规则总数（2026-08-15 新增 ACTIVITY_EXTERNAL_ROUTE_INJECTION 后由 29 增至 30）
-    assert len(input_paths) == 30
+    # 内置规则总数（2026-08-27 P5 新增 PENDING_INTENT_MUTABLE/LOG_SENSITIVE_DATA/HARDCODED_SECRET 后由 30 增至 33）
+    assert len(input_paths) == 33
     assert max(path.stat().st_size for path in input_paths) < 64 * 1024
     sample = json.loads(input_paths[0].read_text("utf-8"))
     assert "code_index" not in sample
