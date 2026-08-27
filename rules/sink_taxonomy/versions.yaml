@@ -1,5 +1,5 @@
 schema_version: '1.0'
-taxonomy_version: 1.0.4
+taxonomy_version: 1.0.5
 description: sink taxonomy 版本化文件（T2.9）——backend custom_sink_proposal 判定数据源；种子（base）自
   rules/shared/dataflow.py 提炼，人工扩展（manual）经 scripts/promote_custom_sink.py 追加；单人操作约定，版本冲突
   git 层解决。
@@ -44,6 +44,11 @@ entries:
   taxonomy: ui_navigation
   receiver_leaves:
   - FragmentFactory
+  source: base
+- method: newInstance
+  taxonomy: ui_navigation
+  receiver_leaves:
+  - Constructor
   source: base
 - method: startService
   taxonomy: connection_session_control
@@ -98,6 +103,26 @@ entries:
   - WifiManager
   source: base
 - method: disconnect
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - BluetoothGatt
+  - BluetoothSocket
+  - ConnectivityManager
+  - Socket
+  - UsbDeviceConnection
+  - WifiManager
+  source: base
+- method: startScan
+  taxonomy: connection_session_control
+  receiver_leaves:
+  - BluetoothGatt
+  - BluetoothSocket
+  - ConnectivityManager
+  - Socket
+  - UsbDeviceConnection
+  - WifiManager
+  source: base
+- method: stopScan
   taxonomy: connection_session_control
   receiver_leaves:
   - BluetoothGatt
@@ -162,6 +187,13 @@ entries:
   receiver_leaves:
   - LocationManager
   source: base
+- method: getCurrentLocation
+  taxonomy: location_sensor_collection
+  receiver_leaves:
+  - LocationManager
+  receiver_prefixes:
+  - com.google.android.gms.location.
+  source: base
 - method: registerListener
   taxonomy: location_sensor_collection
   receiver_prefixes:
@@ -222,6 +254,40 @@ entries:
   receiver_exact:
   - android.content.SharedPreferences$Editor
   source: base
+- method: clear
+  taxonomy: persistent_state_write
+  receiver_leaves:
+  - Editor
+  receiver_exact:
+  - android.content.SharedPreferences$Editor
+  source: base
+- method: putInt
+  taxonomy: persistent_state_write
+  receiver_leaves:
+  - Editor
+  receiver_exact:
+  - android.content.SharedPreferences$Editor
+  - android.provider.Settings$Global
+  - android.provider.Settings$Secure
+  source: base
+- method: putLong
+  taxonomy: persistent_state_write
+  receiver_leaves:
+  - Editor
+  receiver_exact:
+  - android.content.SharedPreferences$Editor
+  - android.provider.Settings$Global
+  - android.provider.Settings$Secure
+  source: base
+- method: putBoolean
+  taxonomy: persistent_state_write
+  receiver_leaves:
+  - Editor
+  receiver_exact:
+  - android.content.SharedPreferences$Editor
+  - android.provider.Settings$Global
+  - android.provider.Settings$Secure
+  source: base
 - method: updateData
   taxonomy: persistent_state_write
   receiver_prefixes:
@@ -266,6 +332,22 @@ entries:
   - android.database.sqlite.
   - androidx.sqlite.db.
   source: base
+- method: compileStatement
+  taxonomy: database_mutation
+  receiver_prefixes:
+  - android.database.sqlite.
+  - androidx.sqlite.db.
+  source: base
+- method: applyBatch
+  taxonomy: database_mutation
+  receiver_leaves:
+  - ContentResolver
+  - SQLiteDatabase
+  - SupportSQLiteDatabase
+  receiver_prefixes:
+  - android.database.sqlite.
+  - androidx.sqlite.db.
+  source: base
 - method: query
   taxonomy: data_disclosure
   receiver_leaves:
@@ -303,6 +385,35 @@ entries:
   receiver_prefixes:
   - okhttp3.
   - retrofit2.
+  source: base
+- method: send
+  taxonomy: data_disclosure
+  receiver_prefixes:
+  - okhttp3.
+  - retrofit2.
+  - org.apache.http.
+  source: base
+- method: write
+  taxonomy: data_disclosure
+  receiver_prefixes:
+  - okhttp3.
+  - retrofit2.
+  - org.apache.http.
+  source: base
+- method: FileInputStream
+  taxonomy: data_disclosure
+  receiver_leaves:
+  - FileInputStream
+  source: base
+- method: RandomAccessFile
+  taxonomy: data_disclosure
+  receiver_leaves:
+  - RandomAccessFile
+  source: base
+- method: MatrixCursor
+  taxonomy: data_disclosure
+  receiver_leaves:
+  - MatrixCursor
   source: base
 - method: delete
   taxonomy: file_mutation
@@ -342,14 +453,36 @@ entries:
 - method: write
   taxonomy: file_mutation
   receiver_leaves:
-  - BluetoothOutputStream
   - BufferedWriter
   - FileOutputStream
   - FileWriter
+  - RandomAccessFile
+  receiver_prefixes:
+  - java.nio.file.
+  source: base
+- method: write
+  taxonomy: device_protocol_output
+  receiver_leaves:
+  - BluetoothOutputStream
   - NfcOutputStream
   - ProtocolWriter
-  - RandomAccessFile
   - UsbOutputStream
+  source: base
+- method: truncate
+  taxonomy: file_mutation
+  receiver_leaves:
+  - File
+  - FileChannel
+  - RandomAccessFile
+  receiver_prefixes:
+  - java.nio.file.
+  source: base
+- method: open
+  taxonomy: file_mutation
+  receiver_leaves:
+  - File
+  - FileChannel
+  - ParcelFileDescriptor
   receiver_prefixes:
   - java.nio.file.
   source: base

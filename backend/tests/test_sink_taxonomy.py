@@ -488,3 +488,31 @@ def test_bare_method_entry_matches_any_receiver() -> None:
 
     entry = SinkTaxonomyEntry(method="customSink", taxonomy="t")
     assert sink_matches_taxonomy("customSink", "com.anything.Receiver", [entry]) is not None
+
+
+def test_versions_yaml_synced_with_dataflow() -> None:
+    """双源同步 CI 接入（P1 核验 R-4）：versions.yaml base 条目与
+    rules/shared/dataflow.py::classify_operation_taxonomy 一致性校验。
+
+    冲突（CONFLICT，退出码 1）即失败——防止两源 taxonomy 漂移
+    （验收用例：write 设备流曾归 file_mutation 而 dataflow 归
+    device_protocol_output）。详见 scripts/check_sink_taxonomy_sync.py。
+    """
+
+    import subprocess
+    import sys
+
+    script = WORKSPACE_ROOT / "scripts" / "check_sink_taxonomy_sync.py"
+    taxonomy_yaml = WORKSPACE_ROOT / "rules" / "sink_taxonomy" / "versions.yaml"
+    assert script.exists() and taxonomy_yaml.exists()
+    result = subprocess.run(
+        [sys.executable, str(script), "--yaml", str(taxonomy_yaml)],
+        capture_output=True,
+        text=True,
+        cwd=str(WORKSPACE_ROOT),
+        timeout=120,
+    )
+    assert result.returncode == 0, (
+        f"sink taxonomy 双源同步校验失败（exit={result.returncode}）：\n"
+        f"{result.stdout}\n{result.stderr}"
+    )
