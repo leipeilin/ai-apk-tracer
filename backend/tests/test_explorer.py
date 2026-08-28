@@ -1993,3 +1993,41 @@ class _SequenceConcat:
                 requests=[]),
             "metadata": {"prompt_version": "1.0.0", "model": "test"},
         }
+
+
+def test_partial_jsonl_realtime_persistence(tmp_path: Path) -> None:
+    """P-3 v4 教训修正：worker 完成即实时 append jsonl（崩溃安全）。
+
+    模拟中途死亡：2 入口完成但 run 未收尾（用异常中断 explore_all）——
+    jsonl 里应有已完成入口记录（旧实现零落盘）。
+    """
+    call_tree = _service(tmp_path)
+    entry = _entry(call_tree)
+    other = dict(entry)
+    other["entry_id"] = "act_com_example_A_other"
+
+    class ExplodingAfterFirst:
+        """首入口正常完成，第二入口触发进程级异常（模拟死亡）。"""
+
+        def __init__(self):
+            self._first = FakeAnalyzer([{"done": True, "proposals": [_proposal()]}])
+
+        async def __call__(self, model_input):
+            entry_id = json.loads(model_input.entry_json).get("entry_id")
+            if entry_id == other["entry_id"]:
+                raise RuntimeError("simulated death")
+            return await self._first(model_input)
+
+    import pytest
+    orchestrator = ExplorerOrchestrator(
+        ExplodingAfterFirst(), call_tree,
+        ExplorerSettings(entry_concurrency=1), tmp_path)
+    with pytest.raises(RuntimeError):
+        asyncio_run(orchestrator.explore_all([entry, other]))
+    # 实时 jsonl 保住了首入口（旧实现聚合未开始——零落盘）
+    partial = tmp_path / "explorer" / "observations-partial.jsonl"
+    assert partial.is_file()
+    lines = [json.loads(line) for line in partial.read_text("utf-8").splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert lines[0]["entry_id"] == entry["entry_id"]
+    assert lines[0]["candidate_count"] == 1

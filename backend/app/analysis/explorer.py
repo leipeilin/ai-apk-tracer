@@ -187,6 +187,10 @@ class ExplorerOrchestrator:
                 return None, "skipped_max_cap", []
             entry_candidates, terminated_by, rounds = await self._explore_entry(entry)
             candidate_total += len(entry_candidates)
+            # P-3 修正（v4 教训）：worker 完成即实时 append jsonl——真正的崩溃安全
+            # 落盘（原实现写在聚合循环里，而聚合在全部 job 完成后才开始——
+            # v4 中途死亡时零落盘）。正式产物写盘后删除该临时文件。
+            self._append_partial_record(entry, entry_candidates, terminated_by, rounds)
             return entry_candidates, terminated_by, rounds
 
         jobs = [IndexedJob(index, entry) for index, entry in enumerate(entries)]
@@ -197,7 +201,6 @@ class ExplorerOrchestrator:
             opens_circuit=lambda result: result[1] == "short_circuit",
             circuit_reason="explorer_short_circuit",
         )
-        incremental_writes = 0  # P-3 追加：阶段落盘计数（T1-v3 教训——结束才落盘，
         # 收尾挂起时 198 入口数据全险丢；每入口增量重写后 kill/挂起损失 ≤ 并发数）
         for scheduled_result in scheduled.results:
             if scheduled_result.status == JobStatus.SUCCEEDED:
@@ -228,19 +231,45 @@ class ExplorerOrchestrator:
                     "terminated_by": "short_circuited",
                     "rounds": [], "candidate_count": 0,
                 })
-            # P-3 追加：阶段落盘——每入口聚合后增量重写产物（T1-v3 教训：
-            # 收尾挂起时 198 入口数据全险丢；增量后 kill/挂起损失 ≤ 并发数 4）
-            incremental_writes += 1
-            if incremental_writes % 5 == 0 or incremental_writes == len(scheduled.results):
-                self._entries_explored = entries_explored
-                self._write_observations(observations)
-                self._write_candidates(candidates)
+            # P-3：实时崩溃安全落盘已移至 worker 完成回调（_append_partial_record
+            # ——v4 教训修正：聚合在全部完成后才开始，此处写盘对中途死亡无效）
         # F4（2026-08-27）：入口覆盖透明化——上限截断可见（未探索入口计数
         # 入 stage summary，供覆盖率评估与入口策略优化决策）
         self._entries_explored = entries_explored
         self._write_observations(observations)
         self._write_candidates(candidates)
+        # P-3 修正：正式产物已写——清理实时 jsonl 临时文件
+        partial_path = self._run_dir / "explorer" / "observations-partial.jsonl"
+        if partial_path.is_file():
+            partial_path.unlink()
         return candidates
+
+    def _append_partial_record(
+        self,
+        entry: dict[str, Any],
+        entry_candidates: list[dict[str, Any]] | None,
+        terminated_by: str,
+        rounds: list[dict[str, Any]],
+    ) -> None:
+        """实时崩溃安全落盘（P-3 v4 教训修正）：每入口完成即 append 一行 jsonl。
+
+        进程中途死亡（kill/断网级联/挂起）时，本文件保住全部已完成入口——
+        恢复分析可用（正式 observations.json 仅在全部完成时写）。
+        """
+
+        try:
+            record = {
+                "entry_id": entry.get("entry_id"),
+                "terminated_by": terminated_by,
+                "rounds": rounds,
+                "candidate_count": len(entry_candidates) if entry_candidates is not None else 0,
+            }
+            partial_dir = self._run_dir / "explorer"
+            partial_dir.mkdir(parents=True, exist_ok=True)
+            with (partial_dir / "observations-partial.jsonl").open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError:
+            pass  # 崩溃备份写盘失败不阻断探索主流程
 
     def _build_seed_hops(self, entry: dict[str, Any]) -> list[SeedHop]:
         """骨架链第一跳（M4-SEED-HOPS 评审 R-1/R-6：三要素全确定性）。
