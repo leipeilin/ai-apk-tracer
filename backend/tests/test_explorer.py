@@ -2006,8 +2006,8 @@ def test_partial_jsonl_realtime_persistence(tmp_path: Path) -> None:
     other = dict(entry)
     other["entry_id"] = "act_com_example_A_other"
 
-    class ExplodingAfterFirst:
-        """首入口正常完成，第二入口触发进程级异常（模拟死亡）。"""
+    class HangingSecond:
+        """首入口正常完成，第二入口永久挂起（模拟运行中死亡前的状态）。"""
 
         def __init__(self):
             self._first = FakeAnalyzer([{"done": True, "proposals": [_proposal()]}])
@@ -2015,15 +2015,17 @@ def test_partial_jsonl_realtime_persistence(tmp_path: Path) -> None:
         async def __call__(self, model_input):
             entry_id = json.loads(model_input.entry_json).get("entry_id")
             if entry_id == other["entry_id"]:
-                raise RuntimeError("simulated death")
+                await asyncio.sleep(3600)  # 永久挂起
             return await self._first(model_input)
 
-    import pytest
     orchestrator = ExplorerOrchestrator(
-        ExplodingAfterFirst(), call_tree,
+        HangingSecond(), call_tree,
         ExplorerSettings(entry_concurrency=1), tmp_path)
-    with pytest.raises(RuntimeError):
-        asyncio_run(orchestrator.explore_all([entry, other]))
+    # 超时取消 = 中途死亡（首入口已完成，第二入口挂起被取消——未到清理逻辑）
+    import pytest
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(asyncio.wait_for(
+            orchestrator.explore_all([entry, other]), timeout=3))
     # 实时 jsonl 保住了首入口（旧实现聚合未开始——零落盘）
     partial = tmp_path / "explorer" / "observations-partial.jsonl"
     assert partial.is_file()
