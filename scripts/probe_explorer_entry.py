@@ -398,7 +398,11 @@ async def _run_probe(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         if hasattr(analyzer, "aclose"):
-            await analyzer.aclose()
+            try:
+                await asyncio.wait_for(analyzer.aclose(), 10.0)
+            except TimeoutError:
+                pass  # P-3 追加：aclose 挂起兜底（T1-v3 实证 1h+ 不退出）——
+                # 产物已全部落盘，强退由 OS 回收连接
         return 0 if passed else 1
     finally:
         reader.close()

@@ -190,11 +190,17 @@ class AITransport:
         )
 
     async def aclose(self) -> None:
+        """关闭 transport；对僵尸连接（对端消失的 keep-alive 空闲连接）的关闭
+        握手加 10s 墙钟兜底——T1-v3 实证：run 完成落盘后 aclose 因对端消失
+        的连接无限挂起（进程不退出 1h+）。超时后放弃由 OS 回收连接。"""
         if self._closed:
             return
         self._closed = True
         if self._owns_client and self._client is not None:
-            await self._client.aclose()
+            try:
+                await asyncio.wait_for(self._client.aclose(), 10.0)
+            except (TimeoutError, httpx.HTTPError):
+                pass  # 关闭挂起/失败——连接由 OS 最终回收（数据已落盘）
 
 
 def is_retryable_status(status: int) -> bool:

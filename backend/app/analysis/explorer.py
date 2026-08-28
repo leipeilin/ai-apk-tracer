@@ -197,6 +197,8 @@ class ExplorerOrchestrator:
             opens_circuit=lambda result: result[1] == "short_circuit",
             circuit_reason="explorer_short_circuit",
         )
+        incremental_writes = 0  # P-3 追加：阶段落盘计数（T1-v3 教训——结束才落盘，
+        # 收尾挂起时 198 入口数据全险丢；每入口增量重写后 kill/挂起损失 ≤ 并发数）
         for scheduled_result in scheduled.results:
             if scheduled_result.status == JobStatus.SUCCEEDED:
                 entry_candidates, terminated_by, rounds = scheduled_result.value
@@ -226,6 +228,13 @@ class ExplorerOrchestrator:
                     "terminated_by": "short_circuited",
                     "rounds": [], "candidate_count": 0,
                 })
+            # P-3 追加：阶段落盘——每入口聚合后增量重写产物（T1-v3 教训：
+            # 收尾挂起时 198 入口数据全险丢；增量后 kill/挂起损失 ≤ 并发数 4）
+            incremental_writes += 1
+            if incremental_writes % 5 == 0 or incremental_writes == len(scheduled.results):
+                self._entries_explored = entries_explored
+                self._write_observations(observations)
+                self._write_candidates(candidates)
         # F4（2026-08-27）：入口覆盖透明化——上限截断可见（未探索入口计数
         # 入 stage summary，供覆盖率评估与入口策略优化决策）
         self._entries_explored = entries_explored
