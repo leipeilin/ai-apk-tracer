@@ -109,13 +109,14 @@ ai:
   # 例如 http://127.0.0.1:11434/v1；使用外部地址前需确认代码处理边界。
   # base_url: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   # siliconflow
-  base_url: https://api.siliconflow.cn/v1
+  # base_url: https://api.siliconflow.cn/v1
+  base_url: https://open.bigmodel.cn/api/paas/v4/
   # 这里只填写保存密钥的环境变量名，禁止填写真实密钥、Token 或 Cookie。
   # export AI_APK_TRACER_OPENAI_API_KEY="你的实际密钥"设置在环境变量中
   api_key_env: AI_APK_TRACER_OPENAI_API_KEY
   # OpenAI-compatible 服务端可识别的模型 ID；未配置时跳过 AI 阶段。
   # model: deepseek-v4-pro-0813 
-  model: deepseek-ai/DeepSeek-V4-Flash
+  model: glm-5.3-flash
   # 全局代码外发开关，默认 true；设为 false 会跳过 AI，且不存在额外的逐任务授权步骤。
   allow_external_code: true
   # 旧 timeout_seconds 仅在未显式配置 read_timeout_seconds 时作为读取超时回退。
@@ -158,8 +159,11 @@ ai:
   # 被截断（实测 131/138 初始响应为空字符串，JSON 判定 100% 失败）。本项目所有 AI 输出都是
   # 结构化 JSON 判定，无需思维过程，默认显式关闭。thinking_param 为请求参数名（deepseek
   # 兼容层为 thinking，其他服务可用 reasoning_effort）。
+  # P-3 追加：智谱 glm-5.3-flash"始终思考"模型不支持 disabled——发 low 档
+  # （deepseek 无此配置语义不变：None → {type: disabled}）
   disable_thinking: true
   thinking_param: thinking
+  thinking_level: max
   # 单次输出 token 上限；None 时沿用 context_budget.max_output_tokens（8000）。
   # 仅在关闭思维链后仍需更大输出的场景覆盖。
   max_output_tokens: null

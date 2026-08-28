@@ -98,12 +98,18 @@ class AISettings(BaseModel):
     )
     disable_thinking: bool = Field(
         default=True,
-        description="向模型服务发送 thinking 禁用参数（deepseek-v4-flash 思维模式默认开启，推理 token 会挤占 "
-        "max_tokens 导致 content 为空或截断；JSON 判定任务无需思维过程，显式关闭可显著提高稳定性）",
+        description="向模型服务发送 thinking 参数控制思维模式（deepseek-v4-flash 思维模式默认开启，推理 token 会挤占 "
+        "max_tokens 导致 content 为空或截断；JSON 判定任务无需深度思维，显式控制可显著提高稳定性）",
     )
     thinking_param: str = Field(
         default="thinking",
-        description="禁用思维链的请求参数名；deepseek 兼容层为 thinking，其他服务可用 reasoning_effort",
+        description="思维控制的请求参数名；deepseek 兼容层为 thinking，其他服务可用 reasoning_effort",
+    )
+    thinking_level: str | None = Field(
+        default=None,
+        description="思考强度档位（P-3 追加）：None 发送 {type: disabled}（deepseek 语义）；"
+        "设置时发送 {type: enabled, level: <值>}——智谱 glm-5.3-flash 等始终思考模型"
+        "不支持 disabled，须用 low/high/max 档位",
     )
     max_output_tokens: int | None = Field(
         default=None,

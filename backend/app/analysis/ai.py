@@ -576,6 +576,7 @@ class OpenAICompatibleAnalyzer:
             self._max_output_tokens,
             disable_thinking=bool(getattr(self.settings, "disable_thinking", False)),
             thinking_param=str(getattr(self.settings, "thinking_param", "thinking")),
+            thinking_level=getattr(self.settings, "thinking_level", None),
         )
         metadata.update(_prompt_metadata(rendered, messages, payload))
         metadata["model_input_hash"] = _sha256(input_json)
@@ -863,6 +864,7 @@ class OpenAICompatibleAnalyzer:
             self._max_output_tokens,
             disable_thinking=bool(getattr(self.settings, "disable_thinking", False)),
             thinking_param=str(getattr(self.settings, "thinking_param", "thinking")),
+            thinking_level=getattr(self.settings, "thinking_level", None),
         )
         repair_metadata = _prompt_metadata(rendered, messages, payload)
         metadata["repair"] = repair_metadata
@@ -1362,6 +1364,7 @@ def _chat_payload(
     max_output_tokens: int | None = None,
     disable_thinking: bool = False,
     thinking_param: str = "thinking",
+    thinking_level: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -1374,7 +1377,13 @@ def _chat_payload(
     if disable_thinking:
         # deepseek-v4-flash 思维模式默认开启，推理 token 挤占 max_tokens 导致
         # content 为空或截断（实测 131/138 初始响应为空串）。JSON 判定无需思维过程。
-        payload[thinking_param] = {"type": "disabled"}
+        # P-3 追加：thinking_level 配置——智谱 glm-5.3-flash 等"始终思考"模型
+        # 不支持 disabled，须发 {type: enabled, level: low/high/max} 档位
+        payload[thinking_param] = (
+            {"type": "enabled", "level": thinking_level}
+            if thinking_level
+            else {"type": "disabled"}
+        )
 
     return payload
 
