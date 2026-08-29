@@ -9,13 +9,15 @@
 | [项目概述](./01-项目概述.md) | 产品定位、核心能力、适用场景 | 所有读者 |
 | [架构设计](./02-架构设计.md) | 技术栈、模块关系、数据流 | 开发者 / 架构师 |
 | [分析流程](./03-分析流程.md) | 扫描流水线、证据模型、置信度体系 | 安全分析人员 / 开发者 |
-| [规则体系](./04-规则体系.md) | 29 条内置规则、规则协议、扩展开发 | 规则开发者 |
+| [规则体系](./04-规则体系.md) | 34 条内置规则、规则协议、扩展开发 | 规则开发者 |
 | [API 参考](./05-API参考.md) | 全部 HTTP 端点、请求/响应格式 | 前端开发 / 集成方 |
 | [使用指南](./06-使用指南.md) | 安装、配置、日常使用、故障排除 | 最终用户 |
 | [开发指南](./07-开发指南.md) | 开发环境、测试、构建、贡献规范 | 开发者 |
 | [Pipeline v2 权威设计](./08-L1-AI分诊与语义复核优化设计.md) | L1 分诊、L2 复核、证据与决策边界、当前实施状态 | 安全分析人员 / 开发者 |
 | [风险等级定义](./09-风险等级定义.md) | 6 档等级标准、CVSS/OWASP 映射、人工复核判据 | 安全分析人员 / 开发者 |
 | [漏洞判定标准](./10-漏洞判定标准.md) | 漏洞四要素、23 条红线、verdict 映射、红线 23 约束、可达性分级 | 安全分析人员 / 开发者 |
+| [评估流程与优化门槛](./evaluation-workflow.md) | 离线评估与回归门槛工作流 | 开发者 |
+| [AI 漏洞精准挖掘产品规格](./AI漏洞精准挖掘产品规格文档.md) | 产品规格 PRD | 所有读者 |
 
 ## 快速了解
 
@@ -23,6 +25,7 @@ AI-APK-Tracer 是一个本地单用户的 Android APK 安全分析工具，采�
 
 ```text
 APK 上传 → 结构校验 → JADX 反编译/索引 → 规则预筛选
+→（funnel 前 Guard 验证、api_surface/攻击面扫描）→ 探索轨 explorer（默认关闭）
 → candidate funnel（确定性路由、chain identity、精确去重）
 → 方法级切片 → AI preflight → L1 triage / L2 review
 → 必要时 finalization observation → evidence integrity → decision
@@ -31,10 +34,10 @@ APK 上传 → 结构校验 → JADX 反编译/索引 → 规则预筛选
 
 核心特点：
 
-- **29 条内置规则**覆盖 Activity、Service、ContentProvider、BroadcastReceiver 四大组件及本地配置、WebView、密码学/证书校验攻击面；动态 Receiver 规则可按证据闭合程度输出 L1 暴露或 L2 静态链
+- **34 条内置规则**覆盖 Activity、Service、ContentProvider、BroadcastReceiver 四大组件及本地配置、WebView、密码学/证书校验、Intent（PendingIntent）、日志敏感数据攻击面；动态 Receiver 规则可按证据闭合程度输出 L1 暴露或 L2 静态链
 - **共享只读 SQLite 索引**通过版本化 descriptor 传给规则；规则输出候选及可选组件级 diagnostics
 - **Candidate funnel**先做确定性 disposition、chain identity 和精确去重，再选择 L1/L2 AI 代表项
-- **双轨 AI**只做 strict observation：L1 triage 提出潜在链，L2 review 复核既有静态链；finalization 也只是建议，不写确定性事实或最终状态
+- **AI 采用规则轨 + 可选探索轨**，只做 strict observation：规则轨上 L1 triage 提出潜在链，L2 review 复核既有静态链；探索轨/核验轨默认关闭；finalization 也只是建议，不写确定性事实或最终状态
 - **确定性边界**由规则、evidence validator 与 decision engine 负责 dataflow、Guard、授权、证据完整性和最终 evidence/review 状态
 - **方法级上下文切片**支持有界扩片；输入 token 是按 UTF-8 字节估算的近似值，请求预算按一次逻辑 AI 调用计数
 - **Prompt/Schema 同步门禁**校验版本、模板/Schema hash 与 strict Pydantic 模型，不一致时拒绝加载
