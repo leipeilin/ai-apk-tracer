@@ -16,6 +16,7 @@ def build_run_config(
     source_analysis_enabled: bool = True,
     ai_enabled: bool | None = None,
     ai_skip_reason: str | None = None,
+    explorer_enabled: bool | None = None,
 ) -> dict[str, Any]:
     """构造写入 run manifest 的扫描配置快照。
 
@@ -23,7 +24,10 @@ def build_run_config(
     - ai_enabled：None 时沿用 settings.ai.enabled；显式 False 用于 batch
       预算/墙钟降级（跳过 AI 仅确定性主链）；
     - ai_skip_reason：降级原因附注（'batch_budget'/'batch_wall_clock'），
-      进 manifest 可审计（评审 R-4 的原因分解依据）。
+      进 manifest 可审计（评审 R-4 的原因分解依据）；
+    - explorer_enabled：None 时沿用 settings.explorer.enabled；显式值来自
+      API form 字段（explorer-run-toggle：任务级探索轨开关，orchestrator
+      门禁按本快照执行——对齐 source_analysis_enabled 的 run 级模式）。
     """
 
     ai_section: dict[str, Any] = {
@@ -41,4 +45,10 @@ def build_run_config(
             "enabled": source_analysis_enabled,
         },
         "ai": ai_section,
+        # 全量 dump + enabled 覆盖（与 source_analysis 段同构）：其余 explorer
+        # 参数仅如实记录全局值供审计，不开放任务级覆盖
+        "explorer": {
+            **settings.explorer.model_dump(mode="json"),
+            "enabled": settings.explorer.enabled if explorer_enabled is None else explorer_enabled,
+        },
     }

@@ -152,6 +152,7 @@ export const api = {
     form.append('file', input.file)
     form.append('authorized', String(input.authorized))
     form.append('source_analysis_enabled', String(input.sourceAnalysisEnabled))
+    form.append('explorer_enabled', String(input.explorerEnabled))
     return postFormData<AnalysisRun>({ path: '/api/runs', form, fallbackTotal: input.file.size }, onProgress)
   },
   async listAssets() {

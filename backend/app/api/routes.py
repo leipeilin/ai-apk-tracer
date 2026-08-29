@@ -106,10 +106,13 @@ def create_run(
     file: UploadFile = _APK_UPLOAD,
     authorized: bool = Form(...),
     source_analysis_enabled: bool = Form(default=True),
+    explorer_enabled: bool | None = Form(default=None),
 ) -> dict:
     """接收已授权 APK，完成安全入库后异步启动扫描。
 
     未确认合法测试授权时拒绝创建任务。
+    explorer_enabled：任务级探索轨开关（explorer-run-toggle）；缺省沿用
+    全局 settings.explorer.enabled，显式值写入 config 快照并由探索门禁执行。
     """
 
     if authorized is not True:
@@ -118,7 +121,11 @@ def create_run(
     storage = request.app.state.storage
     repository = request.app.state.repository
     trace_id = trace_id_var.get()
-    config = build_run_config(settings, source_analysis_enabled=source_analysis_enabled)
+    config = build_run_config(
+        settings,
+        source_analysis_enabled=source_analysis_enabled,
+        explorer_enabled=explorer_enabled,
+    )
     ingested = storage.ingest(file.file, file.filename or "upload.apk", trace_id, config)
     run = repository.create_run({
         "id": ingested["id"],

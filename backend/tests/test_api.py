@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import zipfile
@@ -7,8 +8,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.config import Settings, SourceAnalysisSettings, StorageSettings
+from app.analysis.orchestrator import ScanOrchestrator
+from app.config import ExplorerSettings, Settings, SourceAnalysisSettings, StorageSettings
 from app.main import create_app
+from app.runs.run_config import build_run_config
 
 
 def client_for(tmp_path: Path) -> TestClient:
@@ -125,6 +128,83 @@ def test_get_run_returns_track_progress(tmp_path: Path) -> None:
         assert rules["failed"] is None or rules["failed"] <= rules["total"]
         # explorer 默认未启用 → 轨级 null（不伪造 0）
         assert progress["explorer"] is None
+
+
+def test_create_run_explorer_toggle(tmp_path: Path) -> None:
+    """explorer-run-toggle：explorer_enabled 三态 → manifest config 快照与探索门禁。"""
+    with client_for(tmp_path) as client:
+        files = {"file": ("sample.apk", apk_payload(), "application/vnd.android.package-archive")}
+
+        # ① 显式关闭：config 落 False，且扫描完成后不产生 explorer 阶段
+        response = client.post(
+            "/api/runs",
+            files=files,
+            data={"authorized": "true", "source_analysis_enabled": "false", "explorer_enabled": "false"},
+        )
+        manifest = client.app.state.storage.read_manifest(response.json()["id"])
+        assert manifest["config"]["explorer"]["enabled"] is False
+        assert all(stage["name"] != "explorer" for stage in manifest["stages"])
+
+        # ② 显式开启：config 落 True（探索阶段行为由既有 test_explorer 覆盖）
+        response = client.post(
+            "/api/runs",
+            files=files,
+            data={"authorized": "true", "source_analysis_enabled": "false", "explorer_enabled": "true"},
+        )
+        manifest = client.app.state.storage.read_manifest(response.json()["id"])
+        assert manifest["config"]["explorer"]["enabled"] is True
+
+        # ③ 缺省：沿用测试所用 Settings 实例的全局值（client_for 直构 Settings
+        # 不加载 default.yaml → 模型默认 False；运行时 True 由 get_settings 提供）
+        response = client.post(
+            "/api/runs",
+            files=files,
+            data={"authorized": "true", "source_analysis_enabled": "false"},
+        )
+        manifest = client.app.state.storage.read_manifest(response.json()["id"])
+        assert manifest["config"]["explorer"]["enabled"] is client.app.state.settings.explorer.enabled
+
+        # ④ 非法值：bool 解析失败 422（与 source_analysis_enabled 同语义——代码审查 C-3）
+        response = client.post(
+            "/api/runs",
+            files=files,
+            data={"authorized": "true", "source_analysis_enabled": "false", "explorer_enabled": "abc"},
+        )
+        assert response.status_code == 422
+
+
+def test_scan_explorer_fallback_for_legacy_config(tmp_path: Path) -> None:
+    """N-1（代码审查 C-1）：改动前创建的历史 run（config 无 explorer 段）→
+    门禁回退全局 settings.explorer.enabled，行为与改动前一致。"""
+    settings = Settings(
+        database_path=tmp_path / "tracer.sqlite3",
+        storage=StorageSettings(data_root=tmp_path / "data"),
+        source_analysis=SourceAnalysisSettings(enabled=False),
+        explorer=ExplorerSettings(enabled=True),
+    )
+    with TestClient(create_app(settings)) as client:
+        storage = client.app.state.storage
+        repository = client.app.state.repository
+        config = build_run_config(settings, source_analysis_enabled=False)
+        del config["explorer"]  # 模拟改动前创建的历史 run（快照无 explorer 段）
+        trace_id = "trace-explorer-fallback"
+        ingested = storage.ingest(io.BytesIO(apk_payload()), "sample.apk", trace_id, config)
+        repository.create_run({
+            "id": ingested["id"],
+            "trace_id": trace_id,
+            "status": "queued",
+            "stage": "queued",
+            "apk_filename": "sample.apk",
+            "apk_sha256": ingested["sha256"],
+            "config": config,
+            "manifest_path": str(storage.run_dir(ingested["id"]) / "manifest.json"),
+        })
+        asyncio.run(ScanOrchestrator(
+            settings, repository, storage, client.app.state.ai_runtime,
+        ).scan(ingested["id"]))
+        manifest = storage.read_manifest(ingested["id"])
+        # 回退全局 True → 探索阶段照常执行
+        assert any(stage["name"] == "explorer" for stage in manifest["stages"])
 
 
 def test_upload_manifest_ai_summary_has_requests_used(tmp_path: Path) -> None:

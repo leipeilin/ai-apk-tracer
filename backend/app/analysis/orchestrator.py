@@ -114,6 +114,11 @@ class ScanOrchestrator:
         source_enabled = run.get("config", {}).get("source_analysis", {}).get(
             "enabled", self.settings.source_analysis.enabled
         )
+        # 任务级探索轨开关（explorer-run-toggle）：config 快照优先，老 run
+        # 无 explorer 段时回退全局配置（与 source_enabled 同款兜底）
+        explorer_enabled = run.get("config", {}).get("explorer", {}).get(
+            "enabled", self.settings.explorer.enabled
+        )
         if source_enabled:
             self._stage(run_id, "decompiling")
             artifact = await self.decompiler.decompile(apk_path, run_dir / "decompile")
@@ -228,7 +233,7 @@ class ScanOrchestrator:
         # 规则候选同 funnel 路由 L2 复核）；partial/unverified 留在
         # explorer/candidates.json（M2 验收 4.3.2：未通过校验的探索候选
         # 0 条进入正式 finding）。默认关闭。
-        if self.settings.explorer.enabled:
+        if explorer_enabled:
             self._stage(run_id, "explorer")
             # F5（评审 P1-1 数据源接线）：传入 rule_prescan 产物（此时点
             # candidates 尚未 extend explorer 结果——纯规则候选），供

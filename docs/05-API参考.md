@@ -38,6 +38,9 @@ Multipart 字段：
 | `file` | File | 是 | APK |
 | `authorized` | Boolean | 是 | 必须为 true |
 | `source_analysis_enabled` | Boolean | 否 | 默认 true |
+| `explorer_enabled` | Boolean | 否 | 任务级探索轨开关（explorer-run-toggle）；缺省沿用服务端 `explorer.enabled` 配置 |
+
+任务级配置以落盘 manifest 的 `config` 快照为准（`config.explorer.enabled` 可审计）；HTTP 响应按脱敏设计仅透出 config 的 `ai` 段。
 
 成功状态码为 **202 Accepted**：上传与安全入库在请求内同步完成，扫描通过后台任务异步启动。响应体为新 run，主键字段是 `id`：
 

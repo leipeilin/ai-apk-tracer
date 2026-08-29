@@ -6,13 +6,16 @@ import { formatBytes } from '../../lib/format'
 import { Button } from '../../ui/Button'
 
 /**
- * 收集已授权 APK、反编译开关并创建扫描任务；上传阶段通过 XHR 展示字节级进度。
+ * 收集已授权 APK、反编译/探索轨开关并创建扫描任务；上传阶段通过 XHR 展示字节级进度。
+ * 探索轨开关为任务级配置（explorer-run-toggle），随任务写入 manifest config 快照。
  */
 export function CreateRunForm({ onClose }: { onClose?: () => void }) {
   const navigate = useNavigate()
   const inputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
   const [sourceAnalysis, setSourceAnalysis] = useState(true)
+  // 默认开——对齐全局配置默认（2026-08-29 用户决策：b2d4d15 置值、add9ef0 同步断言）
+  const [explorerEnabled, setExplorerEnabled] = useState(true)
   const [authorized, setAuthorized] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -50,7 +53,7 @@ export function CreateRunForm({ onClose }: { onClose?: () => void }) {
     try {
       // 上传成功后直接进入任务详情，后续阶段状态由详情页轮询更新。
       const run = await api.createRun(
-        { file, authorized, sourceAnalysisEnabled: sourceAnalysis },
+        { file, authorized, sourceAnalysisEnabled: sourceAnalysis, explorerEnabled },
         ({ percent }) => setProgress(percent),
       )
       setProgress(100)
@@ -100,6 +103,11 @@ export function CreateRunForm({ onClose }: { onClose?: () => void }) {
         <label className="switch-row">
           <span><strong>启用反编译代码分析</strong><small>对 DEX 伪源码执行数据流与调用链检查</small></span>
           <input type="checkbox" checked={sourceAnalysis} onChange={(event) => setSourceAnalysis(event.target.checked)} />
+          <span className="switch" aria-hidden />
+        </label>
+        <label className="switch-row">
+          <span><strong>启用探索轨</strong><small>AI 检索循环逐个探索攻击面入口（消耗 AI 请求预算）</small></span>
+          <input type="checkbox" checked={explorerEnabled} onChange={(event) => setExplorerEnabled(event.target.checked)} />
           <span className="switch" aria-hidden />
         </label>
         <label className="authorization-note">

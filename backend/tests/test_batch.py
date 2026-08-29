@@ -478,6 +478,11 @@ def test_run_config_golden(tmp_path: Path) -> None:
             "provider_kind": "openai-compatible",
             "model": settings.ai.model,
         },
+        # explorer-run-toggle：explorer 段随快照恒存在；未显式传参时沿用 settings
+        "explorer": {
+            **settings.explorer.model_dump(mode="json"),
+            "enabled": settings.explorer.enabled,
+        },
     }
     assert build_run_config(settings, source_analysis_enabled=False) == golden
 

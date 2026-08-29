@@ -261,6 +261,8 @@ export interface CreateRunInput {
   file: File
   authorized: boolean
   sourceAnalysisEnabled: boolean
+  /** 任务级探索轨开关（explorer-run-toggle）；后端写入 manifest config 快照。 */
+  explorerEnabled: boolean
 }
 
 export interface CreateRunProgress {

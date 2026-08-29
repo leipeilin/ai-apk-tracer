@@ -41,7 +41,7 @@ export function ExplorerQueuePanel({ queue }: { queue: ExplorerQueueResponse | n
         <header className="panel-head">
           <h2><Compass size={16} />探索人工队列</h2>
         </header>
-        <EmptyState icon={<Compass size={27} />} title="探索轨未启用或无候选" description="开启 explorer.enabled 后，部分验证与未验证的探索候选将在此按置信度与深挖证据排序展示。" />
+        <EmptyState icon={<Compass size={27} />} title="探索轨未启用或无候选" description="提交任务时开启「启用探索轨」后，部分验证与未验证的探索候选将在此按置信度与深挖证据排序展示。" />
       </section>
     )
   }
