@@ -65,9 +65,10 @@
         "allow_external_code": {"type": "boolean", "description": "是否允许向模型服务发送候选事实和方法级代码切片。"},
         "timeout_seconds": {"type": "integer", "minimum": 1, "default": 120, "description": "兼容字段；仅在未显式配置 read_timeout_seconds 时作为读取超时回退。"},
         "connect_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 600, "default": 10.0, "description": "建立模型连接的超时，单位秒。"},
-        "read_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600, "default": 120.0, "description": "读取模型响应的显式超时，单位秒；优先于 timeout_seconds。"},
+        "read_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600, "default": 240.0, "description": "读取模型响应的显式超时，单位秒；优先于 timeout_seconds（P-1 验证值 240——原 120 对慢推理模型不足，全量数据后回归定参）。"},
         "write_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 600, "default": 30.0, "description": "写入模型请求的超时，单位秒。"},
         "pool_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 600, "default": 10.0, "description": "等待 HTTP 连接池的超时，单位秒。"},
+        "request_timeout_seconds": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 7200, "default": null, "description": "单次模型 HTTP 请求总时长兜底（墙钟）——防御中间层 keepalive 重置分项超时的长挂起（M2-DEFECT-FIX D-2）；超时归入可重试 network 失败。null 时动态取 read_timeout_seconds + 60。"},
         "max_request_bytes": {"type": "integer", "minimum": 1, "default": 524288, "description": "单次 AI 请求 HTTP body 字节上限。"},
         "max_concurrent": {"type": "integer", "minimum": 1, "maximum": 64, "default": 6, "description": "进程级 AI HTTP 最大并发数。"},
         "candidate_concurrency": {"type": "integer", "minimum": 1, "maximum": 32, "default": 4, "description": "单次扫描并发分析候选数上限。"},
@@ -78,7 +79,12 @@
         "retry_base_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 0.05, "description": "指数退避基础时长，单位秒。"},
         "retry_max_seconds": {"type": "number", "minimum": 0, "maximum": 600, "default": 30.0, "description": "单次重试等待上限，单位秒。"},
         "retry_jitter_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 0.05, "description": "单次重试随机抖动上限，单位秒。"},
-        "cache_max_entry_bytes": {"type": "integer", "minimum": 1024, "maximum": 16777216, "default": 2097152, "description": "run 内共享 AI 缓存的单条记录大小上限。"}
+        "cache_max_entry_bytes": {"type": "integer", "minimum": 1024, "maximum": 16777216, "default": 2097152, "description": "run 内共享 AI 缓存的单条记录大小上限。"},
+        "preflight_strict_protocol": {"type": "boolean", "default": false, "description": "preflight 是否只接受纯 JSON 响应；默认 false 允许围栏剥离与一次 repair 后再熔断。"},
+        "disable_thinking": {"type": "boolean", "default": true, "description": "向模型服务发送 thinking 参数控制思维模式；推理 token 会挤占 max_tokens 导致 content 为空或截断，JSON 判定任务无需深度思维，显式控制可显著提高稳定性。"},
+        "thinking_param": {"type": "string", "minLength": 1, "default": "thinking", "description": "思维控制的请求参数名；deepseek 兼容层为 thinking，其他服务可用 reasoning_effort。"},
+        "thinking_level": {"type": ["string", "null"], "default": null, "description": "思考强度档位；null 发送 {type: disabled}（deepseek 语义），设置时发送 {type: enabled, level: <值>}——始终思考模型（如 glm-5.3-flash）不支持 disabled，须用 low/high/max 档位。"},
+        "max_output_tokens": {"type": ["integer", "null"], "minimum": 1, "maximum": 384000, "default": null, "description": "单次模型输出 token 上限；null 时沿用 context_budget.max_output_tokens，供在思维链已关闭但仍需更大输出的场景覆盖。"}
       },
       "additionalProperties": true
     },
@@ -88,6 +94,9 @@
       "properties": {
         "max_l1_candidates_per_run": {"type": "integer", "minimum": 0, "default": 20, "description": "单次任务最多进入 AI 的 L1 代表候选数。"},
         "min_l1_risk_score": {"type": "integer", "minimum": 0, "maximum": 100, "default": 80, "description": "L1 候选进入 AI 分诊的最低风险分。"},
+        "demote_unproven_flow": {"type": "boolean", "default": false, "description": "值流未证明的链（control_to_sink 作用域未解析、legacy 回退匹配）是否降级为 signal 不占 AI 预算；默认关闭，需先完成历史回归（被降级集合中真漏洞数必须为 0）与至少 3 个不同风格 APK 的复现验证方可开启。"},
+        "l1_priority_clean": {"type": "boolean", "default": false, "description": "L1 预算按可判定性排序（R-2）：receiver_flag_tier 高的（confirmed_exported_clean 真实暴露面）优先进 AI 预算；默认关闭，需口径 A/B 对比确认 clean 形态判定质量后开启。"},
+        "l1_skip_ai": {"type": "boolean", "default": true, "description": "L1 informational 候选默认不进 AI：L1 承载暴露事实/无法判定而非漏洞成立，coverage_insufficient/deterministically_refuted 形态不占预算；receiver_flag_tier=confirmed_exported_clean 与 funnel_disposition 在 {exposure_only, high_risk_uncertain} 的确定性暴露面例外保留。false 完全回退旧行为。"},
         "l2_ai_undecidable_route": {"type": "boolean", "default": false, "description": "S4：L2 AI 预算按可判定性路由（纯运行期目标/符号歧义且无 AI 可补证据的候选不进 AI）。默认关闭，需先完成 unresolved 路由表校准。"}
       },
       "additionalProperties": false
@@ -106,7 +115,7 @@
         "max_requests_per_candidate": {"type": "integer", "minimum": 1, "default": 4, "description": "单候选逻辑 AI 调用上限，不按 transport HTTP 重试计数。"},
         "max_expansions_per_candidate": {"type": "integer", "minimum": 0, "default": 2, "description": "单候选上下文扩片次数上限。"},
         "max_candidate_wall_seconds": {"type": "integer", "minimum": 1, "default": 300, "description": "单候选阶段墙钟预算；到期后不发起后续调用，但不取消在途请求。"},
-        "max_requests_per_run": {"type": "integer", "minimum": 1, "default": 140, "description": "单次扫描逻辑 AI 调用上限，不按 transport HTTP 重试计数。"},
+        "max_requests_per_run": {"type": ["integer", "null"], "minimum": 1, "default": 140, "description": "单次扫描逻辑 AI 调用上限，不按 transport HTTP 重试计数（context_budget 全轨共享池——explorer/deep_dive/L1L2 三处消费）；null = 无上限（P-2 验证阶段临时形态，全量数据后随 T1 恢复定参，见 docs/todo/）。"},
         "max_contexts_per_slice": {"type": "integer", "minimum": 1, "default": 24, "description": "送入单次 AI 请求的上下文数量上限。"},
         "max_additions_per_request": {"type": "integer", "minimum": 1, "default": 8, "description": "单轮上下文扩片最多新增的上下文数量。"},
         "max_context_bytes_per_slice": {"type": "integer", "minimum": 1, "default": 96000, "description": "单个切片中 contexts 的确定性 UTF-8 JSON 字节上限。"},
@@ -120,14 +129,16 @@
       "required": ["enabled"],
       "properties": {
         "enabled": {"type": "boolean", "default": false, "description": "是否启用探索轨；默认关闭，开启前须过 M2 三加一验收。"},
-        "max_candidates_per_run": {"type": "integer", "minimum": 1, "default": 50, "description": "单次扫描最多纳入 funnel 的探索候选数。"},
+        "max_candidates_per_run": {"type": ["integer", "null"], "minimum": 1, "default": 50, "description": "单次扫描最多纳入 funnel 的探索候选数；null = 无上限（P-1 验证阶段临时形态——采集无截断数据后须回归定参恢复，见 docs/todo/ T1）。"},
         "auto_promote": {"type": "boolean", "default": false, "description": "validated 探索候选是否自动升入正式候选池；默认 false。"},
         "allow_external_code": {"type": "boolean", "default": true, "description": "是否允许向模型发送探索检索读回的代码片段。"},
         "prompt_version": {"type": "string", "minLength": 1, "default": "explorer/1.0.0", "description": "探索协议版本；先声明后注册（T2.5）。"},
         "max_rounds_per_entry": {"type": "integer", "minimum": 1, "default": 4, "description": "单入口检索循环轮数上限。"},
         "max_requests_per_entry": {"type": "integer", "minimum": 1, "default": 20, "description": "单入口读码请求总数上限。"},
+        "entry_concurrency": {"type": "integer", "minimum": 1, "maximum": 16, "default": 4, "description": "探索轨入口并行探索数（P-2 D3——BoundedJobScheduler worker 数）；1 = 串行等价。"},
         "max_requests_per_candidate": {"type": "integer", "minimum": 1, "default": 4, "description": "单探索候选的 AI 请求上限。"},
         "deep_dive_prompt_version": {"type": "string", "minLength": 1, "default": "explorer-deep-dive/1.0.0", "description": "partial 候选深挖协议版本。"},
+        "custom_sink_taxonomy_path": {"type": ["string", "null"], "default": null, "description": "sink taxonomy 版本化文件路径（T2.9）；null = 自动发现 rules/sink_taxonomy/versions.yaml（存在即启用判定——文件缺失/损坏/路径不存在即禁用，兼容保守行为）。"},
         "call_tree": {
           "type": "object",
           "properties": {

@@ -119,6 +119,39 @@ def test_config_schema_describes_new_sections() -> None:
     assert properties["report"]["properties"]["allow_executable_poc"]["default"] is False
 
 
+def test_config_schema_describes_thinking_and_budget_fields() -> None:
+    document = json.loads((WORKSPACE_ROOT / "schemas/config.schema.json").read_text("utf-8"))
+    ai = document["properties"]["ai"]["properties"]
+    funnel = document["properties"]["funnel"]["properties"]
+    explorer = document["properties"]["explorer"]["properties"]
+
+    # ai 段：思维控制/输出上限/preflight 协议/请求总兜底（与 config.py AISettings 对齐）
+    assert ai["disable_thinking"]["default"] is True
+    assert ai["thinking_param"]["default"] == "thinking"
+    assert ai["thinking_level"]["type"] == ["string", "null"]
+    assert ai["max_output_tokens"]["type"] == ["integer", "null"]
+    assert ai["max_output_tokens"]["maximum"] == 384000
+    assert ai["preflight_strict_protocol"]["default"] is False
+    assert ai["request_timeout_seconds"]["type"] == ["number", "null"]
+    assert ai["read_timeout_seconds"]["default"] == 240.0
+    # funnel 段：L1 预算开关；l2_ai_undecidable_route 在 config.py 与
+    # candidate_funnel.py 均有定义与消费，schema 不得移除（漂移审计曾误判为死字段）
+    assert funnel["demote_unproven_flow"]["default"] is False
+    assert funnel["l1_priority_clean"]["default"] is False
+    assert funnel["l1_skip_ai"]["default"] is True
+    assert funnel["l2_ai_undecidable_route"]["type"] == "boolean"
+    # explorer 段：入口并行度、可空候选预算与 sink taxonomy 路径
+    assert explorer["entry_concurrency"]["default"] == 4
+    assert explorer["entry_concurrency"]["maximum"] == 16
+    assert explorer["max_candidates_per_run"]["type"] == ["integer", "null"]
+    assert explorer["max_candidates_per_run"]["default"] == 50
+    assert explorer["custom_sink_taxonomy_path"]["type"] == ["string", "null"]
+    # context_budget.max_requests_per_run 支持整型或 null（None = 无上限）
+    max_requests_per_run = document["properties"]["context_budget"]["properties"]["max_requests_per_run"]
+    assert max_requests_per_run["type"] == ["integer", "null"]
+    assert max_requests_per_run["default"] == 140
+
+
 def test_batch_zero_semantics() -> None:
     from app.config import BatchSettings
 
