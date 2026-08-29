@@ -164,6 +164,12 @@ class ScanOrchestrator:
         ) if source_enabled else {"schema_version": "1.0.0", "files": [], "content_sha256": None}
 
         self._stage(run_id, "rule_prescan")
+        # 运行反馈（track-progress-console）：规则总量提前落 manifest——运行中
+        # rule_prescan summary 未生成前，progress 计数依赖此键；与终态 summary
+        # 共用一次 discover() 结果（代码审查 C-3：省 2 次 YAML 全量解析，且
+        # 提前写入与终态口径绝对同源）
+        rule_total_count = len(self.rule_runner.discover())
+        self.storage.update_manifest(run_id, rule_total_count=rule_total_count)
         candidates, failures = await asyncio.to_thread(
             self.rule_runner.run_all,
             run_dir,
@@ -186,7 +192,7 @@ class ScanOrchestrator:
                 "candidate_count": len(candidates),
                 "rule_failures": failures,
                 "component_coverage_gaps": rule_component_gaps,
-                "rule_total_count": len(self.rule_runner.discover()),
+                "rule_total_count": rule_total_count,
             },
         )
         for candidate in candidates:
@@ -1189,6 +1195,11 @@ class ScanOrchestrator:
                 build_known_findings_context(rule_candidates) if rule_candidates else {}
             )
             degraded = bool(entries) and not effective and entries[0].get("degraded")
+            # 运行反馈（track-progress-console）：探索总量提前落 manifest——运行中
+            # explorer summary 未生成前，progress 计数依赖此键（与终态 entry_count
+            # 同源同值：同一 effective 列表；api_entry_table 条目无 method_id 键，
+            # JSON 静态计数不可行——评审 R-1）
+            self.storage.update_manifest(run_id, explorer_total_count=len(effective))
             orchestrator = ExplorerOrchestrator(
                 budgeted_ai_call, call_tree, explorer_settings, run_dir, budgeted_deep_dive_call,
                 attack_surface=load_attack_surface_index(run_dir),

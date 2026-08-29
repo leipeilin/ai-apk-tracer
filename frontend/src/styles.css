@@ -358,6 +358,21 @@ a { color: inherit; text-decoration: none; }
 .explorer-queue-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted); }
 .explorer-queue-notes { max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* 双轨切换与运行反馈（track-progress-console）：分段按钮 + 进度块——
+   对齐 .theme-switch 分段激活态与 .progress-track 进度条既有模式 */
+.track-switcher { margin-bottom: 12px; padding: 5px; border-radius: 12px; display: inline-flex; gap: 4px; }
+.track-tab { min-height: 34px; padding: 0 13px; display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 650; cursor: pointer; transition: all .18s ease; }
+.track-tab:hover { color: var(--text); background: var(--surface-hover); }
+.track-tab.active { color: var(--accent); background: var(--surface-solid); box-shadow: inset 0 0 0 1px var(--line); }
+.track-tab-count { padding: 1px 7px; border-radius: 999px; background: var(--bg-soft); color: var(--muted); font-size: 9.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.track-tab.active .track-tab-count { color: var(--accent); background: var(--accent-soft); }
+.track-progress { margin-bottom: 12px; padding: 12px 14px; border-radius: 12px; display: flex; flex-direction: column; gap: 9px; }
+.track-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.track-progress-label { display: inline-flex; align-items: center; gap: 7px; color: var(--text); font-size: 11px; font-weight: 700; }
+.track-progress-stats { display: inline-flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 10.5px; }
+.track-progress-stats strong { color: var(--accent); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.track-progress-note { color: var(--faint); font-size: 10.5px; }
+
 .drawer-root { position: fixed; z-index: 50; inset: 0; display: flex; justify-content: flex-end; }
 .drawer-backdrop { position: absolute; inset: 0; border: 0; background: rgba(25, 23, 19, .48); backdrop-filter: blur(4px); cursor: default; }
 .drawer-panel { position: relative; width: min(670px, calc(100% - 24px)); height: 100%; background: var(--surface-solid); box-shadow: -24px 0 70px rgba(22,20,17,.22); border-left: 1px solid var(--line); overflow-y: auto; }

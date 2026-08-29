@@ -13,8 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
-from concurrent.futures import ProcessPoolExecutor
-from itertools import repeat
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
@@ -102,7 +101,13 @@ class RuleRunner:
             if rules else 0
         )
         if max_workers <= 1:
-            results = [self._run_one(run_dir, rule, payload) for rule in rules]
+            # 运行反馈（track-progress-console）：逐条完成即落盘——详情页进度
+            # 计数（progress.processed）依赖 rule-results 文件实时可见
+            results = []
+            for rule in rules:
+                result = self._run_one(run_dir, rule, payload)
+                self._persist_result(run_dir, rule, result)
+                results.append(result)
         else:
             settings = {
                 name: getattr(self.settings, name)
@@ -111,22 +116,33 @@ class RuleRunner:
                     "stdout_max_mb", "stderr_max_mb", "workdir_max_mb",
                 )
             }
+            indexed_results: list[tuple[int, dict]] = []
             with ProcessPoolExecutor(
                 max_workers=max_workers,
                 mp_context=multiprocessing.get_context("spawn"),
             ) as executor:
-                results = list(executor.map(
-                    _run_rule_worker,
-                    repeat(self.rules_root.as_posix()),
-                    repeat(settings),
-                    repeat(run_dir.as_posix()),
-                    rules,
-                    repeat(payload),
-                ))
-
+                # as_completed 逐条回收：每条完成即落盘（运行反馈实时可见）；
+                # 索引排序还原 rules 原序——candidates/failures 聚合顺序与
+                # executor.map 版本一致（异常传播语义亦同：_run_one 已归一
+                # 全部预期失败，仅资源类 OSError 可能抛出）
+                future_to_index = {
+                    executor.submit(
+                        _run_rule_worker,
+                        self.rules_root.as_posix(),
+                        settings,
+                        run_dir.as_posix(),
+                        rule,
+                        payload,
+                    ): index
+                    for index, rule in enumerate(rules)
+                }
+                for future in as_completed(future_to_index):
+                    index = future_to_index[future]
+                    result = future.result()
+                    indexed_results.append((index, result))
+                    self._persist_result(run_dir, rules[index], result)
+            results = [result for _, result in sorted(indexed_results, key=lambda pair: pair[0])]
         for rule, result in zip(rules, results):
-            result_path = run_dir / "rule-results" / f"{rule['metadata']['id']}.json"
-            self._write_result(result_path, result)
             if result["status"] == "completed":
                 self._export_rule_artifacts(run_dir, result)
                 candidates.extend(result["candidates"])
@@ -149,6 +165,16 @@ class RuleRunner:
             else:
                 failures.append(result)
         return candidates, failures
+
+    def _persist_result(self, run_dir: Path, rule: dict, result: dict[str, Any]) -> None:
+        """单条规则结果落盘（运行反馈实时可见——track-progress-console）。
+
+        与原 run_all 收尾批量写盘等价，仅提前到该规则完成时点；原子性由
+        _write_result（tmp + os.replace）保证。
+        """
+
+        result_path = run_dir / "rule-results" / f"{rule['metadata']['id']}.json"
+        self._write_result(result_path, result)
 
     @staticmethod
     def _write_result(result_path: Path, result: dict[str, Any]) -> None:

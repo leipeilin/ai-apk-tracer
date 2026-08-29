@@ -105,6 +105,28 @@ def test_upload_creates_run(tmp_path: Path) -> None:
         assert any(item["evidence_level"] == "L1" for item in findings)
 
 
+def test_get_run_returns_track_progress(tmp_path: Path) -> None:
+    """track-progress-console：getRun 响应含双轨 progress 块（终态对账）。"""
+    with client_for(tmp_path) as client:
+        response = client.post(
+            "/api/runs",
+            files={"file": ("sample.apk", apk_payload(), "application/vnd.android.package-archive")},
+            data={"authorized": "true", "source_analysis_enabled": "false"},
+        )
+        run_id = response.json()["id"]
+        run = client.get(f"/api/runs/{run_id}").json()
+        progress = run["progress"]
+        assert progress is not None
+        rules = progress["rules"]
+        assert rules is not None
+        assert rules["total"] >= 1
+        # 产物词干排除后（评审 R-2）：每条规则（含失败）恰一个 result 文件
+        assert rules["processed"] == rules["total"]
+        assert rules["failed"] is None or rules["failed"] <= rules["total"]
+        # explorer 默认未启用 → 轨级 null（不伪造 0）
+        assert progress["explorer"] is None
+
+
 def test_upload_manifest_ai_summary_has_requests_used(tmp_path: Path) -> None:
     """真实 pipeline 的 ai_analysis 阶段 summary 含 requests_used（T1.3 batch 预算计数源）。"""
     with client_for(tmp_path) as client:

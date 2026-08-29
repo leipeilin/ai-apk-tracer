@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Annotated
@@ -16,11 +17,14 @@ from app.api.models import BatchCreateRequest, CleanupRequest, ReviewRequest
 from app.findings.report import build_report_payload, render_markdown
 from app.reporting.generator import generate_report_document, save_report_document
 from app.runs.cleanup import CleanupService
+from app.runs.progress import build_run_progress
 from app.runs.run_config import build_run_config
 from app.shared.errors import AppError, NotFoundError, ValidationError
 from app.shared.logging import trace_id_var
 
 router = APIRouter()
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _safe_config_snapshot(config: object) -> dict:
@@ -141,6 +145,7 @@ def get_run(run_id: str, request: Request) -> dict:
     """返回任务状态，并在可用时补充清单与应用包信息。"""
 
     run = request.app.state.repository.get_run(run_id)
+    run["progress"] = None
     try:
         manifest = request.app.state.storage.read_manifest(run_id)
         run["manifest"] = manifest
@@ -149,6 +154,15 @@ def get_run(run_id: str, request: Request) -> dict:
         run["artifact_schema_versions"] = manifest.get("artifact_schema_versions", {})
         run["stages"] = manifest.get("stages", [])
         run["file_size"] = manifest.get("apk", {}).get("size_bytes")
+        # 双轨运行反馈（track-progress-console）：计算自身全容错，此处兜底
+        # 保证 progress 永不阻塞 run 响应。
+        try:
+            run["progress"] = build_run_progress(
+                request.app.state.storage.run_dir(run_id), manifest
+            )
+        except Exception:
+            LOGGER.warning("run progress 计算失败（降级 null）", exc_info=True)
+            run["progress"] = None
         index_manifest = request.app.state.storage.run_dir(run_id) / "index" / "manifest.json"
         if index_manifest.is_file() and not index_manifest.is_symlink():
             parsed = json.loads(index_manifest.read_text("utf-8"))

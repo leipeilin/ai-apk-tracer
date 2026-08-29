@@ -585,6 +585,9 @@ def test_explorer_stage_normalizes_validated_into_main_candidates(tmp_path: Path
     # F4 核验 V-1：summary 接线断言（单入口无截断——全覆盖态）
     assert summary["entries_explored"] == 1
     assert summary["entries_unexplored"] == 0
+    # track-progress-console：探索总量提前落 manifest（运行中 progress 数据源，
+    # 与终态 entry_count 同源同值——评审 R-1）
+    assert manifest["explorer_total_count"] == summary["entry_count"]
     # T2.10：探索产物注册（explorer_candidates 既有 + explorer_observations 补注册）
     artifact_types = {a["type"] for a in manifest.get("artifacts", [])}
     assert "explorer_candidates" in artifact_types

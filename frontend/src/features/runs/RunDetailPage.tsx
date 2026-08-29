@@ -1,5 +1,6 @@
-import { ArrowLeft, Clock, File, Fingerprint, ShieldCheck, Warning } from '@phosphor-icons/react'
+import { ArrowLeft, Clock, Compass, File, Fingerprint, ShieldCheck, Target, Warning } from '@phosphor-icons/react'
 import { Link, useParams } from 'react-router-dom'
+import { useState } from 'react'
 import { api } from '../../lib/api'
 import { formatBytes, formatDate, isRunActive, runName } from '../../lib/format'
 import { usePolling } from '../../lib/usePolling'
@@ -10,12 +11,23 @@ import { CleanupPanel } from '../cleanup/CleanupPanel'
 import { FindingsPanel } from '../findings/FindingsPanel'
 import { ExplorerQueuePanel } from './ExplorerQueuePanel'
 import { StageTimeline } from './StageTimeline'
+import { TrackProgress, type TrackId } from './TrackProgress'
 
 /**
- * 展示单次扫描的阶段、发现和清理能力；仅在任务活跃时轮询，完成后自动停止。
+ * 展示单次扫描的双轨运行情况（规则轨发现 / 探索轨人工队列，分段按钮切换——
+ * track-progress-console）、双轨进度反馈与清理能力；仅在任务活跃时轮询，
+ * 完成后自动停止。
  */
+
+function trackBadge(done: number | null | undefined, total: number | null | undefined): string {
+  const doneText = typeof done === 'number' ? String(done) : '—'
+  const totalText = typeof total === 'number' ? String(total) : '—'
+  return `${doneText}/${totalText}`
+}
+
 export function RunDetailPage() {
   const { id = '' } = useParams()
+  const [track, setTrack] = useState<TrackId>('rules')
   const runState = usePolling(
     () => api.getRun(id),
     (current) => current && isRunActive(current.status) ? 2000 : false,
@@ -88,10 +100,48 @@ export function RunDetailPage() {
           <CleanupPanel runId={run.id} onCleaned={() => void runState.reload(true)} />
         </aside>
         <main className="detail-findings">
-          {findingState.loading && !findingState.data && <SkeletonRows count={5} />}
-          {findingState.error && !findingState.data && <ErrorState error={findingState.error} onRetry={() => void findingState.reload()} />}
-          {findingState.data && <FindingsPanel findings={findingState.data} onChange={(findings: Finding[]) => findingState.setData(findings)} />}
-          {explorerQueueState.data && <ExplorerQueuePanel queue={explorerQueueState.data} />}
+          <div className="track-switcher glass-panel" role="tablist" aria-label="运行轨切换">
+            <button
+              type="button"
+              role="tab"
+              id="track-tab-rules"
+              aria-selected={track === 'rules'}
+              aria-controls="track-panel"
+              className={track === 'rules' ? 'track-tab active' : 'track-tab'}
+              onClick={() => setTrack('rules')}
+            >
+              <Target size={15} />规则轨
+              <span className="track-tab-count">
+                {trackBadge(run.progress?.rules?.processed, run.progress?.rules?.total)}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="track-tab-explorer"
+              aria-selected={track === 'explorer'}
+              aria-controls="track-panel"
+              className={track === 'explorer' ? 'track-tab active' : 'track-tab'}
+              onClick={() => setTrack('explorer')}
+            >
+              <Compass size={15} />探索轨
+              <span className="track-tab-count">
+                {trackBadge(run.progress?.explorer?.explored, run.progress?.explorer?.total)}
+              </span>
+            </button>
+          </div>
+          <TrackProgress track={track} progress={run.progress ?? null} />
+          <div id="track-panel" role="tabpanel" aria-labelledby={track === 'rules' ? 'track-tab-rules' : 'track-tab-explorer'}>
+            {track === 'rules' ? (
+              <>
+                {findingState.loading && !findingState.data && <SkeletonRows count={5} />}
+                {findingState.error && !findingState.data && <ErrorState error={findingState.error} onRetry={() => void findingState.reload()} />}
+                {findingState.data && <FindingsPanel findings={findingState.data} onChange={(findings: Finding[]) => findingState.setData(findings)} />}
+              </>
+            ) : (
+              <ExplorerQueuePanel queue={explorerQueueState.data} />
+            )}
+          </div>
         </main>
       </div>
     </div>

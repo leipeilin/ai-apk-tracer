@@ -29,6 +29,27 @@ export interface RunStage {
   summary?: Record<string, unknown>
 }
 
+/** 双轨运行反馈（track-progress-console；GET /api/runs/{id} 的 progress 块）。
+ *  字段无法可靠得出时为 null（不伪造 0）；轨级无任何信号时该轨为 null。 */
+export interface RulesProgress {
+  total: number | null
+  /** 已处理规则数（成功+失败；rule-results 文件数，产物词干已由后端排除）。 */
+  processed: number | null
+  failed: number | null
+}
+
+export interface ExplorerProgress {
+  total: number | null
+  /** 已探索入口数（运行中为 partial jsonl 近似值，终态为 stage summary 精确值）。 */
+  explored: number | null
+  unexplored: number | null
+}
+
+export interface RunProgress {
+  rules: RulesProgress | null
+  explorer: ExplorerProgress | null
+}
+
 export interface AnalysisRun {
   id: string
   trace_id?: string
@@ -47,7 +68,8 @@ export interface AnalysisRun {
   created_at: string
   updated_at?: string
   completed_at?: string | null
-  progress?: number
+  /** track-progress-console：替换遗留的 progress?: number（全仓无消费方）。 */
+  progress?: RunProgress | null
   findings_count?: number
   stages?: RunStage[]
   manifest?: {
