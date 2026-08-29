@@ -108,9 +108,7 @@ ai:
   enabled: true
   # 例如 http://127.0.0.1:11434/v1；使用外部地址前需确认代码处理边界。
   # base_url: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
-  # siliconflow
-  # base_url: https://api.siliconflow.cn/v1
-  base_url: https://open.bigmodel.cn/api/paas/v4/
+  base_url: https://open.bigmodel.cn/api/coding/paas/v4/
   # 这里只填写保存密钥的环境变量名，禁止填写真实密钥、Token 或 Cookie。
   # export AI_APK_TRACER_OPENAI_API_KEY="你的实际密钥"设置在环境变量中
   api_key_env: AI_APK_TRACER_OPENAI_API_KEY
@@ -130,24 +128,31 @@ ai:
   # request_timeout_seconds: 180.0
   # 单次 AI 请求 HTTP body 字节上限，超过则不发请求，当前候选标记失败但不熔断其他候选。
   max_request_bytes: 524288
-  # 进程级、单次扫描及同 provider 的最大并发分别为 20/12/12。
+  # 进程级、单次扫描及同 provider 的最大并发分别为 20/12/2。
   # 三者需协同：candidate_concurrency 决定同时分析的候选数；provider_max_in_flight 是同
   # base_url/model 的在途请求闸门（实际瓶颈）；max_concurrent 为进程级总闸门，须 >= 前两者。
   # 若服务端频繁返回 429，应优先下调 provider_max_in_flight 而非 candidate_concurrency，
   # 以保留候选级并行度；provider_max_cooldown_seconds 会在 429 时触发共享冷却。
   max_concurrent: 20
-  candidate_concurrency: 12
+  # 2026-08-29 xmsf run 实测（175 请求：26 成功/149 个 429）：在途闸门已降至 2 后仍触发
+  # 服务端 RPM/配额限流（约 80-90s 放行一个请求），12 候选并发只放大重试风暴，降至 4。
+  candidate_concurrency: 4
   # 同一 base_url/model/api_key_env 的进程级最大在途 HTTP 请求数。
-  provider_max_in_flight: 12
+  # 2026-08-29 实测：智谱 Coding Plan 端点（/api/coding/paas/v4）对 glm-5.3-flash
+  # 的并发放行上限为 2（超限 429 错误码 1302）；探索轨/规则轨 AI 调用共享本闸门，
+  # 超配只会引发 429 重试风暴，故由 12 下调至 2。
+  provider_max_in_flight: 2
   # 429 Retry-After 触发的共享服务冷却上限，单位秒。
   provider_max_cooldown_seconds: 60.0
   # 可恢复失败后的重试次数；retry_max_attempts 为 null 时总发送次数等于 retry_count+1。
-  retry_count: 1
+  # 2026-08-29：429 为分钟级限流，2 次发送必然全灭（xmsf run 81 候选完成 0），
+  # 提升至 4 次发送并拉长退避窗口以跨越限流周期。
+  retry_count: 3
   retry_max_attempts: null
   # 指数退避基础时长、单次等待上限和随机抖动上限，单位秒。
-  retry_base_seconds: 0.05
-  retry_max_seconds: 30.0
-  retry_jitter_seconds: 0.05
+  retry_base_seconds: 15.0
+  retry_max_seconds: 90.0
+  retry_jitter_seconds: 5.0
   # run 内共享 ai-cache 的单条记录大小上限，单位字节；候选和恢复执行共享，但不会跨 run 共享。
   cache_max_entry_bytes: 2097152
   # preflight 协议严格度。默认 false：与普通分析同级，允许剥离 markdown 围栏/周边文本并在首次
@@ -163,15 +168,15 @@ ai:
   # （deepseek 无此配置语义不变：None → {type: disabled}）
   disable_thinking: true
   thinking_param: thinking
-  thinking_level: max
+  thinking_level: medium
   # 单次输出 token 上限；None 时沿用 context_budget.max_output_tokens（8000）。
   # 仅在关闭思维链后仍需更大输出的场景覆盖。
   max_output_tokens: null
 
-# 探索轨（Agent1）。全部默认关闭：开启前须通过 M2 三加一验收
-# （2026-08-21-explorer-track-implementation-plan.md §4.3）。
+# 探索轨（Agent1）。默认开启（2026-08-29 用户决策：M2 三加一验收已通过且 T1-v3
+# 全量探针验证产出有效，见 docs/analysis/explorer-track/2026-08-29-t1v3-attack-surface-findings.md）。
 explorer:
-  enabled: false
+  enabled: true
   # P-1 验证阶段临时值：null = 无上限（采集 278 入口无截断数据）；定参后恢复（docs/todo/ T1）
   max_candidates_per_run: null
   auto_promote: false
@@ -197,9 +202,11 @@ verify:
   max_requests_per_candidate: 12
   fallback_to_single_turn_l2: true
 
-# API 入口表（方案 §2.1）。默认关闭；生成须在 rule_prescan 之后。
+# API 入口表（方案 §2.1）。默认开启（2026-08-29 用户决策：探索轨入口表依赖
+# api_entry_table，关闭时探索轨降级为 0 入口空跑——degraded_entry_table=
+# api_entry_table_missing，见 xmsf run 20260829T103650Z 实证）。
 api_surface:
-  enabled: false
+  enabled: true
   include_binder: true
   include_webview_jsbridge: true
 
