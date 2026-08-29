@@ -18,10 +18,16 @@
 | POST | `/api/runs` | 上传 APK 创建 run |
 | GET | `/api/runs/{run_id}` | run、manifest、stage、版本和安全配置快照 |
 | GET | `/api/runs/{run_id}/findings` | finding 列表 |
+| GET | `/api/runs/{run_id}/explorer/candidates` | 探索候选人工队列（投影 + 预排序 + 计数；产物缺失返回空态） |
 | GET | `/api/findings/{finding_id}/slice` | 最新方法级切片 |
 | PATCH | `/api/findings/{finding_id}/review` | 更新 review |
 | GET | `/api/findings/{finding_id}/report` | 生成 Markdown 报告 |
+| POST | `/api/findings/{finding_id}/report-draft` | AI 报告草稿 + PoC 骨架 + 修复建议（仅 confirmed finding；目前无前端调用方） |
 | POST | `/api/runs/{run_id}/cleanup` | 清理产物 |
+| GET | `/api/assets` | 资产列表（assets.enabled 门控，apk_path 脱敏） |
+| POST | `/api/assets/import` | 导入本地 APK 资产（201；重复 sha256 返回 409） |
+| POST | `/api/batches` | 创建批量扫描（202 秒回 pending，后台跑批） |
+| GET | `/api/batches/{batch_id}` | 批量进度与 runs 聚合汇总 |
 
 ## 3. POST `/api/runs`
 
@@ -33,7 +39,7 @@ Multipart 字段：
 | `authorized` | Boolean | 是 | 必须为 true |
 | `source_analysis_enabled` | Boolean | 否 | 默认 true |
 
-响应为新 run，主键字段是 `id`：
+成功状态码为 **202 Accepted**：上传与安全入库在请求内同步完成，扫描通过后台任务异步启动。响应体为新 run，主键字段是 `id`：
 
 ```json
 {
@@ -234,6 +240,254 @@ L1 exposure 不应被渲染成正式漏洞；接口会依据当前 finding 证�
 
 `prune_intermediates` 会删除该 run 的 `ai-cache` 兼容结果、`ai-trace`、切片、索引等中间目录；finding/报告元数据仍可能保留 Prompt/Schema 版本、hash、stop reason 和摘要，但不会保留密钥。`clear_sensitive_content` 还会删除 findings/reports 并清空数据库 finding；`delete_run` 删除整个 run。外部 provider 已接收的数据不受本地 cleanup 控制。
 
-## 10. v1 兼容
+## 10. GET `/api/runs/{run_id}/explorer/candidates`
+
+探索候选人工队列（探索轨候选的复核入口视图）。主体为 `partially_validated`、`unverified`、`pending` 档位候选；`validated` 已并入主链 findings，仅出现在 `counts` 作计数对照。响应为投影视图：不携带 hops 全文与逐轮审计，防止响应膨胀。
+
+```json
+{
+  "entries": [
+    {
+      "candidate_id": "...",
+      "component": {"kind": "activity", "name": "...", "entry_method": "..."},
+      "chain": {"source": "...", "sink": "...", "hop_count": 2},
+      "validation": {
+        "status": "partially_validated",
+        "verified_hop_count": 1,
+        "failed_hop_indices": [],
+        "blocked_by_guard": false,
+        "custom_sink_proposal": false,
+        "notes": null
+      },
+      "deep_dive": {
+        "status": "completed",
+        "evidence_count": 4,
+        "confirmed_fact_count": 2,
+        "remaining_gap_count": 1,
+        "unverifiable_evidence_count": 1,
+        "evidence_truncated_count": 0,
+        "requests_used": 3
+      },
+      "confidence": "high",
+      "sort_keys": {"confidence_rank": 3, "deep_dive_evidence": 4, "hop_ratio": 0.5}
+    }
+  ],
+  "counts": {
+    "validated": 5,
+    "partially_validated": 2,
+    "unverified": 3,
+    "pending": 1,
+    "total": 11,
+    "queue_length": 6,
+    "deep_dive_completed": 4
+  }
+}
+```
+
+字段语义：
+
+- `entries[].component` 的 `kind`/`name`/`entry_method` 与 `candidate_id`、`chain.source`/`chain.sink`、`validation.notes`、`confidence` 均可为 null，客户端按可选处理。
+- `validation.status` 取值 `partially_validated`、`unverified`、`pending`（未知档位归一化为 `pending`）；`verified_hop_count` 为整数或 null；`blocked_by_guard`、`custom_sink_proposal` 为布尔。
+- `deep_dive` 为 null 表示该候选未做深挖；非 null 时 `status` 取候选深挖的原始状态，`counts.deep_dive_completed` 只统计 `status=completed` 的深挖。
+- `sort_keys` 是服务端排序依据的透出：`confidence_rank`（high=3 / medium=2 / low=1 / 未知=0）、`deep_dive_evidence`（深挖证据引用数）、`hop_ratio`（已验证跳数 / 总跳数，无跳或未验证为 0）。
+- 排序为服务端预排序：置信度降序 → 深挖证据数降序 → 跳回查完整度降序 → `candidate_id` 稳定序；客户端不应依赖自身重排。
+
+计数语义：`counts.total` 为产物文件中全部候选数（含 validated），`queue_length` 为 `entries` 长度（仅入队档位）。
+
+空态语义：run 不存在返回 404；run 存在但 `explorer/candidates.json` 缺失或损坏时返回空态（`entries=[]`、`counts` 全 0），不返回 404——探索轨未启用是常态。
+
+```json
+{"entries": [], "counts": {"validated": 0, "partially_validated": 0, "unverified": 0, "pending": 0, "total": 0, "queue_length": 0, "deep_dive_completed": 0}}
+```
+
+前端 RunDetailPage 在 run 活跃期间以 2 秒间隔轮询本端点（与 findings 轮询共用同一活跃判定），以捕捉探索阶段末尾落盘的产物。
+
+## 11. POST `/api/findings/{finding_id}/report-draft`
+
+生成 AI 报告草稿 + PoC 骨架 + 修复建议（AI 草稿与确定性证据分离展示）。目前无前端调用方，属后端/手工端点。
+
+安全门禁（不满足即拒绝，最保守语义）：
+
+- **仅 confirmed finding**：`review_status` 非 `confirmed` 返回 409 `REPORT_DRAFT_REQUIRES_CONFIRMED`（`report.require_confirmed_finding` 默认 true）。
+- **L1 / informational 拒绝**：`evidence_level=L1` 或 `severity=informational` 返回 409 `L1_REPORT_FORBIDDEN`（与确定性报告同一先例：L1 提示项不进入正式漏洞报告）。
+- **禁可执行 PoC**：`report.allow_executable_poc` 必须保持 false，置真视为配置违例直接拒绝（422 `EXECUTABLE_POC_FORBIDDEN`）；PoC 仅为步骤说明与占位符命令骨架文本，`poc_skeleton.executable_files_created` 恒为空列表（schema 级强制，非生成器约定）。
+
+成功返回 200，响应体为报告文档（同时落盘 `run_dir/reports/drafts/{finding_id}.json`，目录 0o700、文件 0o600，含 symlink 防护）：
+
+```json
+{
+  "finding_id": "...",
+  "run_id": "...",
+  "generated_at": "2026-08-29T08:00:00Z",
+  "evidence_source": "rule_candidate",
+  "explorer_caveat": null,
+  "deterministic": {
+    "rule_id": "...",
+    "severity": "high",
+    "review_status": "confirmed",
+    "evidence_level": "L2",
+    "sources": [],
+    "sinks": [],
+    "guard_status": "..."
+  },
+  "ai_draft": {
+    "summary": "...",
+    "narrative": "...",
+    "exploit_scenario": "...",
+    "confidence_tier": "medium",
+    "provenance": "ai_report_protocol",
+    "prompt_version": "...",
+    "model": "...",
+    "analysis_complete": true
+  },
+  "poc_skeleton": {
+    "component_kind": "activity",
+    "kind": "intent",
+    "steps": ["确认目标组件 exported", "构造测试意图触发入口"],
+    "command_skeleton": ["adb shell am start -n <PACKAGE>/<ACTIVITY>"],
+    "notes": ["本骨架仅为验证步骤说明，不包含任何可执行文件"],
+    "executable_files_created": []
+  },
+  "repair": {
+    "deterministic_recommendations": ["按规则/组件类型的确定性建议"],
+    "ai_recommendations": [],
+    "ai_rationale": null
+  }
+}
+```
+
+字段语义：
+
+- `deterministic` 为 finding 确定性字段的原样投影（`rule_id`、`severity`、`sources`、`sinks`、`locations`、`guard_status`、`review_state` 等固定字段集合），缺失字段为 null，服务端不改写。
+- `ai_draft.provenance` 取 `ai_report_protocol`（真实 AI 协议生成）或 `projected_from_l2_review`（从 L2 已验证输出投影的兜底草稿）；AI 失败或输出不符合严格契约时自动降级为投影，报告永不因 AI 阻塞，降级详情附于 `ai_draft.fallback`。
+- `evidence_source` 取 `rule_candidate` 或 `explorer_candidate`；explorer 来源时注入 `explorer_caveat` 置信度告警（探索质量未达标期间探索候选证据置信度低于规则候选）。
+- `confidence_tier` 取 `low`/`medium`/`high`。
+
+错误码：
+
+| 状态码 | code | 条件 |
+|---|---|---|
+| 404 | `NOT_FOUND` | finding 不存在 |
+| 409 | `REPORT_DRAFT_REQUIRES_CONFIRMED` | `review_status` 非 `confirmed` |
+| 409 | `L1_REPORT_FORBIDDEN` | `evidence_level=L1` 或 `severity=informational` |
+| 422 | `EXECUTABLE_POC_FORBIDDEN` | 配置 `report.allow_executable_poc=true` |
+| 422 | `FINDING_ID_MISSING` / `FINDING_ID_INVALID` | finding 缺稳定 ID / ID 含非法字符（防路径注入） |
+
+## 12. 资产：GET `/api/assets` 与 POST `/api/assets/import`
+
+两个端点共用 `assets.enabled` 门禁（默认 false）：未启用时返回 **503 ASSETS_DISABLED**——语义是功能未启用，不是请求校验失败（422）或资源不存在（404）。错误响应沿用统一结构：
+
+```json
+{
+  "error": {"code": "ASSETS_DISABLED", "message": "资产批量功能未启用（assets.enabled=false）", "details": {}},
+  "trace_id": "..."
+}
+```
+
+### GET `/api/assets`
+
+按创建时间倒序返回资产列表，响应外层为 `{ "items": [...] }`。`apk_path` 为服务端路径，API 层脱敏剔除，不出现在响应中：
+
+```json
+{
+  "items": [
+    {
+      "id": "20260828T093000Z_1a2b3c4d5e6f_7a8b9c0d",
+      "package_name": "com.example.app",
+      "apk_filename": "example.apk",
+      "apk_sha256": "1a2b...",
+      "source": "local_upload",
+      "status": "ready",
+      "last_run_id": null,
+      "created_at": "2026-08-28T09:30:00+00:00",
+      "updated_at": "2026-08-28T09:30:00+00:00"
+    }
+  ]
+}
+```
+
+- `id` 与 run id 同风格（`{UTC时间戳}_{sha256[:12]}_{uuid[:8]}`），注意与 run id 区分。
+- `status` 取 `ready`/`scanning`/`error`；`source` 当前固定 `local_upload`；`last_run_id` 为 null 或最近一次 run 的 id。
+
+### POST `/api/assets/import`
+
+导入本地 APK 资产（同步注册：流式副本 + sha256/大小/ZIP 校验）。成功返回 **201 Created**，响应体为资产记录（与 `GET /api/assets` 的 items 元素一致，不含 `apk_path`）。
+
+multipart 字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `file` | File | 是 | APK（仅 `.apk` 扩展名） |
+| `package_name` | String | 是 | 非空 |
+| `authorized` | Boolean | 是 | 必须为 true |
+
+错误码：
+
+| 状态码 | code | 条件 |
+|---|---|---|
+| 422 | `AUTHORIZATION_CONFIRMATION_REQUIRED` | `authorized` 非 true（与 POST /api/runs 同级授权语义） |
+| 422 | `PACKAGE_NAME_REQUIRED` | `package_name` 为空 |
+| 422 | `INVALID_APK_EXTENSION` / `INVALID_APK_FILENAME` | 非 `.apk` 扩展名 / 文件名含路径分隔符 |
+| 422 | `APK_TOO_LARGE` | 超过大小上限（与 run 上传同源限制） |
+| 409 | `ASSET_ALREADY_REGISTERED` | 重复 sha256；`details.asset_id` 指向既有资产（供前端跳转），`details.apk_sha256` 为重复哈希 |
+
+重复 sha256 返回 409 时保留已注册资产与其内容寻址副本（同 sha256 内容必然一致，天然幂等），不做清删。
+
+## 13. 批量扫描：POST `/api/batches` 与 GET `/api/batches/{batch_id}`
+
+两个端点同样受 `assets.enabled` 门控（未启用返回 503 `ASSETS_DISABLED`，见 §12）。
+
+### POST `/api/batches`
+
+创建批量扫描。成功返回 **202 Accepted**：请求内仅创建 batch 行并固化资产快照（秒回 `pending`），逐资产扫描经后台任务异步启动（batch 内 run 的 trace_id 即 batch_id，便于按批次聚合审计）。
+
+JSON 请求体：
+
+```json
+{
+  "authorized": true,
+  "asset_ids": ["20260828T093000Z_1a2b3c4d5e6f_7a8b9c0d"]
+}
+```
+
+- `authorized`：Boolean 必填，必须为 true，否则 422 `AUTHORIZATION_CONFIRMATION_REQUIRED`。
+- `asset_ids`：字符串数组必填，1..100 项（越界返回 422）；重复 id 服务端去重保序，去重后为空返回 422 `BATCH_ASSETS_REQUIRED`；引用的资产不存在返回 404 `NOT_FOUND`。
+
+响应为 batch 记录（原始 `assets_json` 列已剔除，解析后的 `assets` 快照在内）：
+
+```json
+{
+  "id": "20260828T100000Z_112233445566_778899aa",
+  "status": "pending",
+  "max_ai_calls": 0,
+  "max_wall_seconds": 0,
+  "ai_skipped_count": 0,
+  "assets": [
+    {"asset_id": "20260828T093000Z_1a2b3c4d5e6f_7a8b9c0d", "package_name": "com.example.app", "apk_sha256": "1a2b..."}
+  ],
+  "created_at": "2026-08-28T10:00:00+00:00",
+  "updated_at": "2026-08-28T10:00:00+00:00",
+  "completed_at": null,
+  "total_runs": 0,
+  "completed_runs": 0,
+  "failed_runs": 0,
+  "ai_skipped": 0,
+  "ai_skipped_by_budget": 0,
+  "ai_skipped_by_wall_clock": 0
+}
+```
+
+`assets` 为创建时固化的快照数组（`asset_id`/`package_name`/`apk_sha256`），资产删除后审计信息仍可回溯。`max_ai_calls`/`max_wall_seconds` 为创建时刻的 batch 预算帽快照（0 表示沿用 run 级预算 / 不限墙钟）。
+
+### GET `/api/batches/{batch_id}`
+
+返回批量进度与 runs 聚合汇总，响应结构与 POST `/api/batches` 一致（同样剔除 `assets_json` 原始列）。`batch_id` 不存在返回 404 `NOT_FOUND`。
+
+- `status` 状态机：`pending` → `running` → `completed` / `partial` / `failed`；终态由 runs 聚合判定（无失败为 `completed`，全部失败为 `failed`，其余为 `partial`）。
+- `total_runs`/`completed_runs`/`failed_runs` 为该 batch 下 runs 的聚合事实源；`ai_skipped` 为 AI 被跳过（降级仅确定性主链）的 run 数。
+- `ai_skipped_by_budget` 与 `ai_skipped_by_wall_clock` 为降级原因分解：预算耗尽（`batch_budget`）或墙钟超限（`batch_wall_clock`）的 run 分别以 AI 关闭配置只跑确定性主链，原因记录在 run 自身配置中。
+- `ai_skipped_count` 是 batch 行上落库的累计值，终态时与聚合值一致；进行中二者可能短暂不一致，以聚合字段为准。
+
+## 14. v1 兼容
 
 历史数据可能缺少所有 v2 新字段，或使用旧 review 值 `pending`、`false_positive`、`ai_candidate`。读取端应兼容显示；迁移端不得在无法证明人工来源时擅自改写结论。
