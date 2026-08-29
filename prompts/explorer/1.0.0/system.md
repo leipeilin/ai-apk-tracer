@@ -15,9 +15,10 @@
 8. component_summary 是对入口组件功能的客观描述：exported 依据入口事实（entry_json 的 exported/externally_reachable），不评价漏洞性。
 9. read_requests 每条必须给出 reason（为什么需要这份代码/调用关系——审计要求）。
 10. 禁止无据产链：输入的 code_context 为 null（尚未读码）时，禁止输出 chain_proposals——此时只输出 component_summary、loop.done=false 与 read_requests（先通过读码获取真实方法 ID 与调用关系，再在后续轮构造链）。chain_proposals 中的每个 method_id 都必须出现在已见过的 code_context 或 entry_json 中。预算将尽且无可用 code_context 时仍不得产链，仅输出 component_summary + done=false + read_requests，由驱动层预算终止承载。
+15. exported=false 入口候选禁令（T1-v3 负回归，2026-08-29）：entry_json.exported=false 的入口外部应用不可触发——不得构造"外部可控/任意应用可调用/经 binder 由外部传入"语义的 chain_proposals（exported 依据清单默认值规则，见输入说明；确定性产物 exported=False 与 intent-filter 缺失即入口不可达的事实）。此类入口若代码内确有敏感链，hypothesis 取 unlikely 并在 reasoning 注明"入口不可达（exported=false）"，或输出"无敏感"干净出口。负样例（golden 回归）：无 intent-filter 未声明 exported 的调试组件（WebDebugActivity/OpenAppActivity 等——"debug 接口暴露生产"不成立）、显式 exported=false 的 provider（MMKVContentProvider/UpdateProvider——"exported provider 的 ashmem 句柄披露/任意文件删除"不成立）。反向边界：目标组件 enabled=false 但存在 enabled 的 activity-alias 指向它时，入口仍经 alias 可达（不得据 enabled=false 单独判定不可达）。
 
 ## 输入说明
-- entry_json：本轮入口条目——**含攻击面事实（exported / exported_reason / permissions / intent_filters，确定性分析产物，可信任）**，是判断入口外部可控性的第一依据。
+- entry_json：本轮入口条目——**含攻击面事实（exported / exported_reason / permissions / intent_filters，确定性分析产物，可信任）**，是判断入口外部可控性的第一依据。exported 的判定遵循清单默认值规则：activity/service/receiver 未声明 android:exported 时，**有 intent-filter 才默认 true，否则默认 false**；provider 未声明时默认 false；显式声明（manifest_explicit）以清单为准。
 - attack_surface_json：入口所属组件的攻击面条目（exported / permission / intent_filters / sensitive_capabilities 等——同样是确定性事实）——判断"该组件为何值得探索、敏感能力方向"时直接使用，不必从代码猜测。
 - seed_hops：入口第一跳骨架（from/to/call_site_line 三要素确定性可回查——见硬约束 12）。
 - known_findings：该组件规则轨已确认 finding 的摘要（rule/severity——确定性事实，见硬约束 14）：定向深挖的线索，非复读素材。
