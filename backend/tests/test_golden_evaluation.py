@@ -27,7 +27,7 @@ MANIFEST = GOLDEN_ROOT / "manifest.json"
 
 def test_golden_dataset_schema_and_required_regression_patterns() -> None:
     dataset = load_golden_dataset(MANIFEST)
-    assert len(dataset.cases) == 29
+    assert len(dataset.cases) == 32
     assert len(dataset.by_id()) == len(dataset.cases)
     assert {case.label for case in dataset.cases} >= {
         CaseLabel.POSITIVE,
@@ -64,6 +64,10 @@ def test_golden_dataset_schema_and_required_regression_patterns() -> None:
         "extra-close-url-unregistered-dos",
         "account-broadcast-external-sender",
         "keepalive-proxy-data-status-injection",
+        # v4（2026-08-29 T1-v3 POC 负回归）：manifest_reachability 入口可达性样例。
+        "activity-no-intent-filter-default-not-exported",
+        "provider-declared-exported-false",
+        "activity-alias-enabled-target-reachable",
     }
     assert set(dataset.by_id()) == required_ids
     assert all(case.provenance for case in dataset.cases)
@@ -272,9 +276,9 @@ def test_cli_prints_json_without_writing_output(tmp_path: Path) -> None:
     )
     assert completed.returncode == 0, completed.stderr
     output = json.loads(completed.stdout)
-    assert output["dataset_version"] == "v3"  # M4-T4.1：探索轨标注层升级（评审 R-2）
+    assert output["dataset_version"] == "v4"  # v4：T1-v3 POC 负回归（manifest_reachability 三例）
     assert output["submitted_result_count"] == 1
-    assert output["missing_actual_count"] == 28
+    assert output["missing_actual_count"] == 31
     assert output["missing_actual_ids"] == output["metrics"]["missing_actual_ids"]
     assert "remote-aidl-unguarded" not in output["missing_actual_ids"]
     assert output["metrics"]["candidate"]["tp"] == 1
@@ -294,6 +298,13 @@ _CONDITIONAL_CASES = {
     "account-broadcast-external-sender",
     "keepalive-proxy-data-status-injection",
     "extra-splashinfo-plugin-injection",
+    "activity-alias-enabled-target-reachable",
+}
+# v4（2026-08-29 T1-v3 POC 负回归）：exported 默认值规则入口误判——探索轨
+# 期望 miss（不产出此类候选）；explorer_hit 对 miss 恒 False，不进二元命中。
+_MISS_CASES = {
+    "activity-no-intent-filter-default-not-exported",
+    "provider-declared-exported-false",
 }
 
 
@@ -308,11 +319,12 @@ def _load_all_cases() -> dict:
 
 
 def test_explorer_annotations_present_and_typed() -> None:
-    """A-6：9 case 有标注（6 hit + 3 conditional——M3/M4 实施审查 4.1 修正后
-    口径：含 shop V-02 extra-close-url-unregistered-dos）、其余 None。"""
+    """A-6：12 case 有标注（6 hit + 3 conditional——M3/M4 实施审查 4.1 修正后
+    口径：含 shop V-02 extra-close-url-unregistered-dos；v4 追加 2 miss——
+    T1-v3 POC 负回归 exported 默认值规则入口误判）、其余 None。"""
     cases = _load_all_cases()
     annotated = {cid for cid, c in cases.items() if c.get("explorer_expected")}
-    assert annotated == _HIT_CASES | _CONDITIONAL_CASES
+    assert annotated == _HIT_CASES | _CONDITIONAL_CASES | _MISS_CASES
     for cid in _HIT_CASES:
         assert cases[cid]["explorer_expected"]["expectation"] == "hit"
         assert cases[cid]["explorer_expected"]["source_match_keys"]
@@ -320,6 +332,11 @@ def test_explorer_annotations_present_and_typed() -> None:
         assert cases[cid]["explorer_expected"]["notes"]
     for cid in _CONDITIONAL_CASES:
         assert cases[cid]["explorer_expected"]["expectation"] == "conditional"
+    for cid in _MISS_CASES:
+        assert cases[cid]["explorer_expected"]["expectation"] == "miss"
+        assert cases[cid]["explorer_expected"]["source_match_keys"]
+        assert cases[cid]["explorer_expected"]["sink_match_keys"]
+        assert cases[cid]["explorer_expected"]["notes"]
 
 
 def test_explorer_hit_matching_channels() -> None:

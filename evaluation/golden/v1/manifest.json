@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "dataset_version": "v3",
-  "description": "阶段0离线静态分析黄金集（v2：并入两轮动态终审正负样本）；仅包含合成语义与测试引用，不包含APK代码。label=positive/negative分别表示已知候选/已知非候选，conditional/unknown不进入二元指标；must_not_report仅按完整字符串精确匹配；provenance只用于审计引用，不作为评分证据。v2 依据 manual-verification-report 动态终审新增：provider-query-helper-delegation / sport-binder-unguarded-effect（positive），ble-broadcast-sdk-dead-code / nfc-service-no-sensitive-capability / connect-new-phone-protected-broadcast / widget-provider-authority-conflict / sp-control-flow-cooccurrence-refuted / ownsystem-unselected-implementation（negative）；extra-splashinfo-plugin-injection / extra-close-url-unregistered-dos / account-broadcast-external-sender / keepalive-proxy-data-status-injection（shop V-01/V-02 与 P-01/P-05，conditional 或 positive）。V-02 RouterActivity 由 router-validation-overwritten 覆盖、P-08 由 fragment-external-class-name 覆盖（同规则同模式，已核查）。 v3（M4-T4.1）：新增 explorer_expected 探索轨命中标注层（9 case：6 hit + 3 conditional（含 M3/M4 实施审查 4.1 补标的 shop V-02 extra-close-url-unregistered-dos）——键派生自 path 类名与 symbol，三通道匹配含 hops method_id；conditional 不进二元命中，T4.2 单独报告 conditional_hit_rate）。",
+  "dataset_version": "v4",
+  "description": "阶段0离线静态分析黄金集（v2：并入两轮动态终审正负样本）；仅包含合成语义与测试引用，不包含APK代码。label=positive/negative分别表示已知候选/已知非候选，conditional/unknown不进入二元指标；must_not_report仅按完整字符串精确匹配；provenance只用于审计引用，不作为评分证据。v2 依据 manual-verification-report 动态终审新增：provider-query-helper-delegation / sport-binder-unguarded-effect（positive），ble-broadcast-sdk-dead-code / nfc-service-no-sensitive-capability / connect-new-phone-protected-broadcast / widget-provider-authority-conflict / sp-control-flow-cooccurrence-refuted / ownsystem-unselected-implementation（negative）；extra-splashinfo-plugin-injection / extra-close-url-unregistered-dos / account-broadcast-external-sender / keepalive-proxy-data-status-injection（shop V-01/V-02 与 P-01/P-05，conditional 或 positive）。V-02 RouterActivity 由 router-validation-overwritten 覆盖、P-08 由 fragment-external-class-name 覆盖（同规则同模式，已核查）。 v3（M4-T4.1）：新增 explorer_expected 探索轨命中标注层（9 case：6 hit + 3 conditional（含 M3/M4 实施审查 4.1 补标的 shop V-02 extra-close-url-unregistered-dos）——键派生自 path 类名与 symbol，三通道匹配含 hops method_id；conditional 不进二元命中，T4.2 单独报告 conditional_hit_rate）。 v4（2026-08-29 T1-v3 POC 负回归）：新增 manifest_reachability 三例——activity-no-intent-filter-default-not-exported / provider-declared-exported-false（negative + explorer miss：忽略 exported 默认值规则的入口误判，见 docs/analysis/explorer-track/2026-08-29-t1v3-poc-verification.md §4），activity-alias-enabled-target-reachable（conditional：enabled=false target 经 enabled alias 仍可达的反向防漏样例）。",
   "cases": [
     {
       "id": "import-is-not-source",
@@ -118,6 +118,18 @@
     {
       "id": "keepalive-proxy-data-status-injection",
       "file": "cases/keepalive-proxy-data-status-injection.json"
+    },
+    {
+      "id": "activity-no-intent-filter-default-not-exported",
+      "file": "cases/activity-no-intent-filter-default-not-exported.json"
+    },
+    {
+      "id": "provider-declared-exported-false",
+      "file": "cases/provider-declared-exported-false.json"
+    },
+    {
+      "id": "activity-alias-enabled-target-reachable",
+      "file": "cases/activity-alias-enabled-target-reachable.json"
     }
   ],
   "ai_responses": [

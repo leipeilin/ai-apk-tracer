@@ -1,0 +1,30 @@
+{
+  "id": "activity-alias-enabled-target-reachable",
+  "category": "manifest_reachability",
+  "label": "conditional",
+  "rule": "ACTIVITY_ALIAS_ENABLED_TARGET_REACHABLE",
+  "component": "activity",
+  "entry": "explicit_component",
+  "operation": "target activity android:enabled=\"false\" but enabled activity-alias with same intent-filter targets it => entry still reachable via alias",
+  "expected": {"candidate": true, "dataflow": "interprocedural", "auth": "unprotected", "guard": "absent", "taxonomy": null, "verdict": "review"},
+  "must_not_report": [
+    "target disabled by android:enabled=false treated as unreachable while enabled alias targets it"
+  ],
+  "sources": [
+    {"path": "synthetic/ShareImageReceiverActivity.java", "symbol": "enabled activity-alias targeting enabled=false activity", "kind": "manifest_alias"}
+  ],
+  "sinks": [
+    {"path": "synthetic/ShareImageReceiverActivity.java", "symbol": "PreferenceUtil.setStringPref(PREF_KEY_SHARE_IMAGES_INFO_MD5, md5(attacker URI))", "kind": "persistent_state_write"}
+  ],
+  "tags": ["conditional", "manifest", "reachability", "activity-alias", "enabled-gate", "t1v3-shop"],
+  "explorer_expected": {
+    "expectation": "conditional",
+    "source_match_keys": ["ShareImageReceiverActivity", "ShareImageActivityAlias"],
+    "sink_match_keys": ["setStringPref", "startGoWebView"],
+    "scope_keys": ["com.xiaomi.shop.activity"],
+    "notes": "反向防漏样例（2026-08-29 shop 5.54 动态实证）：直启 enabled=false 的 ShareImageReceiverActivity 被禁（result code=-92），但经 ShareImageActivityAlias 启动 result code=0 且组件 onCreate 实际执行（18ms 后应用自身发出 ShopPlugin://com.xiaomi.shop2.plugin.webview.RootFragment 深链 = startGoWebView 动作）；'target disabled = 不可达'的过度抑制不成立。sink 偏好写仅在 !hasInitCta()（隐私未同意）分支，已初始化设备休眠——故 conditional 不进二元命中（见 docs/analysis/explorer-track/2026-08-29-t1v3-poc-verification.md §2 B/§3 3.1）"
+  },
+  "provenance": [
+    {"kind": "dynamic", "reference": "docs/analysis/explorer-track/2026-08-29-t1v3-poc-verification.md §2 B/§3 3.1"}
+  ]
+}

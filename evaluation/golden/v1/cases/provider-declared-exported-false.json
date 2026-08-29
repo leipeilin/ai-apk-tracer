@@ -1,0 +1,30 @@
+{
+  "id": "provider-declared-exported-false",
+  "category": "manifest_reachability",
+  "label": "negative",
+  "rule": "PROVIDER_EXPORTED_DECLARED_FALSE",
+  "component": "provider",
+  "entry": "call/query/delete",
+  "operation": "android:exported=\"false\" declared => external caller cannot resolve provider",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": [
+    "exported provider ashmem fd disclosure for provider declared exported=false",
+    "cross-process call/delete on provider declared exported=false"
+  ],
+  "sources": [
+    {"path": "synthetic/MMKVProvider.java", "symbol": "provider android:exported=\"false\"", "kind": "manifest_explicit"}
+  ],
+  "sinks": [],
+  "tags": ["false-positive", "manifest", "reachability", "exported-declared-false", "provider", "t1v3-shop"],
+  "explorer_expected": {
+    "expectation": "miss",
+    "source_match_keys": ["MMKVContentProvider", "UpdateProvider"],
+    "sink_match_keys": ["mmkvWithAshmemID", "ParcelableMMKV", "File.delete"],
+    "scope_keys": ["com.tencent.mmkv", "com.huawei.hms.update.provider"],
+    "notes": "T1-v3 实证（shop 5.53/5.54）：MMKVContentProvider 与 HMS UpdateProvider 两版清单均 declared exported=false（attack_surface reason=manifest_explicit 正确）——'exported provider 的 ashmem 句柄披露/任意文件删除'前提错误；对 exported=false 入口产出'经 ContentResolver.call 由外部传入'语义候选属入口误判（见 docs/analysis/explorer-track/2026-08-29-t1v3-poc-verification.md §4）"
+  },
+  "provenance": [
+    {"kind": "dynamic", "reference": "docs/analysis/explorer-track/2026-08-29-t1v3-poc-verification.md §3 3.4/3.5"},
+    {"kind": "design", "reference": "manifest 显式声明优先于默认值；exported=false 的 provider 外部应用不可解析（non_exported_provider 反证basis）"}
+  ]
+}

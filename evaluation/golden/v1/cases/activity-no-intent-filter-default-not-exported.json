@@ -1,0 +1,30 @@
+{
+  "id": "activity-no-intent-filter-default-not-exported",
+  "category": "manifest_reachability",
+  "label": "negative",
+  "rule": "ACTIVITY_EXPORTED_DEFAULT_NO_INTENT_FILTER",
+  "component": "activity",
+  "entry": "explicit_component",
+  "operation": "android:exported omitted and no intent-filter => effective exported=false (externally unreachable)",
+  "expected": {"candidate": false, "dataflow": "not_applicable", "auth": "not_applicable", "guard": "not_applicable", "taxonomy": null, "verdict": "suppress"},
+  "must_not_report": [
+    "activity without intent-filter as externally triggerable entry",
+    "effective exported=true for component without android:exported and without intent-filter"
+  ],
+  "sources": [
+    {"path": "synthetic/DebugToolActivity.java", "symbol": "activity without android:exported and without intent-filter", "kind": "manifest_default"}
+  ],
+  "sinks": [],
+  "tags": ["false-positive", "manifest", "reachability", "exported-default", "no-intent-filter", "t1v3-shop"],
+  "explorer_expected": {
+    "expectation": "miss",
+    "source_match_keys": ["WebDebugActivity", "OpenAppActivity", "MiShopDebugActivity"],
+    "sink_match_keys": ["startActivity", "getLaunchIntentForPackage", "loadUrl"],
+    "scope_keys": ["com.xiaomi.shop.yrnsdk.debug"],
+    "notes": "T1-v3 实证（shop 5.53/5.54）：yrnsdk.debug 四组件无 intent-filter 且未声明 exported → 两版清单均默认非导出，'debug 接口暴露生产'结论不成立；确定性产物 exported=False 正确，误判发生在候选攻击语义与报告层（见 docs/analysis/explorer-track/2026-08-29-t1v3-poc-verification.md §4）"
+  },
+  "provenance": [
+    {"kind": "dynamic", "reference": "docs/analysis/explorer-track/2026-08-29-t1v3-poc-verification.md §3 簇1"},
+    {"kind": "design", "reference": "manifest exported 默认值规则：activity/service/receiver 未声明 android:exported 时有 intent-filter 才默认 true"}
+  ]
+}
