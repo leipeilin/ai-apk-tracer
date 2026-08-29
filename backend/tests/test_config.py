@@ -92,10 +92,12 @@ def test_default_yaml_loads_with_new_sections() -> None:
 
     get_settings.cache_clear()
     settings = get_settings()
-    assert settings.explorer.enabled is False
+    # 2026-08-29 用户决策：探索轨默认开启（default.yaml explorer.enabled: true）。
+    assert settings.explorer.enabled is True
     assert settings.explorer.prompt_version == "explorer/1.0.0"
     assert settings.verify.fallback_to_single_turn_l2 is True
-    assert settings.api_surface.enabled is False
+    # 探索轨入口表依赖 api_surface，随之默认开启（2026-08-29）。
+    assert settings.api_surface.enabled is True
     assert settings.assets.enabled is False
     assert settings.batch.max_ai_calls == 0
     assert settings.report.require_confirmed_finding is True
