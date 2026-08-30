@@ -629,6 +629,9 @@ class ScanOrchestrator:
         )
         ai_results: list[dict[str, Any]] = []
         ai_counts = {"completed": 0, "failed": 0, "skipped": 0, "incomplete": 0}
+        # T1 实证：输出预算饿死（reasoning 吃满 max_tokens 的空响应）单列——
+        # 不与 schema_invalid 混算，否则协议违规统计失真误导定参
+        output_budget_starved = 0
         for scheduled_result in scheduled.results:
             candidate_index = scheduled_result.index
             candidate = candidates[candidate_index]
@@ -659,6 +662,8 @@ class ScanOrchestrator:
                 **result,
             })
             ai_counts[result["status"]] = ai_counts.get(result["status"], 0) + 1
+            if result.get("classification") == "output_budget_starved":
+                output_budget_starved += 1
 
         legacy_results = run_dir / "ai-cache" / "results.json"
         legacy_results.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -693,6 +698,8 @@ class ScanOrchestrator:
             # ai_stage_requests_used + deep_dive_requests_used + verify_requests_used）
             "verify_requests_used": self._verify_requests_used,
             "verify_counts": verify_counts,
+            # 失败归因单列（仍计入 failed）——T1 评估据此区分预算问题与协议违规
+            "output_budget_starved": output_budget_starved,
             **ai_counts,
         }
         if circuit_reason:

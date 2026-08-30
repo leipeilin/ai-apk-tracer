@@ -708,6 +708,24 @@ class OpenAICompatibleAnalyzer:
                     metadata["reasoning_tokens"] = details.get("reasoning_tokens")
                 except (ValueError, KeyError, TypeError, IndexError):
                     LOGGER.debug("空响应诊断字段解析失败（忽略）")
+            if (
+                metadata.get("empty_initial_content")
+                and metadata.get("finish_reason") == "length"
+            ):
+                # T1 实证（run b84daab7：85 次 L2 schema_invalid 全为此形态）：
+                # 始终思考模型 reasoning_tokens 吃满 max_tokens，可见内容 0 token
+                # ——输出预算饿死而非协议违规。repair 同预算重试必然再次饿死
+                # （83 次全败实证），跳过 repair 直接失败并单列分类，
+                # 避免污染 schema_invalid 统计误导定参。
+                _finish_latency(metadata, started)
+                return _analysis_failure(
+                    "output_budget_starved",
+                    False,
+                    response.status_code,
+                    "AI 推理 token 耗尽输出预算（finish_reason=length），可见内容为空",
+                    metadata,
+                    circuit_breaking=False,
+                )
             parsed, relaxation = _parse_structured_response_details(
                 content,
                 allow_relaxed=not preflight_strict_only,
