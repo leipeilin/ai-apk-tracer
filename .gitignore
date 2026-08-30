@@ -30,3 +30,5 @@ tmp_*.py
 .venv/
 
 backend/.venv-tls/
+
+tools/
